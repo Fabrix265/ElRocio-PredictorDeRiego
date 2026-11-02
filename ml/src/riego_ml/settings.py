@@ -1,10 +1,17 @@
 from pathlib import Path
 
 ML_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = ML_ROOT.parent
 DATA_DIR = ML_ROOT / "data"
 DATA_RAW_DIR = DATA_DIR / "raw"
+DATA_PROCESSED_DIR = DATA_DIR / "processed"
 CACHE_DIR = ML_ROOT / "cache"
 LOGS_DIR = ML_ROOT / "logs"
+CONFIG_DIR = ML_ROOT / "config"
+DEFAULT_TRAIN_CONFIG = CONFIG_DIR / "train.yaml"
+MODELS_DIR = ML_ROOT / "models"
+REPORTS_DIR = ML_ROOT / "reports"
+RANDOM_STATE = 42
 
 MAX_FILAS_POR_HOJA = 1_000_000
 ZONA_HORARIA_POR_DEFECTO = "America/Lima"

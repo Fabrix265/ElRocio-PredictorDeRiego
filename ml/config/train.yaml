@@ -1,0 +1,118 @@
+name: riego
+seed: 42
+reports_dir: ml/reports
+models_dir: ml/models
+
+data:
+  source:
+    type: excel
+    path: ml/data/processed/dataset_riego_muestra.xlsx
+    sheet: Dataset
+    column_map: {}
+  date_column: Fecha
+  group_column: Turno
+  id_columns: [Fecha, Fundo, Modulo, Turno]
+  categorical_features: [Fundo, Modulo, Turno]
+  numeric_features: []
+  environmental_features:
+    - Temperatura_C
+    - Humedad_rel_pct
+    - Contraccion_planta_um
+    - Radiacion_W_m2
+  max_cycles: 3
+  nro_ciclo_column: Nro_ciclo
+  cycle_volume_column: Riego_ciclo_m3
+  start_column: Hora_inicio
+  end_column: Hora_fin
+  drop_columns: []
+
+split:
+  strategy: group_shuffle
+  test_size: 0.2
+  validation_size: 0.15
+  random_state: 42
+
+targets:
+  n_ciclos_column: N_ciclos
+  n_ciclos_classes: [1, 2, 3]
+  total_column: Riego_total_m3
+  direct_total_model: false
+
+schedule:
+  min_gap_min: 0
+  end_mode: derived
+
+models:
+  random_forest:
+    enabled: true
+    params:
+      n_estimators: 300
+      max_depth: null
+      min_samples_leaf: 1
+      min_samples_split: 2
+      max_features: sqrt
+    early_stopping:
+      enabled: true
+      step: 50
+      patience: 8
+      max_iter: 500
+
+  xgboost:
+    enabled: true
+    params:
+      n_estimators: 500
+      max_depth: 4
+      learning_rate: 0.05
+      subsample: 0.9
+      colsample_bytree: 0.9
+      reg_lambda: 1.0
+      min_child_weight: 1
+    early_stopping:
+      enabled: true
+      rounds: 50
+
+  svr:
+    enabled: true
+    params:
+      C: 10.0
+      epsilon: 0.1
+      kernel: rbf
+      gamma: scale
+
+  mlp:
+    enabled: true
+    params:
+      hidden_layer_sizes: [32, 16]
+      activation: relu
+      solver: adam
+      alpha: 0.0001
+      learning_rate_init: 0.001
+      batch_size: 32
+    early_stopping:
+      enabled: true
+      patience: 15
+      max_iter: 200
+
+evaluation:
+  regression_metrics:
+    - rmse
+    - mae
+    - r2
+    - mbe
+    - pearson_r
+    - kge
+    - nse
+    - pbias
+    - smape
+    - willmott_d
+    - medae
+    - max_error
+  classification_metrics:
+    - accuracy
+    - balanced_accuracy
+    - f1_macro
+    - cohen_kappa
+  generate_plots: true
+  generate_excel: true
+  max_gantt_turnos: 6
+  top_errors: 20
