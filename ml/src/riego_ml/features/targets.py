@@ -81,6 +81,39 @@ def target_columns(specs: list[TargetSpec]) -> list[str]:
     return [spec.column for spec in specs]
 
 
+def build_v2_turno_specs(config: RunConfig) -> list[TargetSpec]:
+    return [
+        TargetSpec(
+            name="n_ciclos",
+            column="n_ciclos_clase",
+            kind="classification",
+            classes=list(config.targets.n_ciclos_classes),
+            description=(
+                "Número de ciclos del turno. La cola se agrupa en la clase "
+                f"{config.data.tail_class} (5+)."
+            ),
+            metadata={"tail_class": config.data.tail_class},
+        )
+    ]
+
+
+def build_v2_cycle_specs(config: RunConfig) -> list[TargetSpec]:
+    specs: list[TargetSpec] = []
+    for target in config.data.target_cycle_columns:
+        for slot in range(1, config.data.max_cycles + 1):
+            specs.append(
+                TargetSpec(
+                    name=f"{target}_ciclo_{slot}",
+                    column=f"target__{target}__{slot}",
+                    kind="regression",
+                    slot=slot,
+                    description=f"{target} del ciclo {slot}.",
+                    metadata={"target": target, "slot": slot},
+                )
+            )
+    return specs
+
+
 def _is_leakage_column(column: str, config: RunConfig) -> bool:
     if column in config.data.id_columns:
         return True

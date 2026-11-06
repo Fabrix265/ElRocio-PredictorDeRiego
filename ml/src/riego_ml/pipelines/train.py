@@ -44,6 +44,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--name", type=str, default=None, help="Nombre de la corrida."
     )
     parser.add_argument(
+        "--tune",
+        action="store_true",
+        help="Activa la búsqueda de hiperparámetros (RandomizedSearchCV).",
+    )
+    parser.add_argument(
+        "--tune-iter",
+        type=int,
+        default=None,
+        help="Número de combinaciones a probar por modelo cuando --tune está activo.",
+    )
+    parser.add_argument(
+        "--tune-target",
+        type=str,
+        default=None,
+        choices=["n_ciclos", "ciclo", "riego_m3ha", "both"],
+        help="Target o etapa sobre la que se hace tuning.",
+    )
+    parser.add_argument(
         "--log-level",
         type=str,
         default="INFO",
@@ -71,6 +89,12 @@ def main(argv: list[str] | None = None) -> int:
         config.split.validation_size = args.validation_size
     if args.name is not None:
         config.name = args.name
+    if args.tune:
+        config.tuning.enabled = True
+    if args.tune_iter is not None:
+        config.tuning.n_iter = max(1, args.tune_iter)
+    if args.tune_target is not None:
+        config.tuning.target = args.tune_target
     if args.models:
         selected = {
             name.strip().lower() for name in args.models.split(",") if name.strip()

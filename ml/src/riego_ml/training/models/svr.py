@@ -11,6 +11,7 @@ class SVRModel(BaseMultiTargetModel):
     name = "svr"
     supports_early_stopping = False
     scale_numeric = True
+    scale_target = True
 
     def _make_classifier(self) -> SVC:
         params = self._filter_params(SVC, self.params)

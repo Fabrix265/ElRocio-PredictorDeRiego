@@ -9,6 +9,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import StandardScaler
 
 from riego_ml.features.targets import TargetSpec
 
@@ -17,6 +18,7 @@ class BaseMultiTargetModel(ABC):
     name = "base"
     supports_early_stopping = False
     scale_numeric = False
+    scale_target = False
 
     def __init__(
         self,
@@ -31,6 +33,7 @@ class BaseMultiTargetModel(ABC):
         self.histories_: dict[str, Any] = {}
         self.feature_names_: list[str] = []
         self.target_specs_: list[TargetSpec] = []
+        self.target_scalers_: dict[str, StandardScaler] = {}
 
     @abstractmethod
     def _make_classifier(self) -> Any:
@@ -69,6 +72,28 @@ class BaseMultiTargetModel(ABC):
         model.fit(X_train, y_train)
         return model, {}
 
+    def _scale_y(
+        self, spec: TargetSpec, y_train: np.ndarray, y_val: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        if spec.kind != "regression" or not self.scale_target:
+            return y_train, y_val
+        scaler = StandardScaler()
+        train = np.asarray(y_train, dtype=float).reshape(-1, 1)
+        scaler.fit(train)
+        self.target_scalers_[spec.name] = scaler
+        scaled_train = scaler.transform(train).ravel()
+        if len(y_val) == 0:
+            return scaled_train, np.asarray(y_val, dtype=float)
+        validation = np.asarray(y_val, dtype=float).reshape(-1, 1)
+        return scaled_train, scaler.transform(validation).ravel()
+
+    def _inverse_y(self, spec: TargetSpec, prediction: Any) -> np.ndarray:
+        values = np.asarray(prediction)
+        scaler = self.target_scalers_.get(spec.name)
+        if scaler is None:
+            return values
+        return scaler.inverse_transform(values.reshape(-1, 1)).ravel()
+
     def _validation_score(
         self, model: Any, spec: TargetSpec, X_val: np.ndarray, y_val: np.ndarray
     ) -> tuple[float, float, str]:
@@ -78,6 +103,7 @@ class BaseMultiTargetModel(ABC):
         if spec.kind == "classification":
             value = float(accuracy_score(y_val, prediction))
             return -value, value, "accuracy"
+        prediction = self._inverse_y(spec, prediction)
         error = np.asarray(prediction, dtype=float) - np.asarray(y_val, dtype=float)
         value = float(np.sqrt(np.mean(error**2)))
         return value, value, "rmse"
@@ -119,6 +145,7 @@ class BaseMultiTargetModel(ABC):
                 model = self._make_regressor()
                 y_tr = y_tr.astype(float)
                 y_va = y_va.astype(float)
+                y_tr, y_va = self._scale_y(spec, y_tr, y_va)
 
             model, history = self._fit_one(model, spec, X_tr, y_tr, X_va, y_va)
             self.models_[spec.name] = model
@@ -127,7 +154,16 @@ class BaseMultiTargetModel(ABC):
         return self
 
     def predict(self, X: np.ndarray) -> dict[str, np.ndarray]:
-        return {name: model.predict(X) for name, model in self.models_.items()}
+        output: dict[str, np.ndarray] = {}
+        for spec in self.target_specs_:
+            model = self.models_.get(spec.name)
+            if model is None:
+                continue
+            prediction = model.predict(X)
+            if spec.kind == "regression":
+                prediction = self._inverse_y(spec, prediction)
+            output[spec.name] = prediction
+        return output
 
     def predict_proba(self, X: np.ndarray) -> dict[str, np.ndarray]:
         output: dict[str, np.ndarray] = {}
@@ -150,7 +186,7 @@ class BaseMultiTargetModel(ABC):
     def save(self, path: str | Path) -> Path:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(self, target)
+        joblib.dump(self, target, compress=3)
         return target
 
     @classmethod

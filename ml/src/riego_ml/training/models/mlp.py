@@ -14,6 +14,7 @@ class MLPModel(BaseMultiTargetModel):
     name = "mlp"
     supports_early_stopping = True
     scale_numeric = True
+    scale_target = True
 
     def _make_classifier(self) -> MLPClassifier:
         params = self._filter_params(MLPClassifier, self.params)
