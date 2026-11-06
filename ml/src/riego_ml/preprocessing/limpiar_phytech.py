@@ -39,6 +39,7 @@ import glob
 import os
 import re
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -48,11 +49,14 @@ from openpyxl.utils import get_column_letter
 # ----------------------------------------------------------------------------
 # CONFIGURACIÓN (se puede cambiar por línea de comandos)
 # ----------------------------------------------------------------------------
-CARPETA_DEFAULT = "phytech/completo"   # carpeta donde están los Soil/Projects xlsx
+ML_ROOT = Path(__file__).resolve().parents[3]
+DATA_RAW_DIR = ML_ROOT / "data" / "raw"
+
+CARPETA_DEFAULT = str(DATA_RAW_DIR / "phytech")   # carpeta donde están los Soil/Projects xlsx
 AREA_ID_DEFAULT = 12537                # área Phytech "ENSUEÑO 2" (contiene el plot ENSUEÑO 1)
 PLOT_ID_DEFAULT = 70208                # plot Phytech "ENSUEÑO 1"
 FUNDO_DEFAULT = "ENSUEÑO 1"            # nombre de fundo en tus Excel de riego/meteo
-SALIDA_DEFAULT = "phytech_ENSUENO1_limpio.xlsx"
+SALIDA_DEFAULT = str(DATA_RAW_DIR / "data_phytech.xlsx")
 
 # Turno de riego (TE01..TE05) donde está instalado el sensor. Phytech NO trae este
 # dato (solo conoce la válvula 21828). Si sabes en qué turno está, ponlo aquí y
@@ -73,8 +77,8 @@ TEMP_MIN, TEMP_MAX = -5.0, 60.0
 # ----------------------------------------------------------------------------
 def leer_anios(carpeta, prefijo, area_id, plot_id):
     """Lee todos los años de un tipo de archivo y se queda solo con el plot pedido."""
-    patron = os.path.join(carpeta, f"{prefijo}_*_area{area_id}.xlsx")
-    archivos = sorted(glob.glob(patron))
+    patron = os.path.join(carpeta, "**", f"{prefijo}_*_area{area_id}.xlsx")
+    archivos = sorted(glob.glob(patron, recursive=True))
     if not archivos:
         sys.exit(f"No encontré archivos con el patrón: {patron}")
     partes = []
@@ -92,10 +96,11 @@ def leer_anios(carpeta, prefijo, area_id, plot_id):
 
 def etiqueta_sensor(carpeta, area_id):
     """Nombre del proyecto (sensor) por project_id, leído de la metadata."""
-    f = os.path.join(carpeta, "metadata", f"Metadata_projects_area{area_id}.xlsx")
-    if not os.path.exists(f):
+    patron = os.path.join(carpeta, "**", f"Metadata_projects_area{area_id}.xlsx")
+    archivos = sorted(glob.glob(patron, recursive=True))
+    if not archivos:
         return {}
-    m = pd.read_excel(f)
+    m = pd.read_excel(archivos[0])
     return dict(zip(m["projectId"], m["projectName"].astype(str)))
 
 

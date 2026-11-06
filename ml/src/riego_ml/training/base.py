@@ -42,10 +42,19 @@ class BaseMultiTargetModel(ABC):
 
     def _filter_params(self, estimator_class: Any, params: dict[str, Any]) -> dict[str, Any]:
         try:
-            signature = inspect.signature(estimator_class.__init__)
-            allowed = set(signature.parameters) - {"self", "kwargs"}
+            parameters = inspect.signature(estimator_class.__init__).parameters
         except (TypeError, ValueError):
             return dict(params)
+        if any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        ):
+            return dict(params)
+        allowed = {
+            name
+            for name, parameter in parameters.items()
+            if name != "self" and parameter.kind is not inspect.Parameter.VAR_KEYWORD
+        }
         return {key: value for key, value in params.items() if key in allowed}
 
     def _fit_one(

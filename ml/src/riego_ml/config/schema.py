@@ -43,6 +43,7 @@ class DataConfig:
 @dataclass
 class SplitConfig:
     strategy: str = "group_shuffle"
+    group_column: str | None = None
     test_size: float = 0.2
     validation_size: float = 0.15
     random_state: int = 42

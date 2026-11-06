@@ -117,7 +117,7 @@ def _fallback_random_split(
 
 def split_dataset(df: pd.DataFrame, config: RunConfig) -> SplitIndices:
     split = config.split
-    group_column = config.data.group_column
+    group_column = split.group_column or config.data.group_column
     stratify_column = config.targets.n_ciclos_column
     required_classes = set(config.targets.n_ciclos_classes)
 

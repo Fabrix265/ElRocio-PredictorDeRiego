@@ -121,8 +121,10 @@ def _load_split(raw: dict[str, Any]) -> SplitConfig:
         raise ConfigError(
             "split.validation_size debe ser >= 0 y menor que 1 - split.test_size."
         )
+    group_column = raw.get("group_column")
     return SplitConfig(
         strategy=str(raw.get("strategy", "group_shuffle")),
+        group_column=str(group_column) if group_column else None,
         test_size=test_size,
         validation_size=validation_size,
         random_state=int(raw.get("random_state", RANDOM_STATE)),
