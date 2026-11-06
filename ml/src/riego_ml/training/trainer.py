@@ -241,19 +241,6 @@ class Trainer:
             tuning_info=tuning_info,
         )
 
-        test_scores = [
-            row["f1_macro"]
-            for row in self.classification_rows
-            if row["model"] == model_name
-            and row["split"] == "test"
-            and np.isfinite(row.get("f1_macro", np.nan))
-        ]
-        score = float(max(test_scores)) if test_scores else -np.inf
-        if score > self._best_score:
-            self._best_score = score
-            self._best_model = model_name
-            self._best_bundle = self.v2_dir / model_name / "modelo_riego.joblib"
-
         self.model_rows.append(
             {
                 "model": model_name,
@@ -580,15 +567,59 @@ class Trainer:
         self.logger.info("Modelo guardado en: %s", bundle_path)
 
     def _select_best_model(self) -> None:
-        if self._best_model is None or self._best_bundle is None:
+        classification = {
+            row["model"]: float(row["f1_macro"])
+            for row in self.classification_rows
+            if row["split"] == "test" and np.isfinite(row.get("f1_macro", np.nan))
+        }
+        regression: dict[str, list[float]] = {}
+        for row in self.regression_rows:
+            if row["split"] == "test" and np.isfinite(row.get("r2", np.nan)):
+                regression.setdefault(row["model"], []).append(float(row["r2"]))
+        regression_mean = {
+            model: float(np.mean(values)) for model, values in regression.items() if values
+        }
+        candidates = sorted(set(classification) & set(regression_mean))
+        if not candidates:
             return
+
+        classification_rank = pd.Series(classification).rank(ascending=False, method="min")
+        regression_rank = pd.Series(regression_mean).rank(ascending=False, method="min")
+        ranking = [
+            {
+                "model": model,
+                "classification_rank": float(classification_rank[model]),
+                "regression_rank": float(regression_rank[model]),
+                "combined_rank": float(
+                    classification_rank[model] + regression_rank[model]
+                ),
+                "f1_macro_test": classification[model],
+                "r2_mean_test": regression_mean[model],
+            }
+            for model in candidates
+        ]
+        ranking.sort(
+            key=lambda row: (
+                row["combined_rank"],
+                -row["r2_mean_test"],
+                -row["f1_macro_test"],
+            )
+        )
+        best = ranking[0]
+        self._best_model = str(best["model"])
+        self._best_bundle = self.v2_dir / self._best_model / "modelo_riego.joblib"
+        self._best_score = float(best["combined_rank"])
         target = self.v2_dir / "mejor_modelo_riego.joblib"
         shutil.copy2(self._best_bundle, target)
         save_json(
             self.v2_dir / "mejor_modelo.json",
             {
                 "model": self._best_model,
-                "score_f1_macro_test": self._best_score,
+                "selection": "menor suma de ranks (F1 macro y R2 medio en test)",
+                "combined_rank": best["combined_rank"],
+                "score_f1_macro_test": best["f1_macro_test"],
+                "score_r2_mean_test": best["r2_mean_test"],
+                "ranking": ranking,
                 "bundle": str(target),
             },
         )
