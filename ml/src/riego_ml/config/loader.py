@@ -15,6 +15,7 @@ from riego_ml.config.schema import (
     SourceConfig,
     SplitConfig,
     TargetsConfig,
+    TuningConfig,
 )
 from riego_ml.settings import (
     DEFAULT_TRAIN_CONFIG,
@@ -48,7 +49,9 @@ def _require_list(value: Any, name: str) -> list[Any]:
     return value
 
 
-def _load_source(raw: dict[str, Any]) -> SourceConfig:
+def _load_source(raw: dict[str, Any]) -> SourceConfig | None:
+    if not raw or raw.get("path") in (None, ""):
+        return None
     source_type = str(raw.get("type", "excel")).lower()
     if source_type not in {"excel", "csv", "parquet"}:
         raise ConfigError(
@@ -58,9 +61,7 @@ def _load_source(raw: dict[str, Any]) -> SourceConfig:
     if not isinstance(column_map, dict):
         raise ConfigError("data.source.column_map debe ser un objeto YAML.")
     path = _resolve_path(raw.get("path"))
-    if path is None:
-        raise ConfigError("data.source.path es obligatorio.")
-    if not path.exists():
+    if path is None or not path.exists():
         raise ConfigError(f"No existe el archivo de datos: {path}")
     return SourceConfig(
         type=source_type,
@@ -72,13 +73,41 @@ def _load_source(raw: dict[str, Any]) -> SourceConfig:
     )
 
 
+def _optional_existing_path(value: Any, name: str) -> Path | None:
+    if value in (None, ""):
+        return None
+    path = _resolve_path(value)
+    if path is None or not path.exists():
+        raise ConfigError(f"No existe el archivo {name}: {path}")
+    return path
+
+
 def _load_data(raw: dict[str, Any]) -> DataConfig:
     source = _load_source(_require_mapping(raw.get("source", {}), "data.source"))
-    max_cycles = int(raw.get("max_cycles", 3))
+    turno_file = _optional_existing_path(raw.get("turno_file"), "data.turno_file")
+    ciclos_file = _optional_existing_path(raw.get("ciclos_file"), "data.ciclos_file")
+    columns_file = _optional_existing_path(raw.get("columns_file"), "data.columns_file")
+    if source is None and turno_file is None:
+        raise ConfigError(
+            "Debes indicar data.turno_file o data.source.path con el dataset de entrada."
+        )
+    max_cycles = int(raw.get("max_cycles", 5))
     if max_cycles < 1:
         raise ConfigError("data.max_cycles debe ser >= 1.")
+    tail_class = int(raw.get("tail_class", max_cycles))
+    if tail_class < 1:
+        raise ConfigError("data.tail_class debe ser >= 1.")
+    target_cycle_columns = [
+        str(v)
+        for v in _require_list(
+            raw.get("target_cycle_columns"), "data.target_cycle_columns"
+        )
+    ] or ["riego_m3ha", "inicio_min", "duracion_min"]
     return DataConfig(
-        source=source,
+        source=source or SourceConfig(),
+        turno_file=turno_file,
+        ciclos_file=ciclos_file,
+        columns_file=columns_file,
         date_column=str(raw.get("date_column", "Fecha")),
         group_column=str(raw.get("group_column", "Turno")),
         id_columns=[str(v) for v in _require_list(raw.get("id_columns"), "data.id_columns")]
@@ -88,8 +117,7 @@ def _load_data(raw: dict[str, Any]) -> DataConfig:
             for v in _require_list(
                 raw.get("categorical_features"), "data.categorical_features"
             )
-        ]
-        or ["Fundo", "Modulo", "Turno"],
+        ],
         numeric_features=[
             str(v)
             for v in _require_list(raw.get("numeric_features"), "data.numeric_features")
@@ -101,6 +129,13 @@ def _load_data(raw: dict[str, Any]) -> DataConfig:
             )
         ],
         max_cycles=max_cycles,
+        tail_class=tail_class,
+        cycle_column=str(raw.get("cycle_column", "Ciclo")),
+        target_cycle_columns=target_cycle_columns,
+        incomplete_column=str(raw.get("incomplete_column", "dia_incompleto")),
+        exclude_incomplete_from_eval=bool(
+            raw.get("exclude_incomplete_from_eval", True)
+        ),
         nro_ciclo_column=str(raw.get("nro_ciclo_column", "Nro_ciclo")),
         cycle_volume_column=str(raw.get("cycle_volume_column", "Riego_ciclo_m3")),
         start_column=str(raw.get("start_column", "Hora_inicio")),
@@ -123,10 +158,11 @@ def _load_split(raw: dict[str, Any]) -> SplitConfig:
         )
     group_column = raw.get("group_column")
     return SplitConfig(
-        strategy=str(raw.get("strategy", "group_shuffle")),
+        strategy=str(raw.get("strategy", "temporal")),
         group_column=str(group_column) if group_column else None,
         test_size=test_size,
         validation_size=validation_size,
+        gap_days=max(0, int(raw.get("gap_days", 3))),
         random_state=int(raw.get("random_state", RANDOM_STATE)),
     )
 
@@ -188,6 +224,20 @@ def _load_schedule(raw: dict[str, Any]) -> ScheduleConfig:
     )
 
 
+def _load_tuning(raw: dict[str, Any]) -> TuningConfig:
+    return TuningConfig(
+        enabled=bool(raw.get("enabled", False)),
+        n_iter=max(1, int(raw.get("n_iter", 30))),
+        cv_splits=max(2, int(raw.get("cv_splits", 4))),
+        n_jobs=int(raw.get("n_jobs", -1)),
+        scoring_classification=str(raw.get("scoring_classification", "f1_macro")),
+        scoring_regression=str(
+            raw.get("scoring_regression", "neg_root_mean_squared_error")
+        ),
+        target=str(raw.get("target", "n_ciclos")),
+    )
+
+
 def load_config(path: str | Path | None = None) -> RunConfig:
     config_path = _resolve_path(path) if path is not None else DEFAULT_TRAIN_CONFIG
     if config_path is None or not config_path.exists():
@@ -206,6 +256,7 @@ def load_config(path: str | Path | None = None) -> RunConfig:
         _require_mapping(raw.get("evaluation", {}), "evaluation")
     )
     schedule = _load_schedule(_require_mapping(raw.get("schedule", {}), "schedule"))
+    tuning = _load_tuning(_require_mapping(raw.get("tuning", {}), "tuning"))
 
     return RunConfig(
         name=str(raw.get("name", "riego")),
@@ -219,4 +270,5 @@ def load_config(path: str | Path | None = None) -> RunConfig:
         models=models,
         evaluation=evaluation,
         schedule=schedule,
+        tuning=tuning,
     )

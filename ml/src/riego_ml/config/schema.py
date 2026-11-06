@@ -22,6 +22,9 @@ class SourceConfig:
 @dataclass
 class DataConfig:
     source: SourceConfig = field(default_factory=SourceConfig)
+    turno_file: Path | None = None
+    ciclos_file: Path | None = None
+    columns_file: Path | None = None
     date_column: str = "Fecha"
     group_column: str = "Turno"
     id_columns: list[str] = field(
@@ -32,7 +35,14 @@ class DataConfig:
     )
     numeric_features: list[str] = field(default_factory=list)
     environmental_features: list[str] = field(default_factory=list)
-    max_cycles: int = 3
+    max_cycles: int = 5
+    tail_class: int = 5
+    cycle_column: str = "Ciclo"
+    target_cycle_columns: list[str] = field(
+        default_factory=lambda: ["riego_m3ha", "inicio_min", "duracion_min"]
+    )
+    incomplete_column: str = "dia_incompleto"
+    exclude_incomplete_from_eval: bool = True
     nro_ciclo_column: str = "Nro_ciclo"
     cycle_volume_column: str = "Riego_ciclo_m3"
     start_column: str = "Hora_inicio"
@@ -42,10 +52,11 @@ class DataConfig:
 
 @dataclass
 class SplitConfig:
-    strategy: str = "group_shuffle"
+    strategy: str = "temporal"
     group_column: str | None = None
     test_size: float = 0.2
     validation_size: float = 0.15
+    gap_days: int = 3
     random_state: int = 42
 
 
@@ -103,6 +114,17 @@ class ScheduleConfig:
 
 
 @dataclass
+class TuningConfig:
+    enabled: bool = False
+    n_iter: int = 30
+    cv_splits: int = 4
+    n_jobs: int = -1
+    scoring_classification: str = "f1_macro"
+    scoring_regression: str = "neg_root_mean_squared_error"
+    target: str = "n_ciclos"
+
+
+@dataclass
 class RunConfig:
     name: str = "riego"
     seed: int = 42
@@ -115,3 +137,4 @@ class RunConfig:
     models: dict[str, ModelConfig] = field(default_factory=dict)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
+    tuning: TuningConfig = field(default_factory=TuningConfig)

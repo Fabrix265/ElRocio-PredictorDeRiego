@@ -5,49 +5,53 @@ models_dir: ml/models
 
 data:
   source:
-    type: excel
-    path: ml/data/processed/dataset_riego_MOD5_clean.xlsx
-    sheet: Dataset_entrenamiento
+    type: csv
+    path: ml/data/processed/turno_dia.csv
+    sheet: null
     column_map: {}
+  turno_file: ml/data/processed/turno_dia.csv
+  ciclos_file: ml/data/processed/ciclos.csv
+  columns_file: ml/data/processed/columnas.json
   date_column: Fecha
   group_column: Turno
   id_columns: [Fecha, Fundo, Modulo, Turno]
-  categorical_features: [Turno]
+  categorical_features: []
   numeric_features: []
-  environmental_features:
-    - T_mean
-    - T_max
-    - T_min
-    - HR_mean
-    - ETO
-    - DPV
-    - RadSolar_max
-    - hum_45cm
-    - hum_60cm
-    - hum_75cm
-    - hum_90cm
-    - mds_contraccion_um
-    - crecimiento_tronco_um
-    - estres_planta_ps
-  max_cycles: 4
+  environmental_features: []
+  max_cycles: 5
+  tail_class: 5
+  cycle_column: Ciclo
+  target_cycle_columns: [riego_m3ha, inicio_min, duracion_min]
+  incomplete_column: dia_incompleto
+  exclude_incomplete_from_eval: true
   nro_ciclo_column: Ciclo
-  cycle_volume_column: Riego_ciclo_m3_ha
-  start_column: Hora_inicio
-  end_column: Hora_fin
+  cycle_volume_column: riego_m3ha
+  start_column: inicio_min
+  end_column: fin_min
   drop_columns: []
 
 split:
-  strategy: group_shuffle
+  strategy: temporal
   group_column: Fecha
   test_size: 0.2
   validation_size: 0.15
+  gap_days: 3
   random_state: 42
 
 targets:
-  n_ciclos_column: N_ciclos
-  n_ciclos_classes: [1, 2, 3, 4]
-  total_column: Riego_total_m3
+  n_ciclos_column: n_ciclos
+  n_ciclos_classes: [1, 2, 3, 4, 5]
+  total_column: riego_total_m3ha
   direct_total_model: false
+
+tuning:
+  enabled: false
+  n_iter: 30
+  cv_splits: 4
+  n_jobs: -1
+  scoring_classification: f1_macro
+  scoring_regression: neg_root_mean_squared_error
+  target: n_ciclos
 
 schedule:
   min_gap_min: 0
@@ -62,6 +66,7 @@ models:
       min_samples_leaf: 1
       min_samples_split: 2
       max_features: sqrt
+      class_weight: balanced
     early_stopping:
       enabled: true
       step: 50
@@ -89,6 +94,9 @@ models:
       epsilon: 0.1
       kernel: rbf
       gamma: scale
+      class_weight: balanced
+    early_stopping:
+      enabled: false
 
   mlp:
     enabled: true
@@ -123,7 +131,7 @@ evaluation:
     - balanced_accuracy
     - f1_macro
     - cohen_kappa
-  generate_plots: true
+  generate_plots: false
   generate_excel: true
   max_gantt_turnos: 6
   top_errors: 20

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -17,6 +17,13 @@ class SplitIndices:
     test: np.ndarray
     strategy: str
     seed: int
+
+
+@dataclass
+class TemporalBoundaries:
+    train_dates: np.ndarray = field(default_factory=lambda: np.array([]))
+    validation_dates: np.ndarray = field(default_factory=lambda: np.array([]))
+    test_dates: np.ndarray = field(default_factory=lambda: np.array([]))
 
 
 def _classes(values: pd.Series) -> set[Any]:
@@ -115,8 +122,106 @@ def _fallback_random_split(
     )
 
 
+def _dates(df: pd.DataFrame, column: str) -> np.ndarray:
+    values = pd.to_datetime(df[column], errors="coerce").dt.normalize()
+    return np.sort(values.dropna().unique())
+
+
+def temporal_boundaries(df: pd.DataFrame, config: RunConfig) -> TemporalBoundaries:
+    split = config.split
+    date_column = split.group_column or config.data.date_column
+    dates = _dates(df, date_column)
+    total = len(dates)
+    if total < 10:
+        raise ValueError(
+            "Se necesitan al menos 10 fechas distintas para el split temporal."
+        )
+
+    n_test = max(1, int(round(total * split.test_size)))
+    n_validation = max(1, int(round(total * split.validation_size))) if split.validation_size > 0 else 0
+    gap = max(0, int(split.gap_days))
+
+    test_start = max(0, total - n_test)
+    validation_end = max(0, test_start - gap)
+    validation_start = max(0, validation_end - n_validation)
+    train_end = max(0, validation_start - gap)
+
+    if train_end <= 0:
+        raise ValueError(
+            "El split temporal dejó el conjunto de train vacío; reduce test_size, "
+            "validation_size o gap_days."
+        )
+
+    return TemporalBoundaries(
+        train_dates=dates[:train_end],
+        validation_dates=dates[validation_start:validation_end],
+        test_dates=dates[test_start:],
+    )
+
+
+def split_from_boundaries(
+    df: pd.DataFrame,
+    boundaries: TemporalBoundaries,
+    config: RunConfig,
+) -> SplitIndices:
+    split = config.split
+    date_column = split.group_column or config.data.date_column
+    dates = pd.to_datetime(df[date_column], errors="coerce").dt.normalize()
+    train = np.flatnonzero(dates.isin(boundaries.train_dates).to_numpy())
+    validation = np.flatnonzero(dates.isin(boundaries.validation_dates).to_numpy())
+    test = np.flatnonzero(dates.isin(boundaries.test_dates).to_numpy())
+    if len(train) == 0 or len(test) == 0:
+        raise ValueError("El split temporal no produjo filas de train o test.")
+    return SplitIndices(
+        train=train,
+        validation=validation,
+        test=test,
+        strategy="temporal",
+        seed=split.random_state,
+    )
+
+
+def temporal_split(df: pd.DataFrame, config: RunConfig) -> SplitIndices:
+    return split_from_boundaries(df, temporal_boundaries(df, config), config)
+
+
+def expanding_window_folds(
+    df: pd.DataFrame,
+    config: RunConfig,
+    n_splits: int,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    split = config.split
+    date_column = split.group_column or config.data.date_column
+    dates = _dates(df, date_column)
+    total = len(dates)
+    n_splits = max(2, int(n_splits))
+    fold_size = max(1, total // (n_splits + 1))
+    gap = max(0, int(split.gap_days))
+    date_values = pd.to_datetime(df[date_column], errors="coerce").dt.normalize()
+    folds: list[tuple[np.ndarray, np.ndarray]] = []
+    for fold in range(1, n_splits + 1):
+        validation_start = fold * fold_size
+        validation_end = min(total, (fold + 1) * fold_size) if fold < n_splits else total
+        train_end = max(0, validation_start - gap)
+        if train_end == 0 or validation_start >= total:
+            continue
+        train_dates = dates[:train_end]
+        validation_dates = dates[validation_start:validation_end]
+        if len(train_dates) == 0 or len(validation_dates) == 0:
+            continue
+        train_idx = np.flatnonzero(date_values.isin(train_dates).to_numpy())
+        validation_idx = np.flatnonzero(date_values.isin(validation_dates).to_numpy())
+        if len(train_idx) and len(validation_idx):
+            folds.append((train_idx, validation_idx))
+    if not folds:
+        raise ValueError("No se pudieron construir folds temporales para el tuning.")
+    return folds
+
+
 def split_dataset(df: pd.DataFrame, config: RunConfig) -> SplitIndices:
     split = config.split
+    if split.strategy == "temporal":
+        return temporal_split(df, config)
     group_column = split.group_column or config.data.group_column
     stratify_column = config.targets.n_ciclos_column
     required_classes = set(config.targets.n_ciclos_classes)
