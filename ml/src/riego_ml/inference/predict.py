@@ -8,89 +8,159 @@ import numpy as np
 import pandas as pd
 
 from riego_ml.config.schema import RunConfig
-from riego_ml.data.loader import load_dataset
-from riego_ml.data.validation import validate_raw_dataset
-from riego_ml.features.aggregate import aggregate_to_turno
-from riego_ml.features.schedule import build_prediction_frame
-from riego_ml.preprocessing.cleaning import prepare_cycle_data
-from riego_ml.training.base import BaseMultiTargetModel
-from riego_ml.utils.io import load_json
+from riego_ml.preprocessing.cleaning import minutes_to_hhmm
 from riego_ml.utils.logging import configure_logging
 
 
 class Predictor:
-    def __init__(self, config: RunConfig, model_name: str):
+    def __init__(self, config: RunConfig, model_name: str = "mejor_modelo"):
         self.config = config
         self.model_name = model_name
         self.logger = configure_logging()
-        self.model_dir = Path(config.models_dir) / model_name
-        if not self.model_dir.exists():
+        self.bundle_path = self._resolve_bundle_path(model_name)
+        self.bundle = joblib.load(self.bundle_path)
+        self.turno_model = self.bundle["turno"]["model"]
+        self.turno_preprocessor = self.bundle["turno"]["preprocessor"]
+        self.turno_features = list(self.bundle["turno"]["feature_columns"])
+        self.ciclo_model = self.bundle["ciclo"]["model"]
+        self.ciclo_preprocessor = self.bundle["ciclo"]["preprocessor"]
+        self.ciclo_features = list(self.bundle["ciclo"]["feature_columns"])
+        self.target_columns = list(self.bundle["ciclo"]["target_columns"])
+        self.max_cycles = int(self.bundle["ciclo"]["max_cycles"])
+        self.id_columns = list(self.bundle["data"]["id_columns"])
+        self._validate_bundle()
+
+    def _resolve_bundle_path(self, model_name: str) -> Path:
+        candidate = Path(model_name)
+        if candidate.suffix.lower() in {".joblib", ".pkl", ".pickle"}:
+            if not candidate.exists():
+                raise FileNotFoundError(f"No existe el bundle: {candidate}")
+            return candidate
+        if candidate.exists():
+            return candidate
+        if model_name in {"mejor", "mejor_modelo"}:
+            path = Path(self.config.models_dir) / "v2" / "mejor_modelo_riego.joblib"
+        else:
+            path = Path(self.config.models_dir) / "v2" / model_name / "modelo_riego.joblib"
+        if not path.exists():
             raise FileNotFoundError(
-                f"No existe el modelo '{model_name}' en {self.model_dir}. Entrena primero."
+                f"No existe el modelo '{model_name}' en {path}. Entrena primero."
             )
-        self.metadata = load_json(self.model_dir / "metadata.json")
-        self.model = BaseMultiTargetModel.load(self.model_dir / "model.joblib")
-        self.preprocessor = joblib.load(self.model_dir / "preprocessor.joblib")
-        self._validate_metadata()
+        return path
 
-    def _validate_metadata(self) -> None:
-        trained_max_cycles = int(self.metadata.get("data", {}).get("max_cycles", -1))
-        if trained_max_cycles != self.config.data.max_cycles:
+    def _validate_bundle(self) -> None:
+        if int(self.bundle.get("bundle_version", 0)) != 2:
             raise ValueError(
-                "El modelo fue entrenado con max_cycles="
-                f"{trained_max_cycles} y la configuración actual usa "
-                f"{self.config.data.max_cycles}. Usa la misma configuración."
-            )
-        trained_group = self.metadata.get("data", {}).get("group_column")
-        if trained_group and trained_group != self.config.data.group_column:
-            raise ValueError(
-                f"El modelo fue entrenado agrupando por '{trained_group}' y ahora se usa "
-                f"'{self.config.data.group_column}'."
+                "El bundle no corresponde al pipeline V2. Vuelve a entrenar los modelos."
             )
 
-    def predict(self, input_path: str | Path | None = None) -> pd.DataFrame:
-        source = self.config.data.source
-        if input_path is not None:
-            path = Path(input_path).resolve()
+    def predict(
+        self,
+        input_path: str | Path | None = None,
+        frame: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
+        if frame is None:
+            if input_path is None:
+                input_path = self.config.data.turno_file
+            if input_path is None:
+                raise ValueError(
+                    "Debes indicar input_path o un DataFrame con el formato de turno_dia."
+                )
+            path = Path(input_path)
             if not path.exists():
                 raise FileNotFoundError(f"No existe el archivo de entrada: {path}")
-            source.path = path
-            if path.suffix.lower() == ".csv":
-                source.type = "csv"
-            elif path.suffix.lower() == ".parquet":
-                source.type = "parquet"
-            else:
-                source.type = "excel"
+            frame = pd.read_csv(path)
 
-        raw = load_dataset(source)
-        validate_raw_dataset(raw, self.config)
-        cycle_df = prepare_cycle_data(raw, self.config)
-        turno_df = aggregate_to_turno(cycle_df, self.config)
-
-        feature_columns = [str(column) for column in self.metadata["feature_columns"]]
-        missing = [column for column in feature_columns if column not in turno_df.columns]
+        missing = [column for column in self.turno_features if column not in frame.columns]
         if missing:
             raise ValueError(
-                "Faltan features que el modelo espera: " + ", ".join(missing)
+                "Faltan features de turno/día que el modelo espera: " + ", ".join(missing)
             )
-        X = turno_df[feature_columns]
-        X_transformed = self.preprocessor.transform(X)
-        predictions = self.model.predict(X_transformed)
-        indices = np.arange(len(turno_df))
-        frame = build_prediction_frame(
-            turno_df=turno_df,
-            indices=indices,
-            predictions=predictions,
-            config=self.config,
-            model_name=self.model_name,
-            split="predict",
-        )
+
+        work = frame.reset_index(drop=True)
+        X_turno = self.turno_preprocessor.transform(work[self.turno_features])
+        turno_predictions = self.turno_model.predict(X_turno)
+        n_ciclos = np.rint(np.asarray(turno_predictions["n_ciclos"], dtype=float))
+        n_ciclos = np.clip(n_ciclos, 1, self.max_cycles).astype(int)
+
+        cycle_frame = self._build_cycle_frame(work, n_ciclos)
+        X_ciclo = self.ciclo_preprocessor.transform(cycle_frame[self.ciclo_features])
+        cycle_predictions = self.ciclo_model.predict(X_ciclo)
+
+        for i, slot in enumerate(cycle_frame["ciclo_slot"].astype(int)):
+            for target in self.target_columns:
+                cycle_frame.at[i, target] = float(
+                    cycle_predictions[f"{target}_ciclo_{slot}"][i]
+                )
+
+        result = cycle_frame[
+            [*[c for c in self.id_columns if c in cycle_frame.columns], "n_ciclos", "ciclo_slot", *self.target_columns]
+        ].rename(columns={"ciclo_slot": "ciclo"})
+        result["fin_min"] = result["inicio_min"] + result["duracion_min"]
+        result["hora_inicio"] = result["inicio_min"].map(minutes_to_hhmm)
+        result["hora_fin"] = result["fin_min"].map(minutes_to_hhmm)
+        result["modelo"] = self.bundle["model_name"]
+        result = result.reset_index(drop=True)
         self.logger.info(
-            "Predicción generada para %s turnos con el modelo %s.",
-            len(frame),
-            self.model_name,
+            "Predicción generada: %s turnos y %s ciclos con %s.",
+            len(work),
+            len(result),
+            self.bundle["model_name"],
         )
-        return frame
+        return result
+
+    def _build_cycle_frame(
+        self, turno_frame: pd.DataFrame, n_ciclos: np.ndarray
+    ) -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        for i, count in enumerate(n_ciclos):
+            base = turno_frame.iloc[i]
+            for slot in range(1, int(count) + 1):
+                row: dict[str, Any] = {
+                    column: base[column]
+                    for column in self.ciclo_features
+                    if column in base.index
+                }
+                row["ciclo_slot"] = slot
+                row["n_ciclos"] = int(count)
+                for column in self.id_columns:
+                    if column in base.index:
+                        row[column] = base[column]
+                self._fill_previous_cycle_features(row, base)
+                rows.append(row)
+        return pd.DataFrame(rows)
+
+    def _fill_previous_cycle_features(
+        self, row: dict[str, Any], base: pd.Series
+    ) -> None:
+        previous_cycles = base.get("prev_n_ciclos", np.nan)
+        denominator = (
+            float(previous_cycles)
+            if pd.notna(previous_cycles) and float(previous_cycles) > 0
+            else 1.0
+        )
+        if "prev_m3ha_ciclo" in self.ciclo_features:
+            value = row.get("prev_m3ha_ciclo", np.nan)
+            if pd.isna(value):
+                total = base.get("prev_riego_total_m3ha", np.nan)
+                value = float(total) / denominator if pd.notna(total) else np.nan
+            row["prev_m3ha_ciclo"] = value
+        if "prev_dur_ciclo" in self.ciclo_features:
+            value = row.get("prev_dur_ciclo", np.nan)
+            if pd.isna(value):
+                total = base.get("prev_duracion_total_min", np.nan)
+                value = float(total) / denominator if pd.notna(total) else np.nan
+            row["prev_dur_ciclo"] = value
+        if "prev_inicio_ciclo" in self.ciclo_features:
+            value = row.get("prev_inicio_ciclo", np.nan)
+            if pd.isna(value):
+                value = base.get("prev_inicio_primer_min", np.nan)
+            row["prev_inicio_ciclo"] = value
+        if "prev_fin_ciclo" in self.ciclo_features:
+            value = row.get("prev_fin_ciclo", np.nan)
+            if pd.isna(value):
+                value = base.get("prev_fin_ultimo_min", np.nan)
+            row["prev_fin_ciclo"] = value
 
 
 def save_predictions(
@@ -104,25 +174,17 @@ def save_predictions(
         frame.to_csv(output, index=False)
         return output
 
-    summary_columns = [
-        column
-        for column in [
-            "modelo",
-            "Fecha",
-            "Fundo",
-            "Modulo",
-            "Turno",
-            "N_ciclos_pred",
-            "Riego_total_pred_m3",
-        ]
-        if column in frame.columns
-    ]
-    for slot in range(1, 20):
-        for suffix in ("inicio", "fin"):
-            column = f"Hora_{suffix}_{slot}_pred_min_hhmm"
-            if column in frame.columns:
-                summary_columns.append(column)
-    summary = frame[summary_columns].copy()
+    summary = (
+        frame.groupby([c for c in ["Fecha", "Fundo", "Modulo", "Turno"] if c in frame.columns], dropna=False)
+        .agg(
+            n_ciclos=("ciclo", "count"),
+            riego_total_m3ha=("riego_m3ha", "sum"),
+            duracion_total_min=("duracion_min", "sum"),
+            inicio_primer_min=("inicio_min", "min"),
+            fin_ultimo_min=("fin_min", "max"),
+        )
+        .reset_index()
+    )
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         frame.to_excel(writer, sheet_name="Predicciones", index=False)
         summary.to_excel(writer, sheet_name="Resumen", index=False)

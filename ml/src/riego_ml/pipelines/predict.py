@@ -27,14 +27,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         type=str,
-        required=True,
-        help="Nombre del modelo entrenado (random_forest, xgboost, svr, mlp).",
+        default="mejor_modelo",
+        help=(
+            "Nombre del modelo entrenado (random_forest, xgboost, svr, mlp), "
+            "'mejor_modelo' o la ruta a un bundle .joblib."
+        ),
     )
     parser.add_argument(
         "--input",
         type=str,
         default=None,
-        help="Archivo de entrada. Si se omite, se usa data.source.path del YAML.",
+        help="CSV con formato turno_dia. Si se omite, se usa data.turno_file del YAML.",
     )
     parser.add_argument(
         "--sheet",
