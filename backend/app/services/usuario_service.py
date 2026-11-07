@@ -19,7 +19,7 @@ from app.models import Usuario
 from app.models.enums import RolUsuario
 from app.repositories import usuarios as repo_usuarios
 from app.services import auditoria_service as auditoria
-from app.services.auth_service import invalidar_accesos, validar_politica
+from app.services.auth_service import invalidar_accesos, invalidar_resets, validar_politica
 from app.services.contexto import ContextoPeticion
 
 MENSAJE_USUARIO_DUPLICADO = "Ya existe un usuario con ese nombre de usuario."
@@ -139,6 +139,9 @@ def editar(
     if correo is not None:
         correo = correo.strip().lower()
         _verificar_unicos(db, correo=correo, excluir_id=usuario.id)
+        if correo != usuario.correo:
+            # Un enlace de recuperación ya enviado al correo anterior deja de servir.
+            invalidar_resets(db, usuario.id)
         usuario.correo = correo
     if nombre is not None:
         usuario.nombre = nombre.strip()

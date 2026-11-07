@@ -83,7 +83,11 @@ def test_recuperar_worker_restablecer_un_solo_uso(client: TestClient, crear_usua
     assert db.scalars(select(SesionRefresh).where(SesionRefresh.token_hash == hash_token(rt_viejo))).one().revocado_at
     assert login(client, "nora", NUEVA).status_code == 200
     acciones = set(db.scalars(select(Auditoria.accion).where(Auditoria.username == "nora")))
-    assert {"recuperar_solicitado", "password_restablecido"} <= acciones
+    assert "password_restablecido" in acciones
+    # La solicitud es anónima: queda sin actor, con el usuario solo en entidad_id.
+    solicitud = db.scalars(select(Auditoria).where(Auditoria.accion == "recuperar_solicitado")).one()
+    assert (solicitud.usuario_id, solicitud.username, solicitud.rol) == (None, None, None)
+    assert solicitud.entidad_id == str(notificacion.usuario_id)
 
 
 def test_enlace_vencido(client: TestClient, crear_usuario, db: Session, mailer):
@@ -236,3 +240,108 @@ def test_logout_disponible_con_debe_cambiar_password(client: TestClient, crear_u
     login(client, "wen")
     respuesta = client.post(f"{API}/auth/logout", headers={"X-Requested-With": "fetch"})
     assert respuesta.status_code == 204
+
+
+# --- Límite del cambio de contraseña y enlaces pendientes ---------------------
+
+def test_cambiar_password_limita_intentos_y_cierra_accesos(
+    client: TestClient, crear_usuario, db: Session
+):
+    crear_usuario("yoli")
+    token = token_de(client, "yoli")
+
+    def cambiar(token: str, actual: str):
+        return client.post(f"{API}/auth/cambiar-password", headers=bearer(token),
+                           json={"password_actual": actual, "password_nueva": NUEVA})
+
+    with time_machine.travel(ahora_utc(), tick=False) as reloj:
+        for _ in range(5):
+            respuesta = cambiar(token, "incorrecta-123")
+            assert respuesta.status_code == 400
+        fallos = list(db.scalars(
+            select(Auditoria).where(Auditoria.accion == "password_cambio_fallido")
+        ))
+        assert len(fallos) == 5 and all(f.username == "yoli" for f in fallos)
+        # Al quinto fallo se cierran los accesos (podría ser un access token robado).
+        assert client.get(f"{API}/auth/me", headers=bearer(token)).status_code == 401
+
+        # El dueño vuelve a entrar con su contraseña, pero el límite sigue 15 minutos.
+        nuevo = token_de(client, "yoli")
+        bloqueado = cambiar(nuevo, PASSWORD_PRUEBA)
+        assert bloqueado.status_code == 429
+        assert bloqueado.json()["detail"] == "Demasiados intentos. Vuelve a intentarlo en 15 minutos."
+        assert client.get(f"{API}/auth/me", headers=bearer(nuevo)).status_code == 200
+
+        reloj.shift(timedelta(minutes=15, seconds=1))
+        assert cambiar(nuevo, PASSWORD_PRUEBA).status_code == 200
+
+
+def test_cambiar_password_correcta_reinicia_el_contador(client: TestClient, crear_usuario):
+    crear_usuario("yoli2")
+    token = token_de(client, "yoli2")
+    for _ in range(4):
+        respuesta = client.post(f"{API}/auth/cambiar-password", headers=bearer(token),
+                                json={"password_actual": "incorrecta-1", "password_nueva": NUEVA})
+        assert respuesta.status_code == 400
+    # Contraseña actual correcta (aunque la nueva no cumpla la política): reinicia el contador.
+    debil = client.post(f"{API}/auth/cambiar-password", headers=bearer(token),
+                        json={"password_actual": PASSWORD_PRUEBA, "password_nueva": "corta"})
+    assert debil.status_code == 422
+    for _ in range(4):
+        respuesta = client.post(f"{API}/auth/cambiar-password", headers=bearer(token),
+                                json={"password_actual": "incorrecta-1", "password_nueva": NUEVA})
+        assert respuesta.status_code == 400
+    assert client.get(f"{API}/auth/me", headers=bearer(token)).status_code == 200
+
+
+def test_password_temporal_invalida_enlaces_pendientes(
+    client: TestClient, crear_usuario, auth, db: Session, mailer
+):
+    admin = auth("admin", username="jefa_reset")
+    usuario = crear_usuario("zoe")
+    token = _pedir_y_enviar(client, db, mailer, "zoe")
+    respuesta = client.post(f"{API}/usuarios/{usuario.id}/password-temporal", headers=admin,
+                            json={"password_temporal": "Temporal2026x"})
+    assert respuesta.status_code == 200, respuesta.text
+    restablecer = client.post(f"{API}/auth/restablecer", json={"token": token, "password": NUEVA})
+    assert restablecer.status_code == 400
+
+
+def test_cambio_de_correo_invalida_enlaces_pendientes(
+    client: TestClient, crear_usuario, auth, db: Session, mailer
+):
+    admin = auth("admin", username="jefa_correo")
+    usuario = crear_usuario("zoe2")
+    token = _pedir_y_enviar(client, db, mailer, "zoe2")
+    respuesta = client.patch(f"{API}/usuarios/{usuario.id}", headers=admin,
+                             json={"correo": "zoe2.nuevo@example.com"})
+    assert respuesta.status_code == 200, respuesta.text
+    restablecer = client.post(f"{API}/auth/restablecer", json={"token": token, "password": NUEVA})
+    assert restablecer.status_code == 400
+
+
+def test_cambiar_password_invalida_enlaces_pendientes(
+    client: TestClient, crear_usuario, db: Session, mailer
+):
+    crear_usuario("zoe3")
+    acceso = token_de(client, "zoe3")
+    token = _pedir_y_enviar(client, db, mailer, "zoe3")
+    cambio = client.post(f"{API}/auth/cambiar-password", headers=bearer(acceso),
+                         json={"password_actual": PASSWORD_PRUEBA, "password_nueva": NUEVA})
+    assert cambio.status_code == 200
+    restablecer = client.post(f"{API}/auth/restablecer",
+                              json={"token": token, "password": NUEVA + "z"})
+    assert restablecer.status_code == 400
+
+
+def test_limpieza_de_sesiones_y_enlaces_vencidos(client: TestClient, crear_usuario, db: Session, mailer):
+    from app.services import auth_service
+
+    crear_usuario("zoe4")
+    login(client, "zoe4")
+    _pedir_y_enviar(client, db, mailer, "zoe4")
+    assert auth_service.limpiar_vencidos(db) == (0, 0)  # aún vigentes
+    with time_machine.travel(ahora_utc() + timedelta(days=38)):
+        assert auth_service.limpiar_vencidos(db) == (1, 1)
+    assert db.scalar(select(func.count()).select_from(SesionRefresh)) == 0
+    assert db.scalar(select(func.count()).select_from(PasswordReset)) == 0

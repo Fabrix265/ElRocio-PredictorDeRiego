@@ -6,7 +6,7 @@ import logging
 
 from app.db.session import nueva_sesion
 from app.emails.smtp import Mailer, obtener_mailer
-from app.services import correo_service, rate_limit
+from app.services import auth_service, correo_service, rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +28,18 @@ def enviar_correos(mailer: Mailer | None = None) -> correo_service.ResultadoEnvi
 
 
 def limpiar_intentos() -> int:
-    """Borra los intentos de login/recuperación de más de 30 días."""
+    """Limpieza diaria: intentos de login/recuperación de más de 30 días, y sesiones de refresh y
+    enlaces de recuperación vencidos, revocados o usados hace más de 30 días."""
     db = nueva_sesion()
     try:
         borrados = rate_limit.limpiar_antiguos(db)
+        sesiones, enlaces = auth_service.limpiar_vencidos(db)
         db.commit()
     finally:
         db.close()
-    if borrados:
-        logger.info("Intentos de ingreso antiguos borrados: %s", borrados)
+    if borrados or sesiones or enlaces:
+        logger.info(
+            "Limpieza: %s intento(s), %s sesión(es) y %s enlace(s) de recuperación borrados",
+            borrados, sesiones, enlaces,
+        )
     return borrados

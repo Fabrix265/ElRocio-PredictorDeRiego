@@ -15,8 +15,9 @@ from app.core.config import settings
 from app.core.errores import CredencialesInvalidas, LimiteExcedido
 from app.core.security import ALGORITMO_JWT, crear_access_token
 from app.core.tiempo import ahora_utc
-from app.models import Auditoria, SesionRefresh
-from app.services import auth_service
+from app.core.security import hash_token
+from app.models import Auditoria, IntentoLogin, SesionRefresh
+from app.services import auth_service, rate_limit
 from app.services.contexto import ContextoPeticion
 from tests.conftest import API, CABECERA_FETCH, PASSWORD_PRUEBA, bearer, login, token_de
 
@@ -80,15 +81,30 @@ def test_login_incorrecto_y_enumeracion(client: TestClient, crear_usuario, db: S
         assert respuesta.status_code == 401
         assert respuesta.json() == {"detail": MENSAJE_CREDENCIALES}
         assert "set-cookie" not in respuesta.headers
-    motivos = {
-        a.username: a.detalle["motivo"]
-        for a in db.scalars(select(Auditoria).where(Auditoria.accion == "login_fallido"))
-    }
+    filas = list(db.scalars(select(Auditoria).where(Auditoria.accion == "login_fallido")))
+    motivos = {a.username: a.detalle["motivo"] for a in filas}
     assert motivos == {
         "beto": "password_incorrecta",
-        "no_existe": "usuario_inexistente",
+        None: "usuario_inexistente",  # nunca se guarda lo escrito (podría ser una contraseña)
         "inactivo": "usuario_inactivo",
     }
+    # Los intentos de usuarios existentes quedan a su nombre (usuario_id y rol).
+    assert all(a.usuario_id is not None and a.rol for a in filas if a.username)
+    assert not any("no_existe" in str(a.detalle) for a in filas)
+
+
+def test_texto_escrito_en_usuario_no_queda_en_la_bd(client: TestClient, db: Session):
+    """Si alguien escribe su contraseña en el campo usuario, no queda en auditoría ni en
+    intento_login (inmutable la primera, visible para admin y subgerente)."""
+    escrito = "MiClaveSecreta2026"
+    assert login(client, escrito, "x").status_code == 401
+    fila = db.scalars(select(Auditoria).where(Auditoria.accion == "login_fallido")).one()
+    assert fila.username is None and fila.usuario_id is None
+    intento = db.scalars(select(IntentoLogin)).one()
+    assert intento.username_intentado != escrito.lower()
+    assert len(intento.username_intentado) == 64  # HMAC-SHA256 en hex
+    # El conteo sigue funcionando con el valor protegido (mayúsculas y espacios normalizados).
+    assert rate_limit.clave_usuario(f" {escrito.upper()} ") == intento.username_intentado
 
 
 def test_bloqueo_429_tras_5_fallos_y_vuelve_a_los_15_minutos(client: TestClient, crear_usuario):
@@ -207,19 +223,90 @@ def test_refresh_sin_cookie_o_desconocida_da_401_y_borra_cookie(client: TestClie
     assert "Max-Age=0" in respuesta.headers["set-cookie"]
 
 
-def test_reuso_dentro_de_la_gracia_devuelve_un_sucesor(client: TestClient, crear_usuario):
+def _sesiones_activas(db: Session) -> int:
+    db.expire_all()
+    return db.scalar(
+        select(func.count()).select_from(SesionRefresh).where(
+            SesionRefresh.revocado_at.is_(None), SesionRefresh.reemplazado_por.is_(None)
+        )
+    )
+
+
+def test_reuso_dentro_de_la_gracia_devuelve_un_sucesor(client: TestClient, crear_usuario, db: Session):
+    """Respuesta perdida: el cliente reintenta con el token anterior y recibe un sucesor."""
     crear_usuario("ines")
     rt1 = login(client, "ines").cookies["rt"]
     with time_machine.travel(ahora_utc(), tick=False) as reloj:
-        rt2 = _refresh(client, rt1).cookies["rt"]
+        rt2 = _refresh(client, rt1).cookies["rt"]  # esta respuesta "se pierde"
         reloj.shift(timedelta(seconds=20))
-        otra_pestana = _refresh(client, rt1)
-        assert otra_pestana.status_code == 200
-        rt3 = otra_pestana.cookies["rt"]
+        reintento = _refresh(client, rt1)
+        assert reintento.status_code == 200
+        rt3 = reintento.cookies["rt"]
         assert rt3 not in (rt1, rt2)
-        # Ambas pestañas siguen con sesión válida.
-        assert _refresh(client, rt2).status_code == 200
-        assert _refresh(client, rt3).status_code == 200
+        assert _sesiones_activas(db) == 1  # nunca más de una hoja activa por familia
+        # El sucesor de gracia sigue rotando con normalidad.
+        rt4 = _refresh(client, rt3).cookies["rt"]
+        assert _refresh(client, rt4).status_code == 200
+
+
+def test_segundo_reuso_en_la_gracia_revoca_la_familia(client: TestClient, crear_usuario, db: Session):
+    crear_usuario("ines2")
+    rt1 = login(client, "ines2").cookies["rt"]
+    with time_machine.travel(ahora_utc(), tick=False) as reloj:
+        _refresh(client, rt1)
+        reloj.shift(timedelta(seconds=5))
+        primero = _refresh(client, rt1)
+        assert primero.status_code == 200
+        rt_gracia = primero.cookies["rt"]
+        reloj.shift(timedelta(seconds=5))
+        assert _refresh(client, rt1).status_code == 401  # la gracia ya se usó: es un robo
+        assert _refresh(client, rt_gracia).status_code == 401
+    db.expire_all()
+    assert all(s.revocado_at is not None for s in db.scalars(select(SesionRefresh)))
+
+
+def test_hoja_revocada_por_la_gracia_revoca_la_familia(client: TestClient, crear_usuario, db: Session):
+    """Ladrón y dueño con la misma familia: quien use la hoja que la gracia revocó la delata."""
+    crear_usuario("ines3")
+    rt1 = login(client, "ines3").cookies["rt"]
+    with time_machine.travel(ahora_utc(), tick=False) as reloj:
+        rt2 = _refresh(client, rt1).cookies["rt"]  # el dueño rota
+        reloj.shift(timedelta(seconds=10))
+        rt3 = _refresh(client, rt1).cookies["rt"]  # otro usa rt1 dentro de la gracia
+        assert _refresh(client, rt2).status_code == 401  # el dueño vuelve con rt2
+        assert _refresh(client, rt3).status_code == 401  # la familia quedó revocada
+    db.expire_all()
+    assert all(s.revocado_at is not None for s in db.scalars(select(SesionRefresh)))
+
+
+def test_varios_reusos_en_la_gracia_entregan_un_solo_sucesor(
+    client: TestClient, crear_usuario, db: Session
+):
+    crear_usuario("ines4")
+    rt1 = login(client, "ines4").cookies["rt"]
+    with time_machine.travel(ahora_utc(), tick=False):
+        _refresh(client, rt1)
+        estados = [_refresh(client, rt1).status_code for _ in range(5)]
+    assert estados == [200, 401, 401, 401, 401]
+    assert _sesiones_activas(db) == 0
+
+
+def test_sesion_se_desliza_con_tope_de_30_dias(client: TestClient, crear_usuario, db: Session):
+    crear_usuario("ines5")
+    inicio = ahora_utc()
+    with time_machine.travel(inicio, tick=False) as reloj:
+        rt = login(client, "ines5").cookies["rt"]
+        for _ in range(4):  # día 6, 12, 18, 24: cada uso extiende 7 días
+            reloj.shift(timedelta(days=6))
+            respuesta = _refresh(client, rt)
+            assert respuesta.status_code == 200
+            rt = respuesta.cookies["rt"]
+        ultima = db.scalars(
+            select(SesionRefresh).where(SesionRefresh.token_hash == hash_token(rt))
+        ).one()
+        assert ultima.expira_at <= inicio + timedelta(days=30, seconds=1)
+        reloj.shift(timedelta(days=6, seconds=1))  # día 30: tope absoluto desde el login
+        assert _refresh(client, rt).status_code == 401
 
 
 def test_reuso_fuera_de_la_gracia_revoca_la_familia(client: TestClient, crear_usuario, db: Session):
@@ -267,3 +354,54 @@ def test_logout_revoca_y_borra_cookie(client: TestClient, crear_usuario, db: Ses
     # Sin cookie también responde 204 (idempotente).
     client.cookies.clear()
     assert client.post(f"{API}/auth/logout", headers=CABECERA_FETCH).status_code == 204
+
+
+# --- Límite sin carreras ------------------------------------------------------
+
+def test_limite_resiste_intentos_simultaneos(engine):
+    """25 intentos a la vez (mismo usuario e IP), cada uno con commit real en su conexión y una
+    demora como la de argon2: no pasan más de 5 (antes pasaban ~13)."""
+    import threading
+    import time
+    import uuid
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import delete
+    from sqlalchemy.orm import Session as SesionOrm
+
+    from app.db.session import crear_engine
+    from app.models.enums import TipoIntento
+    from tests.conftest import TEST_DATABASE_URL
+
+    usuario = f"carrera_{uuid.uuid4().hex[:8]}"
+    ip = "10.66.0.1"
+    hilos = 25
+    barrera = threading.Barrier(hilos)
+    motor = crear_engine(TEST_DATABASE_URL, modo_pool="null")
+
+    def intentar() -> bool:
+        with SesionOrm(motor, expire_on_commit=False) as sesion:
+            barrera.wait()
+            try:
+                rate_limit.reservar(sesion, TipoIntento.login, usuario=usuario, ip=ip)
+            except LimiteExcedido:
+                return False
+            time.sleep(0.3)  # verificación de la contraseña (argon2)
+            return True  # contraseña incorrecta: el intento queda como fallo
+
+    try:
+        with ThreadPoolExecutor(max_workers=hilos) as ejecutor:
+            resultados = list(ejecutor.map(lambda _i: intentar(), range(hilos)))
+        assert 1 <= sum(resultados) <= 5, resultados
+        with SesionOrm(motor) as sesion:
+            fallos = sesion.scalar(
+                select(func.count()).select_from(IntentoLogin).where(
+                    IntentoLogin.username_intentado == rate_limit.clave_usuario(usuario)
+                )
+            )
+        assert fallos == sum(resultados)  # los rechazados no quedan registrados
+    finally:
+        with SesionOrm(motor) as sesion:
+            sesion.execute(delete(IntentoLogin).where(IntentoLogin.ip == ip))
+            sesion.commit()
+        motor.dispose()

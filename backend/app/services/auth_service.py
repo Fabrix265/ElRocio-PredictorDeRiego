@@ -2,11 +2,15 @@
 
 - Refresh token opaco en cookie ``rt``; en la BD solo su SHA-256 (``sesion_refresh``). Cada uso lo
   rota dentro de su ``familia``. Reusar uno ya reemplazado:
-  - dentro de :data:`GRACIA_REUSO` (dos pestañas que refrescan a la vez) se entrega un sucesor
-    nuevo de la misma familia;
-  - fuera de ese plazo se considera robado y se revoca toda la familia.
-- Desactivar, cambiar rol o contraseña: ``token_version + 1`` (invalida los access token) y
-  revocación de todas las sesiones del usuario.
+  - dentro de :data:`GRACIA_REUSO` (respuesta perdida, o dos pestañas sin el candado del
+    frontend) se entrega **una sola vez** un sucesor nuevo y se revocan las demás hojas activas
+    de la familia (nunca hay más de una);
+  - un segundo reuso, o uno fuera de ese plazo, se considera robo y se revoca toda la familia;
+  - usar un token revocado mientras su familia sigue activa (la hoja que la gracia dejó sin
+    efecto) también revoca la familia.
+  La sesión se desliza 7 días con cada uso, con un tope de :data:`TOPE_SESION` desde el login.
+- Desactivar, cambiar rol o contraseña: ``token_version + 1`` (invalida los access token),
+  revocación de todas las sesiones y de los enlaces de recuperación pendientes.
 """
 
 from __future__ import annotations
@@ -14,9 +18,9 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -42,6 +46,8 @@ from app.services.contexto import ContextoPeticion
 logger = logging.getLogger(__name__)
 
 GRACIA_REUSO = timedelta(seconds=30)
+TOPE_SESION = timedelta(days=30)  # duración máxima de una familia desde el login
+RETENCION_LIMPIEZA = timedelta(days=30)
 MENSAJE_ENLACE_INVALIDO = "El enlace no es válido o ya venció."
 ASUNTO_RECUPERACION = "Restablece tu contraseña - Sistema de Plan de Riego"
 
@@ -62,6 +68,18 @@ def validar_politica(password: str, username: str | None) -> None:
 
 # --- Sesiones -----------------------------------------------------------------
 
+def _vencimiento(db: Session, familia: uuid.UUID | None) -> datetime:
+    """Vencimiento de una sesión nueva: 7 días desde ahora, sin pasar el tope de la familia."""
+    vence = ahora_utc() + timedelta(days=settings.refresh_token_days)
+    if familia is not None:
+        inicio = db.scalar(
+            select(func.min(SesionRefresh.created_at)).where(SesionRefresh.familia == familia)
+        )
+        if inicio is not None:
+            vence = min(vence, inicio + TOPE_SESION)
+    return vence
+
+
 def _nueva_sesion_refresh(
     db: Session, usuario: Usuario, contexto: ContextoPeticion, familia: uuid.UUID | None = None
 ) -> tuple[SesionRefresh, str]:
@@ -70,7 +88,8 @@ def _nueva_sesion_refresh(
         usuario_id=usuario.id,
         token_hash=hash_token(token),
         familia=familia or uuid.uuid4(),
-        expira_at=ahora_utc() + timedelta(days=settings.refresh_token_days),
+        expira_at=_vencimiento(db, familia),
+        created_at=ahora_utc(),  # reloj de la app (base del tope de la familia)
         ip=contexto.ip,
         user_agent=contexto.user_agent,
     )
@@ -105,16 +124,51 @@ def _revocar_familia(db: Session, familia: uuid.UUID) -> None:
     )
 
 
+def _familia_activa(db: Session, familia: uuid.UUID) -> bool:
+    return bool(db.scalar(select(exists().where(
+        SesionRefresh.familia == familia,
+        SesionRefresh.revocado_at.is_(None),
+        SesionRefresh.expira_at > ahora_utc(),
+    ))))
+
+
+def _revocar_hojas(db: Session, familia: uuid.UUID) -> None:
+    """Revoca las sesiones vigentes (no reemplazadas) de la familia."""
+    db.execute(
+        update(SesionRefresh)
+        .where(
+            SesionRefresh.familia == familia,
+            SesionRefresh.revocado_at.is_(None),
+            SesionRefresh.reemplazado_por.is_(None),
+        )
+        .values(revocado_at=ahora_utc())
+        .execution_options(synchronize_session=False)
+    )
+
+
+def invalidar_resets(db: Session, usuario_id: int) -> None:
+    """Deja sin efecto los enlaces de recuperación pendientes del usuario."""
+    db.execute(
+        update(PasswordReset)
+        .where(PasswordReset.usuario_id == usuario_id, PasswordReset.usado_at.is_(None))
+        .values(usado_at=ahora_utc())
+        .execution_options(synchronize_session=False)
+    )
+
+
 def invalidar_accesos(db: Session, usuario: Usuario) -> None:
-    """``token_version + 1`` y revocación de todas sus sesiones (efecto inmediato)."""
+    """``token_version + 1``, revocación de todas sus sesiones y de los enlaces de recuperación
+    pendientes (efecto inmediato)."""
     usuario.token_version = (usuario.token_version or 0) + 1
     revocar_sesiones(db, usuario.id)
+    invalidar_resets(db, usuario.id)
 
 
 # --- Login --------------------------------------------------------------------
 
 def login(db: Session, username: str, password: str, contexto: ContextoPeticion) -> SesionEmitida:
-    rate_limit.verificar(db, TipoIntento.login, usuario=username, ip=contexto.ip)
+    # Se registra (como fallo) antes de verificar: los intentos simultáneos se cuentan entre sí.
+    intento = rate_limit.reservar(db, TipoIntento.login, usuario=username, ip=contexto.ip)
 
     usuario = repo_usuarios.por_username(db, username) if username.strip() else None
     if usuario is None:
@@ -131,13 +185,14 @@ def login(db: Session, username: str, password: str, contexto: ContextoPeticion)
             motivo = "password_incorrecta"
         else:
             motivo = "usuario_inactivo"
-        rate_limit.registrar(db, TipoIntento.login, usuario=username, ip=contexto.ip, exito=False)
+        # Nunca se guarda el texto escrito si el usuario no existe (podría ser una contraseña);
+        # si existe, el intento queda a su nombre (el filtro por usuario lo muestra).
         auditoria.registrar(
             db,
             accion=auditoria.LOGIN_FALLIDO,
             entidad=auditoria.ENTIDAD_USUARIO,
             entidad_id=usuario.id if usuario else None,
-            actor_username=username.strip()[:60] or None,
+            actor=usuario,
             detalle={"motivo": motivo},
             contexto=contexto,
         )
@@ -147,7 +202,7 @@ def login(db: Session, username: str, password: str, contexto: ContextoPeticion)
     if necesita_rehash(usuario.password_hash):
         usuario.password_hash = hash_password(password)
     usuario.ultimo_acceso_at = ahora_utc()
-    rate_limit.registrar(db, TipoIntento.login, usuario=username, ip=contexto.ip, exito=True)
+    rate_limit.marcar_exito(db, intento)
     sesion = emitir_sesion(db, usuario, contexto)
     auditoria.registrar(
         db, accion=auditoria.LOGIN, entidad=auditoria.ENTIDAD_USUARIO, entidad_id=usuario.id,
@@ -171,7 +226,18 @@ def _sesion_por_token(db: Session, token: str | None, *, bloquear: bool) -> Sesi
 def refrescar(db: Session, token: str | None, contexto: ContextoPeticion) -> SesionEmitida:
     sesion = _sesion_por_token(db, token, bloquear=True)
     ahora = ahora_utc()
-    if sesion is None or sesion.revocado_at is not None or sesion.expira_at <= ahora:
+    if sesion is None or sesion.expira_at <= ahora:
+        raise NoAutenticado()
+    if sesion.revocado_at is not None:
+        # Solo la gracia revoca una hoja dejando viva la familia: si esa hoja aparece, hay dos
+        # poseedores de la familia (uno es un ladrón) y se revoca toda.
+        if _familia_activa(db, sesion.familia):
+            logger.warning(
+                "Uso de un refresh token revocado con la familia activa: se revoca la familia "
+                "(usuario %s)", sesion.usuario_id,
+            )
+            _revocar_familia(db, sesion.familia)
+            db.commit()
         raise NoAutenticado()
 
     usuario = repo_usuarios.por_id(db, sesion.usuario_id)
@@ -181,8 +247,12 @@ def refrescar(db: Session, token: str | None, contexto: ContextoPeticion) -> Ses
         raise NoAutenticado()
 
     if sesion.reemplazado_por is not None:
-        if sesion.reemplazado_at is not None and ahora - sesion.reemplazado_at <= GRACIA_REUSO:
-            # Otra pestaña ya lo rotó hace instantes: se entrega un sucesor de la misma familia.
+        en_gracia = sesion.reemplazado_at is not None and ahora - sesion.reemplazado_at <= GRACIA_REUSO
+        if en_gracia and sesion.gracia_usada_at is None:
+            # Se rotó hace instantes y la respuesta no llegó (o dos pestañas a la vez): un único
+            # sucesor nuevo, y la hoja anterior queda revocada (una sola hoja activa por familia).
+            _revocar_hojas(db, sesion.familia)
+            sesion.gracia_usada_at = ahora
             emitida = emitir_sesion(db, usuario, contexto, sesion.familia)
             usuario.ultimo_acceso_at = ahora
             db.commit()
@@ -219,8 +289,7 @@ def logout(db: Session, token: str | None, contexto: ContextoPeticion) -> None:
 
 def solicitar_recuperacion(db: Session, identificador: str, contexto: ContextoPeticion) -> None:
     """Siempre responde igual (el endpoint devuelve 202 exista o no el usuario)."""
-    rate_limit.verificar(db, TipoIntento.recuperar, usuario=identificador, ip=contexto.ip)
-    rate_limit.registrar(db, TipoIntento.recuperar, usuario=identificador, ip=contexto.ip, exito=True)
+    rate_limit.reservar(db, TipoIntento.recuperar, usuario=identificador, ip=contexto.ip, exito=True)
     usuario = repo_usuarios.por_identificador(db, identificador) if identificador.strip() else None
     if usuario is not None and usuario.activo and usuario.correo:
         # Solo el usuario: el token se genera al enviar (nunca queda en la cola).
@@ -231,15 +300,17 @@ def solicitar_recuperacion(db: Session, identificador: str, contexto: ContextoPe
             usuario_id=usuario.id,
             contexto={"ip": contexto.ip} if contexto.ip else {},
         )
+        # La petición es anónima (cualquiera puede pedirla): sin actor; el usuario va en
+        # entidad_id y el origen en la IP.
         auditoria.registrar(
             db, accion=auditoria.RECUPERAR_SOLICITADO, entidad=auditoria.ENTIDAD_USUARIO,
-            entidad_id=usuario.id, actor=usuario, contexto=contexto,
+            entidad_id=usuario.id, contexto=contexto,
         )
     db.commit()
 
 
 def restablecer(db: Session, token: str, password: str, contexto: ContextoPeticion) -> None:
-    rate_limit.verificar(db, TipoIntento.restablecer, usuario=None, ip=contexto.ip)
+    intento = rate_limit.reservar(db, TipoIntento.restablecer, usuario=None, ip=contexto.ip)
     ahora = ahora_utc()
     reset = db.scalars(
         select(PasswordReset).where(PasswordReset.token_hash == hash_token(token)).with_for_update()
@@ -249,7 +320,6 @@ def restablecer(db: Session, token: str, password: str, contexto: ContextoPetici
         reset is None or reset.usado_at is not None or reset.expira_at <= ahora
         or usuario is None or not usuario.activo
     ):
-        rate_limit.registrar(db, TipoIntento.restablecer, usuario=None, ip=contexto.ip, exito=False)
         db.commit()
         raise SolicitudInvalida(MENSAJE_ENLACE_INVALIDO)
 
@@ -257,22 +327,15 @@ def restablecer(db: Session, token: str, password: str, contexto: ContextoPetici
     try:
         validar_politica(password, usuario.username)
     except DatosInvalidos:
-        rate_limit.registrar(db, TipoIntento.restablecer, usuario=None, ip=contexto.ip, exito=False)
         db.commit()
         raise
 
     reset.usado_at = ahora
-    db.execute(
-        update(PasswordReset)
-        .where(PasswordReset.usuario_id == usuario.id, PasswordReset.usado_at.is_(None))
-        .values(usado_at=ahora)
-        .execution_options(synchronize_session=False)
-    )
     usuario.password_hash = hash_password(password)
     usuario.password_cambiada_at = ahora
     usuario.debe_cambiar_password = False
-    invalidar_accesos(db, usuario)
-    rate_limit.registrar(db, TipoIntento.restablecer, usuario=None, ip=contexto.ip, exito=True)
+    invalidar_accesos(db, usuario)  # también consume los demás enlaces pendientes
+    rate_limit.marcar_exito(db, intento)
     auditoria.registrar(
         db, accion=auditoria.PASSWORD_RESTABLECIDO, entidad=auditoria.ENTIDAD_USUARIO,
         entidad_id=usuario.id, actor=usuario, contexto=contexto,
@@ -282,12 +345,33 @@ def restablecer(db: Session, token: str, password: str, contexto: ContextoPetici
 
 # --- Cambio de contraseña -----------------------------------------------------
 
+def _clave_cambio(usuario: Usuario) -> str:
+    """Clave del límite de cambio de contraseña: por usuario (id), no por nombre."""
+    return f"usuario:{usuario.id}"
+
+
 def cambiar_password(
     db: Session, usuario: Usuario, password_actual: str, password_nueva: str,
     contexto: ContextoPeticion,
 ) -> SesionEmitida:
+    clave = _clave_cambio(usuario)
+    intento = rate_limit.reservar(db, TipoIntento.cambiar_password, usuario=clave, ip=contexto.ip)
     if not verificar_password(password_actual, usuario.password_hash):
+        auditoria.registrar(
+            db, accion=auditoria.PASSWORD_CAMBIO_FALLIDO, entidad=auditoria.ENTIDAD_USUARIO,
+            entidad_id=usuario.id, actor=usuario, detalle={"motivo": "password_actual_incorrecta"},
+            contexto=contexto,
+        )
+        if rate_limit.limite_alcanzado(
+            db, TipoIntento.cambiar_password, usuario=clave, ip=contexto.ip
+        ):
+            # Al llegar al límite puede tratarse de un access token robado: se cierran todos los
+            # accesos (el dueño vuelve a ingresar con su contraseña, que sigue igual).
+            invalidar_accesos(db, usuario)
+        db.commit()
         raise SolicitudInvalida("La contraseña actual no es correcta.")
+    rate_limit.marcar_exito(db, intento)
+    db.commit()
     if password_actual == password_nueva:
         raise DatosInvalidos("La nueva contraseña debe ser distinta de la actual.")
     validar_politica(password_nueva, usuario.username)
@@ -303,3 +387,24 @@ def cambiar_password(
     )
     db.commit()
     return sesion
+
+
+# --- Mantenimiento ------------------------------------------------------------
+
+def limpiar_vencidos(db: Session) -> tuple[int, int]:
+    """Borra sesiones y enlaces de recuperación vencidos, revocados o usados hace más de 30 días.
+
+    Devuelve ``(sesiones, enlaces)`` borrados (el commit lo hace quien llama).
+    """
+    limite = ahora_utc() - RETENCION_LIMPIEZA
+    sesiones = db.execute(
+        delete(SesionRefresh).where(
+            or_(SesionRefresh.expira_at < limite, SesionRefresh.revocado_at < limite)
+        )
+    ).rowcount or 0
+    enlaces = db.execute(
+        delete(PasswordReset).where(
+            or_(PasswordReset.expira_at < limite, PasswordReset.usado_at < limite)
+        )
+    ).rowcount or 0
+    return sesiones, enlaces

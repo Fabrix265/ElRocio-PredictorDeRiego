@@ -1,7 +1,8 @@
 """Programador de tareas (APScheduler 3, zona de Lima).
 
 - ``enviar_correos`` cada 30 s.
-- ``limpiar_intentos`` todos los días a las 03:15 (hora de Lima).
+- ``limpiar_intentos`` todos los días a las 03:15 (hora de Lima): intentos de ingreso, sesiones
+  de refresh y enlaces de recuperación antiguos.
 
 ``coalesce`` y ``max_instances=1``: si una corrida se atrasa no se acumulan ejecuciones. Entre
 procesos, la cola de correos se reparte con ``FOR UPDATE SKIP LOCKED`` (no hay candados de sesión,
@@ -33,7 +34,7 @@ def configurar(programador: BaseScheduler) -> BaseScheduler:
     )
     programador.add_job(
         tareas.limpiar_intentos, "cron", hour=3, minute=15,
-        id="limpiar_intentos", name="Borrar intentos de ingreso antiguos", replace_existing=True,
+        id="limpiar_intentos", name="Borrar intentos, sesiones y enlaces antiguos", replace_existing=True,
     )
     return programador
 

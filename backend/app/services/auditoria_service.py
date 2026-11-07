@@ -28,6 +28,7 @@ LOGOUT = "logout"
 RECUPERAR_SOLICITADO = "recuperar_solicitado"
 PASSWORD_RESTABLECIDO = "password_restablecido"
 PASSWORD_CAMBIADO = "password_cambiado"
+PASSWORD_CAMBIO_FALLIDO = "password_cambio_fallido"
 USUARIO_CREADO = "usuario_creado"
 USUARIO_EDITADO = "usuario_editado"
 ROL_CAMBIADO = "rol_cambiado"
@@ -37,6 +38,7 @@ PASSWORD_TEMPORAL_ASIGNADO = "password_temporal_asignado"
 
 ACCIONES = (
     LOGIN, LOGIN_FALLIDO, LOGOUT, RECUPERAR_SOLICITADO, PASSWORD_RESTABLECIDO, PASSWORD_CAMBIADO,
+    PASSWORD_CAMBIO_FALLIDO,
     USUARIO_CREADO, USUARIO_EDITADO, ROL_CAMBIADO, USUARIO_DESACTIVADO, USUARIO_ACTIVADO,
     PASSWORD_TEMPORAL_ASIGNADO,
 )
@@ -103,7 +105,8 @@ def registrar(
     """Agrega una fila de auditoría a la sesión (el commit lo hace quien llama).
 
     ``actor`` es el usuario que hace la acción; sin actor se usa ``actor_username``
-    (p. ej. "sistema" para la CLI, o el usuario intentado en un login fallido).
+    (p. ej. "sistema" para la CLI). Nunca pasar texto escrito por un anónimo (un login fallido
+    de un usuario inexistente se audita sin usuario).
     """
     contexto = contexto or ContextoPeticion()
     fila = Auditoria(
