@@ -59,8 +59,9 @@ VARIABLES = list(RANGOS)
 COLUMNAS_DIARIAS = [
     "T_media", "T_max", "T_min", "HR_media", "HR_min", "HR_max", "ETo_mm",
     "DPV_media", "DPV_max", "Viento_media", "Lluvia_mm", "Rad_max", "Rad_media",
-    "meteo_lecturas",
+    "horas_T30", "meteo_lecturas",
 ]
+UMBRAL_CALOR = 30.0  # °C
 
 
 def leer_meteo(path: str | Path, header: int = 2) -> tuple[pd.DataFrame, dict]:
@@ -121,6 +122,8 @@ def meteo_diaria(lecturas: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             "Lluvia_mm": grupos["Lluvia"].sum(),
             "Rad_max": grupos["Rad"].max(),
             "Rad_media": grupos["Rad"].mean(),
+            # Horas del día con temperatura sobre el umbral (lecturas de 30 min).
+            "horas_T30": df.assign(_c=df["T"] > UMBRAL_CALOR).groupby(["Fundo", "Fecha"])["_c"].sum() * 0.5,
             "meteo_lecturas": grupos["T"].size(),
         }
     )
@@ -128,7 +131,7 @@ def meteo_diaria(lecturas: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         "T_media": "T", "T_max": "T_max", "T_min": "T_min", "HR_media": "HR",
         "HR_min": "HR", "HR_max": "HR_max", "ETo_mm": "ETo", "DPV_media": "DPV",
         "DPV_max": "DPV", "Viento_media": "Viento", "Lluvia_mm": "Lluvia",
-        "Rad_max": "Rad", "Rad_media": "Rad",
+        "Rad_max": "Rad", "Rad_media": "Rad", "horas_T30": "T",
     }
     incompletos = 0
     for destino, fuente in origen.items():

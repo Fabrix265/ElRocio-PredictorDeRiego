@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 from riego_ml.sources.meteo import COLUMNAS_DIARIAS, leer_meteo, meteo_diaria
+from riego_ml.sources.ndvi import leer_ndvi
 from riego_ml.sources.phytech import PLANTA_VARS, columnas_suelo_diario, leer_phytech
 from riego_ml.sources.riego import leer_riego
 
@@ -30,11 +31,13 @@ class DatasetUnido:
 
 
 def columnas_ambiente() -> list[str]:
-    return [*COLUMNAS_DIARIAS, *columnas_suelo_diario(), *PLANTA_VARS]
+    return [*COLUMNAS_DIARIAS, *columnas_suelo_diario(), *PLANTA_VARS, "ndvi_medio"]
 
 
-def construir_ambiente_diario(meteo: pd.DataFrame, phytech: pd.DataFrame, fundos: list[str]) -> pd.DataFrame:
-    """Calendario diario continuo por fundo con meteo + Phytech."""
+def construir_ambiente_diario(
+    meteo: pd.DataFrame, phytech: pd.DataFrame, ndvi: pd.DataFrame, fundos: list[str]
+) -> pd.DataFrame:
+    """Calendario diario continuo por fundo con meteo + Phytech + NDVI."""
     fechas = pd.concat([meteo["Fecha"], phytech["Fecha"]])
     calendario = pd.MultiIndex.from_product(
         [fundos, pd.date_range(fechas.min(), fechas.max(), freq="D")], names=CLAVES_DIA
@@ -42,6 +45,7 @@ def construir_ambiente_diario(meteo: pd.DataFrame, phytech: pd.DataFrame, fundos
     ambiente = (
         calendario.merge(meteo, on=CLAVES_DIA, how="left", validate="one_to_one")
         .merge(phytech, on=CLAVES_DIA, how="left", validate="one_to_one")
+        .merge(ndvi, on=CLAVES_DIA, how="left", validate="one_to_one")
     )
     ambiente["tiene_meteo"] = ambiente["T_media"].notna().astype(int)
     ambiente["tiene_suelo"] = ambiente["suelo_horas"].notna().astype(int)
@@ -55,6 +59,9 @@ def unir_fuentes(
     ruta_phytech: Path,
     hoja_riego: str = "MOD5",
     phytech_project_id: int = 907557,
+    carpeta_phytech_crudo: Path | None = None,
+    phytech_area_id: int = 12537,
+    phytech_plot_id: int = 70208,
 ) -> DatasetUnido:
     diag: dict = {}
     riego, d = leer_riego(ruta_riego, hoja_riego)
@@ -65,6 +72,13 @@ def unir_fuentes(
     diag.update(d)
     phytech, d = leer_phytech(ruta_phytech, phytech_project_id)
     diag.update(d)
+    fundo = sorted(set(riego["Fundo"].dropna()))[0]
+    if carpeta_phytech_crudo is not None and Path(carpeta_phytech_crudo).exists():
+        ndvi, d = leer_ndvi(carpeta_phytech_crudo, phytech_area_id, phytech_plot_id, fundo)
+    else:
+        ndvi, d = pd.DataFrame(columns=CLAVES_DIA + ["ndvi_medio"]), {"NDVI": "carpeta no encontrada"}
+    ndvi["Fecha"] = pd.to_datetime(ndvi["Fecha"])
+    diag.update(d)
 
     fundos_riego = set(riego["Fundo"].dropna())
     for nombre, tabla in (("meteo", meteo), ("phytech", phytech)):
@@ -72,7 +86,7 @@ def unir_fuentes(
         if sin_cruce:
             raise ValueError(f"Fundos de riego sin datos de {nombre}: {sorted(sin_cruce)}")
 
-    ambiente = construir_ambiente_diario(meteo, phytech, sorted(fundos_riego))
+    ambiente = construir_ambiente_diario(meteo, phytech, ndvi, sorted(fundos_riego))
     unido = riego.merge(ambiente, on=CLAVES_DIA, how="left", validate="many_to_one")
 
     dias_riego = unido.drop_duplicates(CLAVES_DIA)
@@ -101,5 +115,8 @@ DICCIONARIO = {
     "hum_zona_radicular_* / hum_linea_estres_*": "Humedad de zona radicular y línea de estrés de Phytech.",
     "mds_contraccion_um": "Máxima contracción diaria del tronco (µm).",
     "crecimiento_tronco_um / estres_planta_ps": "Crecimiento del tronco (µm) e índice de estrés de Phytech.",
+    "hum_<prof>cm_rango": "Máx - mín de la humedad en el día (respuesta del suelo al riego).",
+    "horas_T30": "Horas del día con temperatura > 30 °C.",
+    "ndvi_medio": "NDVI medio del plot (imagen satelital de Phytech, cada ~10 días).",
     "tiene_meteo / tiene_suelo / tiene_planta": "1 si ese día hay dato de la fuente.",
 }

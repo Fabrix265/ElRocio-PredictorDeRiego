@@ -6,6 +6,7 @@ rutas:
   riego: ml/data/raw/data_riego.xlsx
   meteo: ml/data/raw/data_metereologica.xlsx
   phytech: ml/data/raw/data_phytech.xlsx
+  phytech_crudo: ml/data/raw/phytech/completo   # para NDVI
   interim_dir: ml/data/interim         # paso 1: dataset unido
   processed_dir: ml/data/processed     # paso 2: tablas listas para entrenar
   modelos_dir: ml/models
@@ -14,6 +15,8 @@ rutas:
 fuentes:
   hoja_riego: MOD5
   phytech_project_id: 907557           # sensor Phytech del plot ENSUEÑO 1
+  phytech_area_id: 12537
+  phytech_plot_id: 70208
 
 preparacion:
   desde: null                          # YYYY-MM-DD, recorta el histórico de entrenamiento
@@ -22,6 +25,7 @@ preparacion:
   min_riego_m3ha: 2.0                  # ciclos con menos m3/ha = apertura fallida
   incluir_meteo_dia: false             # true solo si en producción habrá pronóstico del día
   usar_suelo_absoluto: false           # niveles de humedad del sensor: cambian de régimen entre temporadas
+  features_extendidas: true            # rotación de turnos, balance hídrico, estabilidad, NDVI, feriados...
 
 split:                                 # temporal: train -> validación -> test
   test: 0.20

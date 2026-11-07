@@ -28,12 +28,15 @@ class Rutas:
     processed_dir: Path
     modelos_dir: Path
     reportes_dir: Path
+    phytech_crudo: Path | None = None
 
 
 @dataclass
 class Fuentes:
     hoja_riego: str = "MOD5"
     phytech_project_id: int = 907557
+    phytech_area_id: int = 12537
+    phytech_plot_id: int = 70208
 
 
 @dataclass
@@ -44,6 +47,7 @@ class Preparacion:
     min_riego_m3ha: float = 2.0
     incluir_meteo_dia: bool = False
     usar_suelo_absoluto: bool = False
+    features_extendidas: bool = True
 
 
 @dataclass

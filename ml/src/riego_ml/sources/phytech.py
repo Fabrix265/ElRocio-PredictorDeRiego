@@ -26,10 +26,14 @@ SUELO_VARS = [*HUM_COLS, "hum_zona_radicular", "hum_linea_estres"]
 PLANTA_VARS = ["mds_contraccion_um", "crecimiento_tronco_um", "estres_planta_ps"]
 
 
+RANGO_VARS = ["hum_45cm", "hum_60cm"]
+
+
 def columnas_suelo_diario() -> list[str]:
     return [
         *[f"{c}_media" for c in SUELO_VARS],
         *[f"{c}_cierre" for c in SUELO_VARS],
+        *[f"{c}_rango" for c in RANGO_VARS],
         "suelo_horas",
     ]
 
@@ -55,8 +59,12 @@ def leer_phytech(path: str | Path, project_id: int = PROJECT_ID_DEFAULT) -> tupl
         .mean()
         .add_suffix("_cierre")
     )
+    # Rango diario (máx - mín): cuánto respondió el suelo al riego del día. Es
+    # relativo, por lo que no le afectan las recalibraciones del sensor.
+    grupos = horario.groupby(claves)[RANGO_VARS]
+    rango = (grupos.max() - grupos.min()).add_suffix("_rango")
     horas = horario.groupby(claves).size().rename("suelo_horas")
-    suelo = pd.concat([media, cierre, horas], axis=1).reset_index()
+    suelo = pd.concat([media, cierre, rango, horas], axis=1).reset_index()
 
     planta = pd.read_excel(path, sheet_name="Planta_diario")
     planta = planta[planta["project_id"] == project_id].copy()

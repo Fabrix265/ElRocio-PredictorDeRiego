@@ -39,3 +39,16 @@ def test_fecha_futura_sin_historial_del_dia():
     f = construir_features_turno(claves, turno_dia, ambiente).iloc[0]
     assert f["prev_riego_total_m3ha"] == 9.0
     assert f["ETo_mm_d1"] == 9.0
+
+
+def test_rotacion_y_estabilidad_usan_el_dia_anterior():
+    turno_dia, ambiente = _datos()
+    otro = turno_dia.assign(Turno="TE02", inicio_primer_min=500.0)   # TE02 arranca después que TE01
+    td = pd.concat([turno_dia, otro], ignore_index=True)
+    f = construir_features_turno(td[["Fecha", "Fundo", "Modulo", "Turno"]], td, ambiente)
+    dia = f[(f["Fecha"] == "2024-01-06") & (f["Turno"] == "TE02")].iloc[0]
+    assert dia["orden_arranque_d1"] == 2
+    assert dia["desfase_modulo_d1"] == 200.0
+    assert dia["inicio_modulo_d1"] == 300.0
+    # n_ciclos = 1,2,3,1,2,... cambia todos los días
+    assert dia["dias_desde_cambio_n"] == 1

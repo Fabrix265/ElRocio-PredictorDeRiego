@@ -38,6 +38,9 @@ def ejecutar(config: Config) -> dict:
         rutas.phytech,
         hoja_riego=config.fuentes.hoja_riego,
         phytech_project_id=config.fuentes.phytech_project_id,
+        carpeta_phytech_crudo=rutas.phytech_crudo,
+        phytech_area_id=config.fuentes.phytech_area_id,
+        phytech_plot_id=config.fuentes.phytech_plot_id,
     )
     salida = rutas.interim_dir
     salida.mkdir(parents=True, exist_ok=True)

@@ -16,8 +16,8 @@ import pandas as pd
 from riego_ml.config import Config
 from riego_ml.dataset.features import (
     CATEGORICAS,
-    FEATURES_SOLO_CICLO,
     columnas_features,
+    features_solo_ciclo,
     construir_features_ciclo,
     construir_features_turno,
     suelo_absoluto,
@@ -82,7 +82,8 @@ def preparar_entrenamiento(historial: Historial, config: Config) -> DatasetEntre
     feats_turno = construir_features_turno(
         td_obs[CLAVES_TD], td_obs, historial.ambiente, prep.incluir_meteo_dia
     )
-    features_turno = columnas_features(feats_turno, prep.usar_suelo_absoluto)
+    features_turno = columnas_features(feats_turno, prep.usar_suelo_absoluto, prep.features_extendidas)
+    todas_turno = columnas_features(feats_turno, prep.usar_suelo_absoluto, True)
 
     turno_dia = td_obs.merge(feats_turno, on=CLAVES_TD, how="left", validate="one_to_one")
     turno_dia = _filtrar_fechas(turno_dia, prep.desde, prep.hasta)
@@ -93,7 +94,7 @@ def preparar_entrenamiento(historial: Historial, config: Config) -> DatasetEntre
         td_obs[[*CLAVES_TD, "dia_incompleto"]], on=CLAVES_TD, how="left", validate="many_to_one"
     )
     ciclos = _filtrar_fechas(ciclos, prep.desde, prep.hasta)
-    features_ciclo = [*features_turno, *FEATURES_SOLO_CICLO]
+    features_ciclo = [*features_turno, *features_solo_ciclo(prep.features_extendidas)]
 
     columnas = {
         "claves": CLAVES_TD,
@@ -105,13 +106,15 @@ def preparar_entrenamiento(historial: Historial, config: Config) -> DatasetEntre
         "observados_turno": OBSERVADOS_TURNO,
         "observados_ciclo": OBSERVADOS_CICLO,
         "derivados": ["duracion_min", "fin_min", "hora_inicio", "hora_fin"],
+        "features_extendidas": prep.features_extendidas,
         "excluidas_del_modelo": suelo_absoluto(list(feats_turno.columns)) if not prep.usar_suelo_absoluto else [],
     }
     diag = dict(historial.diagnostico)
     diag.update(_diagnostico(turno_dia, ciclos, features_turno))
     revision = columnas["excluidas_del_modelo"]
-    solo_features_turno = [c for c in [*features_turno, *revision] if c not in CLAVES_TD]
-    solo_features_ciclo = [c for c in FEATURES_SOLO_CICLO if c not in ("Ciclo", "n_ciclos")]
+    # Los CSV guardan todas las features; columnas.json decide cuáles usa el modelo.
+    solo_features_turno = [c for c in dict.fromkeys([*todas_turno, *revision]) if c not in CLAVES_TD]
+    solo_features_ciclo = [c for c in features_solo_ciclo(True) if c not in ("Ciclo", "n_ciclos")]
     return DatasetEntrenamiento(
         turno_dia[[*CLAVES_TD, *OBSERVADOS_TURNO, *solo_features_turno]],
         ciclos[[*CLAVES_TD, "Ciclo", "n_ciclos", *OBSERVADOS_CICLO, "dia_incompleto",
