@@ -43,6 +43,7 @@ class Preparacion:
     min_duracion_min: float = 5.0
     min_riego_m3ha: float = 2.0
     incluir_meteo_dia: bool = False
+    usar_suelo_absoluto: bool = False
 
 
 @dataclass
@@ -84,6 +85,7 @@ class Config:
     modelos: dict[str, ModeloConfig] = field(default_factory=dict)
     seed: int = 42
     excluir_dias_incompletos_eval: bool = True
+    incluir_persistencia: bool = True
     path: Path | None = None
 
     def modelos_habilitados(self) -> list[str]:
@@ -133,6 +135,7 @@ def load_config(path: str | Path | None = None) -> Config:
         modelos=modelos,
         seed=int(raw.get("seed", 42)),
         excluir_dias_incompletos_eval=bool(raw.get("excluir_dias_incompletos_eval", True)),
+        incluir_persistencia=bool(raw.get("incluir_persistencia", True)),
         path=config_path,
     )
     _validar(config)
