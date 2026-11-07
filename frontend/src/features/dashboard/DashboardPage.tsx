@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Activity, CalendarClock, CalendarDays, CloudSun, Droplet, Gauge, RefreshCcw, ThermometerSun, type LucideIcon } from "lucide-react";
+import { CalendarDays, CloudSun, RefreshCcw } from "lucide-react";
 
 import { Badge } from "../../components/ui/Badge";
 import { Card, CardBody, CardHeader } from "../../components/ui/Card";
@@ -8,21 +8,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { formatearFechaLarga, saludoLima } from "../../lib/fechas";
 import { useUsuario } from "../auth/AuthProvider";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
-
-interface Kpi {
-  titulo: string;
-  icono: LucideIcon;
-  fase: number;
-  unidad: string;
-}
-
-const KPIS: Kpi[] = [
-  { titulo: "Agua aplicada ayer", icono: Droplet, fase: 5, unidad: "m³/ha" },
-  { titulo: "Aplicado vs modelo", icono: Gauge, fase: 5, unidad: "%" },
-  { titulo: "MDS (contracción del tronco)", icono: Activity, fase: 5, unidad: "µm" },
-  { titulo: "ETo de ayer", icono: ThermometerSun, fase: 5, unidad: "mm" },
-  { titulo: "Estado de mañana", icono: CalendarClock, fase: 4, unidad: "" },
-];
+import { kpisParaRol, type Kpi } from "./kpis";
 
 function TarjetaKpi({ kpi }: { kpi: Kpi }) {
   const Icono = kpi.icono;
@@ -66,6 +52,8 @@ export function DashboardPage() {
   const { fundo, modulo } = useSeleccion();
   const nombre = usuario.nombre.trim().split(/\s+/)[0] || usuario.username;
   const contexto = [fundo?.nombre, modulo?.codigo].filter(Boolean).join(" · ");
+  const kpis = kpisParaRol(usuario.rol);
+  const soloPublicados = usuario.rol === "programador";
 
   return (
     <div className="flex flex-col gap-4">
@@ -75,8 +63,8 @@ export function DashboardPage() {
         descripcion={`${formatearFechaLarga()}${contexto ? ` · ${contexto}` : ""}`}
       />
 
-      <section aria-label="Indicadores" className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        {KPIS.map((kpi) => (
+      <section aria-label="Indicadores" className={`grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-3 ${kpis.length >= 5 ? "xl:grid-cols-5" : "xl:grid-cols-4"}`}>
+        {kpis.map((kpi) => (
           <TarjetaKpi key={kpi.titulo} kpi={kpi} />
         ))}
       </section>
@@ -86,7 +74,11 @@ export function DashboardPage() {
           titulo="Hoy y mañana"
           icono={<CalendarDays />}
           fase={3}
-          descripcion="Aquí verás el cronograma de hoy y el de mañana con su Gantt de ciclos, estado y versión."
+          descripcion={
+            soloPublicados
+              ? "Aquí verás el cronograma publicado de hoy y el de mañana con su Gantt de ciclos y versión."
+              : "Aquí verás el cronograma de hoy y el de mañana con su Gantt de ciclos, estado y versión."
+          }
         />
         <TarjetaPendiente
           titulo="Frescura de datos"

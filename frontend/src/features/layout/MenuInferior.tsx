@@ -4,6 +4,8 @@ import { useState } from "react";
 import { NavLink, useNavigate } from "react-router";
 
 import { cn } from "../../lib/cn";
+import { formatearFechaLarga, hoyLima } from "../../lib/fechas";
+import { useAhora } from "../../lib/useAhora";
 import { ETIQUETA_ROL } from "../../lib/roles";
 import { useAuth, useUsuario } from "../auth/AuthProvider";
 import { Avatar, Marca } from "./Marca";
@@ -20,6 +22,7 @@ export function MenuInferior() {
   const navigate = useNavigate();
   const [abierto, setAbierto] = useState(false);
   const atajos = itemsInferiores(usuario.rol);
+  const ahora = useAhora();
 
   return (
     <>
@@ -70,6 +73,10 @@ export function MenuInferior() {
                 </DialogPrimitive.Close>
               </div>
               <DialogPrimitive.Title className="sr-only">Menú principal</DialogPrimitive.Title>
+              <p className="-mt-1 pb-3 text-[13px] text-texto-2">
+                Hoy: <time dateTime={hoyLima(ahora)}>{formatearFechaLarga(ahora)}</time>{" "}
+                <span className="text-texto-3">(Lima)</span>
+              </p>
               <nav aria-label="Principal" className="min-h-0 flex-1 overflow-y-auto">
                 <ListaNav alNavegar={() => setAbierto(false)} />
               </nav>

@@ -10,6 +10,7 @@ const ACCIONES: Record<string, string> = {
   recuperar_solicitado: "Recuperación solicitada",
   password_restablecido: "Contraseña restablecida",
   password_cambiado: "Contraseña cambiada",
+  password_cambio_fallido: "Cambio de contraseña fallido",
   usuario_creado: "Usuario creado",
   usuario_editado: "Usuario editado",
   rol_cambiado: "Rol cambiado",
@@ -59,6 +60,22 @@ const CAMPOS: Record<string, string> = {
   comentario: "Comentario",
 };
 
+/**
+ * Valores internos de `detalle` traducidos por campo (los códigos nunca se muestran en crudo).
+ * Un valor sin traducción se muestra humanizado ("algo_nuevo" → "Algo nuevo").
+ */
+const VALORES: Record<string, Record<string, string>> = {
+  motivo: {
+    password_incorrecta: "Contraseña incorrecta",
+    usuario_inexistente: "Usuario inexistente",
+    usuario_inactivo: "Usuario inactivo",
+    password_actual_incorrecta: "Contraseña actual incorrecta",
+  },
+};
+
+/** Campos cuyos valores son códigos internos (se humanizan si no hay traducción). */
+const CAMPOS_CODIGO = new Set(Object.keys(VALORES));
+
 function humanizar(clave: string): string {
   const texto = clave.replace(/_/g, " ").trim();
   return texto.charAt(0).toUpperCase() + texto.slice(1);
@@ -75,7 +92,7 @@ export function etiquetaRol(rol: string | null | undefined): string {
 
 /** Tono del chip según la naturaleza de la acción (siempre acompañado de texto). */
 export function tonoAccion(accion: string): TonoBadge {
-  if (accion === "login_fallido") return "error";
+  if (accion === "login_fallido" || accion === "password_cambio_fallido") return "error";
   if (["usuario_desactivado", "rol_cambiado", "password_temporal_asignado", "recuperar_solicitado", "solicitar_correccion"].includes(accion))
     return "aviso";
   if (["usuario_creado", "usuario_activado", "publicar", "publicar_cambios", "visto_programador"].includes(accion)) return "exito";
@@ -92,6 +109,7 @@ export function formatearValor(valor: unknown, campo?: string): string {
   if (typeof valor === "number") return valor.toLocaleString("es-PE");
   if (typeof valor === "string") {
     if (campo === "rol") return etiquetaRol(valor);
+    if (campo && CAMPOS_CODIGO.has(campo)) return VALORES[campo][valor] ?? humanizar(valor);
     if (ISO_FECHA_HORA.test(valor)) return formatearFechaHora(valor);
     return valor;
   }

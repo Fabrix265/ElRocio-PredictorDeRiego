@@ -1,20 +1,24 @@
-import { useEffect, useState } from "react";
-
-import { formatearFechaLarga } from "../../lib/fechas";
+import { formatearFechaCorta, formatearFechaLarga, hoyLima } from "../../lib/fechas";
+import { useAhora } from "../../lib/useAhora";
 import { MenuUsuario } from "./MenuUsuario";
 import { SelectorFundo } from "./SelectorFundo";
 
-/** Fecha de hoy en Lima; se actualiza cada minuto (cambia sola a medianoche). */
+/**
+ * Fecha de hoy en Lima: larga desde 1280 px, corta ("sáb 07/11") desde 640 px. En celular va
+ * en el cajón del menú (ver MenuInferior) para no apretar el selector a 360 px.
+ */
 function FechaHoy() {
-  const [ahora, setAhora] = useState(() => new Date());
-  useEffect(() => {
-    const id = window.setInterval(() => setAhora(new Date()), 60_000);
-    return () => window.clearInterval(id);
-  }, []);
+  const ahora = useAhora();
+  const larga = formatearFechaLarga(ahora);
   return (
-    <span className="hidden text-[13px] whitespace-nowrap text-texto-2 xl:inline">
-      {formatearFechaLarga(ahora)} <span className="text-texto-3">(Lima)</span>
-    </span>
+    <time dateTime={hoyLima(ahora)} className="hidden text-[13px] whitespace-nowrap text-texto-2 sm:inline">
+      <span className="xl:hidden" aria-hidden="true" title={`${larga} (Lima)`}>
+        {formatearFechaCorta(ahora)}
+      </span>
+      <span className="sr-only xl:not-sr-only">
+        {larga} <span className="text-texto-3">(Lima)</span>
+      </span>
+    </time>
   );
 }
 

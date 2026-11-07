@@ -30,6 +30,13 @@ const fmtFechaLarga = new Intl.DateTimeFormat(LOCALE, {
   year: "numeric",
 });
 
+const fmtFechaCorta = new Intl.DateTimeFormat(LOCALE, {
+  timeZone: ZONA_LIMA,
+  weekday: "short",
+  day: "2-digit",
+  month: "2-digit",
+});
+
 const fmtPartes = new Intl.DateTimeFormat("en-CA", {
   timeZone: ZONA_LIMA,
   year: "numeric",
@@ -64,6 +71,14 @@ export function formatearFechaLarga(valor: string | Date = new Date()): string {
   if (!d) return "—";
   const texto = fmtFechaLarga.format(d);
   return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
+/** "sáb 07/11" en hora de Lima (cabecera en pantallas medianas). */
+export function formatearFechaCorta(valor: string | Date = new Date()): string {
+  const d = aDate(valor);
+  if (!d) return "—";
+  const p = Object.fromEntries(fmtFechaCorta.formatToParts(d).map((x) => [x.type, x.value]));
+  return `${p.weekday.replace(".", "")} ${p.day}/${p.month}`;
 }
 
 function partesLima(ahora: Date) {

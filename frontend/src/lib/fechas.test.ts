@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { extraerTokenFragmento } from "../features/auth/fragmento";
 import { analizarDetalle, formatearValor } from "../features/auditoria/etiquetas";
-import { formatearFecha, formatearFechaHora, hoyLima, limiteDiaLima, saludoLima } from "./fechas";
+import { formatearFecha, formatearFechaCorta, formatearFechaHora, hoyLima, limiteDiaLima, saludoLima } from "./fechas";
 
 describe("fechas en hora de Lima", () => {
+  it("fecha corta de la cabecera en hora de Lima", () => {
+    expect(formatearFechaCorta(new Date("2026-11-07T15:00:00Z"))).toBe("sáb 07/11");
+    // 23:30 en Lima del sábado = 04:30 UTC del domingo: sigue siendo sábado en Lima.
+    expect(formatearFechaCorta(new Date("2026-11-08T04:30:00Z"))).toBe("sáb 07/11");
+  });
+
   it("formatea instantes UTC en hora de Lima (UTC-5)", () => {
     expect(formatearFechaHora("2026-11-07T11:15:00Z")).toBe("07/11/2026 06:15");
     expect(formatearFechaHora("2026-11-07T06:15:00-05:00")).toBe("07/11/2026 06:15");
@@ -58,5 +64,13 @@ describe("detalle de auditoría", () => {
     expect(formatearValor(null)).toBe("—");
     expect(formatearValor("subgerente", "rol")).toBe("Subgerente");
     expect(formatearValor("2026-11-07T11:15:00Z")).toBe("07/11/2026 06:15");
+  });
+
+  it("traduce los códigos internos de detalle (motivo) en vez de mostrarlos en crudo", () => {
+    expect(formatearValor("password_incorrecta", "motivo")).toBe("Contraseña incorrecta");
+    expect(formatearValor("usuario_inexistente", "motivo")).toBe("Usuario inexistente");
+    expect(formatearValor("usuario_inactivo", "motivo")).toBe("Usuario inactivo");
+    expect(formatearValor("motivo_futuro_x", "motivo")).toBe("Motivo futuro x");
+    expect(formatearValor("password_incorrecta", "comentario")).toBe("password_incorrecta");
   });
 });
