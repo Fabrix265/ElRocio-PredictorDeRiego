@@ -9,6 +9,20 @@ Predice, **antes de que empiece el día**, el plan de riego de cada turno del m�
 | `riego_m3ha` / `riego_m3` | Volumen de cada ciclo (m3/ha y m3) |
 | `duracion_min` | Duración de cada ciclo en minutos |
 | `hora_inicio` / `hora_fin` | Horario de cada ciclo (HH:MM) |
+| `*_p10` / `*_p90`, `hora_inicio_desde/hasta` | Rango probable (~80 %) de m3/ha, duración e inicio |
+
+> **Estado:** listo para un piloto en modo sombra (el modelo sugiere, el operador decide).
+> N° de ciclos, volumen y duración son usables; los horarios son solo orientativos.
+> Rutinas diarias, semanales y mensuales en **[OPERACION.md](OPERACION.md)**.
+
+## Fuentes de datos
+
+| Fuente | Archivo | Origen |
+|---|---|---|
+| Riego (base) | `data/raw/data_riego_historico.xlsx`, hoja `MOD5` (abr-2021 a nov-2026) | Excel que envía el campo (redshift + talgil) |
+| Meteorología | `data/raw/data_metereologica.xlsx` (cada 30 min) | Export en Excel. La API de WeatherLink descarga a `data/raw/WeatherLink/` pero aún no se usa |
+| Phytech | `data/raw/data_phytech.xlsx` | API de Phytech (`descargar_phytech.py`) + paso 0 |
+| NDVI | `data/raw/phytech/completo/NdviImages_*` | API de Phytech |
 
 ## Pipeline
 
@@ -25,13 +39,14 @@ data/raw/data_phytech.xlsx      ┘
 Desde la raíz del repositorio:
 
 ```powershell
+python -m venv ml/.venv; ml\.venv\Scripts\Activate.ps1
 pip install -r ml/requirements.txt
-python ml/src/riego_ml/pipelines/ejecutar_todo.py               # pasos 1-3
-python ml/src/riego_ml/pipelines/predecir.py --fecha 2025-04-25  # paso 4
+python ml/src/riego_ml/pipelines/ejecutar_todo.py               # pasos 1-3 (entrena)
+python ml/src/riego_ml/pipelines/predecir.py --fecha 2026-11-05  # paso 4 (plan del día)
 ```
 
 Cada paso también se puede correr por separado (`limpiar_phytech.py`, `unir_datos.py`,
-`preparar_dataset.py`, `entrenar.py`, `predecir.py`). Toda la configuración está en
+`preparar_dataset.py`, `entrenar.py`, `predecir.py`, `evaluar_modelo.py`). Toda la configuración está en
 [`config/pipeline.yaml`](config/pipeline.yaml).
 
 ## Estructura
@@ -62,10 +77,12 @@ ml/
       entrenamiento.py            Paso 3: compara, selecciona y reentrena
       planificador.py             PlanRiego: n_ciclos -> ciclos -> horario
       prediccion.py               Predicción de una o varias fechas
-    pipelines/                    CLIs de cada paso + ejecutar_todo.py
+      evaluacion.py               Evaluación de modelos guardados sobre un período
+    pipelines/                    CLIs de cada paso + ejecutar_todo.py + evaluar_modelo.py
     utils/                        Excel, horas, logging, JSON
     data_extraction/              Descarga de APIs (fuera de git)
-  tests/                          Pruebas de horas, limpieza, features, split y horario
+  tests/                          Pruebas de horas, limpieza, features, modelos, split y horario
+  OPERACION.md                    Guía para el piloto en el entorno real
 ```
 
 ## Paso 0 – Phytech crudo
@@ -120,10 +137,10 @@ Features extendidas (`preparacion.features_extendidas: true`):
   respuesta diaria del suelo (rango de humedad a 45/60 cm), NDVI y feriados de Perú.
 - Por ciclo: m3/ha e inicio de hace 7 días, dosis habitual (mediana 7 días), desfase del ciclo.
 
-Fuentes revisadas que **todavía no se usan** porque no se cruzan con el histórico de riego:
-`PROGRAMA DE RIEGO 2026-2027.xlsx` (semanas 27-44 de 2026), etapa de la hoja `siga` (un solo
-valor), riegos planificados / recomendaciones Daisy / pronóstico de Phytech (una sola captura).
-Con el `data_riego` actualizado a 2026 el programa de riego pasa a ser candidato.
+Fuentes revisadas que **todavía no se usan**:
+`PROGRAMA DE RIEGO 2026-2027.xlsx` (semanas 27-44 de 2026: con el riego actualizado ya se cruza,
+pero son ~4 meses, insuficientes para entrenar), etapa de la hoja `siga` (un solo valor),
+riegos planificados / recomendaciones Daisy / pronóstico de Phytech (una sola captura).
 
 > **Niveles absolutos de humedad del suelo fuera del modelo** (`usar_suelo_absoluto: false`).
 > El sensor cambió de régimen entre temporadas (a 45 cm la media pasa de ~20 % en el período
@@ -228,14 +245,15 @@ Genera `reports/evaluaciones/evaluacion_<desde>_<hasta>.xlsx`.
 
 ```powershell
 python ml/src/riego_ml/pipelines/predecir.py                          # día siguiente al último registro
-python ml/src/riego_ml/pipelines/predecir.py --fecha 2025-04-25 --dias 3
+python ml/src/riego_ml/pipelines/predecir.py --fecha 2026-11-05 --dias 3
 ```
 
 Genera `Plan_por_turno` (1 fila por turno con los ciclos en columnas) y `Plan_por_ciclo`.
 Cada ciclo trae también su rango: `riego_m3ha_p10`/`p90`, `duracion_min_p10`/`p90` y
 `hora_inicio_desde`/`hasta` (≈80 % de probabilidad de caer dentro).
 Usa el historial del paso 1 para las features del día anterior: cuando lleguen datos
-nuevos, volver a correr `unir_datos.py`. Para varios días, la predicción es recursiva (el
+nuevos, volver a correr `unir_datos.py` (no hace falta reentrenar). Si riego, meteorología o
+Phytech no llegan hasta el día anterior, `predecir.py` lo avisa con un `WARNING`. Para varios días, la predicción es recursiva (el
 plan del día D se usa como "riego de ayer" del día D+1).
 
 ## Pruebas

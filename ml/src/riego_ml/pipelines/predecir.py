@@ -33,6 +33,25 @@ from riego_ml.utils.excel import write_excel
 from riego_ml.utils.logging import configure_logging
 
 
+def _avisar_datos_faltantes(historial, fecha: pd.Timestamp, logger) -> None:
+    """El plan del día D se apoya en el día D-1: avisa si alguna fuente no llega hasta ayer."""
+    ayer = fecha - pd.Timedelta(days=1)
+    amb = historial.ambiente
+    ultimos = {
+        "riego (data_riego)": historial.ciclos["Fecha"].max(),
+        "meteorología": amb.loc[amb["tiene_meteo"] == 1, "Fecha"].max(),
+        "Phytech suelo": amb.loc[amb["tiene_suelo"] == 1, "Fecha"].max(),
+        "Phytech planta": amb.loc[amb["tiene_planta"] == 1, "Fecha"].max(),
+    }
+    for fuente, ultimo in ultimos.items():
+        if pd.isna(ultimo) or ultimo < ayer:
+            dias = (ayer - ultimo).days if pd.notna(ultimo) else "?"
+            logger.warning("Faltan datos de %s: el último día cargado es %s (%s días antes de ayer). "
+                           "El plan se calcula igual pero con menos precisión; actualiza la fuente y "
+                           "vuelve a correr unir_datos.py.", fuente,
+                           f"{ultimo:%Y-%m-%d}" if pd.notna(ultimo) else "ninguno", dias)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Paso 4: predice el plan de riego.")
     parser.add_argument("--config", default=None)
@@ -49,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     inicio = pd.Timestamp(args.fecha) if args.fecha else historial.ciclos["Fecha"].max() + pd.Timedelta(days=1)
     fechas = list(pd.date_range(inicio, periods=max(1, args.dias), freq="D"))
     logger.info("Planificando %s a %s con %s", f"{fechas[0]:%Y-%m-%d}", f"{fechas[-1]:%Y-%m-%d}", plan.elegidos)
+    _avisar_datos_faltantes(historial, fechas[0], logger)
 
     resultado = planificar(plan, historial, fechas, config)
     ancho = plan_ancho(resultado, plan.max_ciclos)
