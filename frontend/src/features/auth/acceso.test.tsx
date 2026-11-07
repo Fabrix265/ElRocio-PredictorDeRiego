@@ -28,6 +28,10 @@ describe("decidirAcceso", () => {
     expect(decidirAcceso({ estado: "cargando", usuario: null, ruta: "/" })).toEqual({ tipo: "cargando" });
   });
 
+  it("si no se pudo verificar la sesión (red o 5xx), no manda al login", () => {
+    expect(decidirAcceso({ estado: "sin_conexion", usuario: null, ruta: "/usuarios" })).toEqual({ tipo: "sin_conexion" });
+  });
+
   it("sin sesión manda al login guardando la ruta en next", () => {
     expect(decidirAcceso({ estado: "anonimo", usuario: null, ruta: "/usuarios?rol=admin" })).toEqual({
       tipo: "redirigir",

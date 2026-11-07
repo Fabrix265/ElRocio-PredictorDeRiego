@@ -11,10 +11,10 @@ import { Input } from "../../../components/ui/Input";
 import { PasswordInput } from "../../../components/ui/PasswordInput";
 import { sanearNext } from "../../../lib/next";
 import { mensajeDeError } from "../../../services/httpClient";
-import { PantallaCarga } from "../../../pages/PantallaCarga";
 import { RUTA_CAMBIAR_PASSWORD } from "../acceso";
 import { AuthLayout } from "../AuthLayout";
 import { useAuth } from "../AuthProvider";
+import { PantallaCargaAcceso, PantallaSinConexion } from "../PantallasAcceso";
 import { esquemaLogin, type DatosLogin } from "../esquemas";
 
 function rutaTrasIngreso(next: string, debeCambiar: boolean): string {
@@ -35,7 +35,8 @@ export function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<DatosLogin>({ resolver: zodResolver(esquemaLogin), defaultValues: { username: "", password: "" } });
 
-  if (estado === "cargando") return <PantallaCarga />;
+  if (estado === "cargando") return <PantallaCargaAcceso />;
+  if (estado === "sin_conexion") return <PantallaSinConexion />;
   if (estado === "autenticado" && usuario && !isSubmitting) {
     return <Navigate to={rutaTrasIngreso(next, usuario.debe_cambiar_password)} replace />;
   }

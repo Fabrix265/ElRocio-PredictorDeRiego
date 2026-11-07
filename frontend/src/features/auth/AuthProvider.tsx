@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 import {
   difundirCierreSesion,
+  esErrorTransitorio,
   fijarAccessToken,
   refrescarSesion,
   registrarOyentesSesion,
@@ -21,6 +22,8 @@ interface ValorAuth {
   cambiarPassword: (actual: string, nueva: string) => Promise<Usuario>;
   /** Aplica una sesión recibida del backend (login, refresh, cambio de contraseña). */
   aplicarSesion: (sesion: RespuestaSesion) => void;
+  /** Vuelve a intentar el refresh inicial tras un fallo de red o del servidor. */
+  reintentarConexion: () => void;
 }
 
 const AuthContext = createContext<ValorAuth | null>(null);
@@ -30,6 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [estado, setEstado] = useState<EstadoSesion>("cargando");
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [salidaVoluntaria, setSalidaVoluntaria] = useState(false);
+  const [intentoInicial, setIntentoInicial] = useState(0);
 
   const aplicarSesion = useCallback((sesion: RespuestaSesion) => {
     fijarAccessToken(sesion.access_token);
@@ -59,7 +63,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   // Al cargar la app: refresh silencioso con la cookie (si existe). Vuelo único, así que el
-  // doble montaje de StrictMode no genera dos refresh.
+  // doble montaje de StrictMode no genera dos refresh. Si falla por red, timeout o 5xx no se
+  // sabe si hay sesión: se muestra "No se pudo conectar · Reintentar" en vez del login.
   useEffect(() => {
     let vigente = true;
     refrescarSesion()
@@ -68,13 +73,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (sesion) aplicarSesion(sesion);
         else setEstado("anonimo");
       })
-      .catch(() => {
-        if (vigente) setEstado("anonimo");
+      .catch((error: unknown) => {
+        if (vigente) setEstado(esErrorTransitorio(error) ? "sin_conexion" : "anonimo");
       });
     return () => {
       vigente = false;
     };
-  }, [aplicarSesion]);
+  }, [aplicarSesion, intentoInicial]);
+
+  const reintentarConexion = useCallback(() => {
+    setEstado("cargando");
+    setIntentoInicial((n) => n + 1);
+  }, []);
 
   const iniciarSesion = useCallback(
     async (username: string, password: string) => {
@@ -107,8 +117,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const valor = useMemo<ValorAuth>(
-    () => ({ estado, usuario, salidaVoluntaria, iniciarSesion, cerrarSesion, cambiarPassword, aplicarSesion }),
-    [estado, usuario, salidaVoluntaria, iniciarSesion, cerrarSesion, cambiarPassword, aplicarSesion],
+    () => ({
+      estado,
+      usuario,
+      salidaVoluntaria,
+      iniciarSesion,
+      cerrarSesion,
+      cambiarPassword,
+      aplicarSesion,
+      reintentarConexion,
+    }),
+    [estado, usuario, salidaVoluntaria, iniciarSesion, cerrarSesion, cambiarPassword, aplicarSesion, reintentarConexion],
   );
 
   return <AuthContext.Provider value={valor}>{children}</AuthContext.Provider>;

@@ -5,10 +5,13 @@ import {
   api,
   ApiError,
   fijarAccessToken,
+  MENSAJE_SIN_CONEXION,
   obtenerAccessToken,
+  pistaOrigenDesarrollo,
   refrescarSesion,
   registrarOyentesSesion,
   solicitar,
+  TIEMPO_LIMITE_REFRESH_MS,
 } from "./httpClient";
 import type { RespuestaSesion } from "./tipos";
 
@@ -110,6 +113,66 @@ describe("httpClient: refresh de vuelo único", () => {
     expect(error.status).toBe(401);
   });
 
+  it.each([
+    ["503 del pooler", () => json(503, { detail: "Servicio no disponible" }), 503],
+    ["502 del proxy (HTML)", () => new Response("<html>Bad Gateway</html>", { status: 502 }), 502],
+    ["red caída", () => Promise.reject(new TypeError("Failed to fetch")), 0],
+  ])("401 seguido de refresh con %s: informa el error SIN cerrar la sesión", async (_caso, refresh, status) => {
+    const fetchMock = crearFetch(refresh as () => Promise<Response>);
+    vi.stubGlobal("fetch", fetchMock);
+    const alPerder = vi.fn();
+    registrarOyentesSesion({ alPerder });
+    fijarAccessToken("viejo");
+
+    const error = await api.get("/usuarios").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(status);
+    expect(alPerder).not.toHaveBeenCalled();
+    expect(obtenerAccessToken()).toBe("viejo");
+    expect(fetchMock).toHaveBeenCalledTimes(2); // original + refresh, sin reintento
+
+    // Cuando el backend vuelve, el siguiente 401 recupera la sesión con la misma cookie.
+    fetchMock.mockImplementation(
+      crearFetch(() => json(200, sesion("nuevo"))).getMockImplementation()!,
+    );
+    await expect(api.get("/usuarios")).resolves.toMatchObject({ ok: true });
+    expect(obtenerAccessToken()).toBe("nuevo");
+    expect(alPerder).not.toHaveBeenCalled();
+  });
+
+  it("el refresh tiene tiempo límite: un refresh colgado libera el candado como 'sin conexión'", async () => {
+    vi.useFakeTimers();
+    try {
+      let llamadas = 0;
+      const fetchMock = vi.fn(
+        (_u: string | URL | Request, init?: RequestInit) =>
+          new Promise<Response>((resolver, rechazar) => {
+            llamadas += 1;
+            if (llamadas > 1) return resolver(json(200, sesion("nuevo")));
+            // Nunca responde; solo se corta cuando se aborta la señal.
+            init?.signal?.addEventListener("abort", () => rechazar(init.signal?.reason));
+          }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const alPerder = vi.fn();
+      registrarOyentesSesion({ alPerder });
+
+      const primero = refrescarSesion().catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(TIEMPO_LIMITE_REFRESH_MS);
+      const error = await primero;
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).status).toBe(0);
+      expect((error as ApiError).detail).toBe(MENSAJE_SIN_CONEXION);
+      expect(alPerder).not.toHaveBeenCalled();
+
+      // La promesa compartida se liberó: el siguiente refresh sale y funciona.
+      await expect(refrescarSesion()).resolves.toMatchObject({ access_token: "nuevo" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("usa navigator.locks para coordinar el refresh entre pestañas", async () => {
     const request = vi.fn((_nombre: string, fn: () => Promise<unknown>) => fn());
     vi.stubGlobal("navigator", { ...navigator, locks: { request } });
@@ -187,7 +250,7 @@ describe("httpClient: peticiones y errores", () => {
     );
     const error = await api.post("/usuarios", {}).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).detail).toBe("correo: correo inválido");
+    expect((error as ApiError).detail).toBe("Correo: correo inválido");
     expect((error as ApiError).errores).toHaveLength(1);
   });
 
@@ -197,6 +260,31 @@ describe("httpClient: peticiones y errores", () => {
 
     vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>", { status: 502 })));
     await expect(api.get("/x")).rejects.toMatchObject({ status: 502, detail: expect.stringContaining("servidor") });
+  });
+
+  it("muestra los campos de un 422 con su nombre en español (o solo el mensaje)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        json(422, {
+          detail: [
+            { loc: ["query", "q"], msg: "Debe tener como máximo 100 caracteres.", type: "string_too_long" },
+            { loc: ["body", "campo_raro"], msg: "Valor no válido.", type: "value_error" },
+          ],
+        }),
+      ),
+    );
+    const error = await api.get("/usuarios", { q: "x".repeat(120) }).catch((e: unknown) => e);
+    expect((error as ApiError).detail).toBe("Búsqueda: Debe tener como máximo 100 caracteres. · Valor no válido.");
+    expect((error as ApiError).detail).not.toContain("q:");
+  });
+
+  it("en desarrollo, un 403 por Origin en /auth explica cómo configurarlo", () => {
+    const pista = pistaOrigenDesarrollo(403, "Solicitud no permitida", true);
+    expect(pista).toContain("CORS_ORIGINS");
+    expect(pista).toContain(window.location.origin);
+    expect(pistaOrigenDesarrollo(403, "Solicitud no permitida", false)).toBe("Solicitud no permitida");
+    expect(pistaOrigenDesarrollo(403, "Debes cambiar tu contraseña", true)).toBe("Debes cambiar tu contraseña");
   });
 
   it("informa sin conexión con status 0", async () => {

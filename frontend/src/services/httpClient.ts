@@ -8,12 +8,18 @@
  * - El refresh token va en la cookie HttpOnly `rt` (Path=/api/v1/auth), por eso las rutas
  *   de auth usan `credentials: "include"`.
  * - Todas las peticiones llevan `X-Requested-With: fetch` (el backend lo exige en refresh/logout).
+ * - La sesión local solo se cierra si el backend RECHAZA el refresh (401/403). Un corte de red,
+ *   un timeout o un 5xx del proxy/pooler no cierran la sesión: el error se informa y la cookie
+ *   sigue sirviendo para el siguiente intento.
  */
 import type { ErrorValidacion, RespuestaSesion } from "./tipos";
 
 export const API_BASE = `${(import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "")}/api/v1`;
 
-const MENSAJE_SIN_CONEXION = "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.";
+export const MENSAJE_SIN_CONEXION = "No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.";
+
+/** Tiempo máximo del refresh: si el proxy o el pooler no responden, se libera el candado. */
+export const TIEMPO_LIMITE_REFRESH_MS = 15_000;
 
 export class ApiError extends Error {
   /** Código HTTP; 0 si no hubo respuesta (sin conexión). */
@@ -36,6 +42,11 @@ export function mensajeDeError(error: unknown): string {
   if (error instanceof ApiError) return error.detail;
   if (error instanceof Error && error.name !== "AbortError") return error.message;
   return "Ocurrió un error inesperado.";
+}
+
+/** true si el error es transitorio (sin respuesta, timeout o error del servidor/proxy). */
+export function esErrorTransitorio(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 0 || error.status >= 500);
 }
 
 type ValorQuery = string | number | boolean | null | undefined;
@@ -158,15 +169,57 @@ const MENSAJE_POR_ESTADO: Record<number, string> = {
   429: "Demasiados intentos. Espera unos minutos.",
 };
 
+/** Nombre en español de los campos que el backend puede citar en un 422. */
+const ETIQUETA_CAMPO: Record<string, string> = {
+  q: "Búsqueda",
+  username: "Usuario",
+  nombre: "Nombre",
+  correo: "Correo",
+  rol: "Rol",
+  activo: "Estado",
+  password: "Contraseña",
+  password_actual: "Contraseña actual",
+  password_nueva: "Nueva contraseña",
+  password_temporal: "Contraseña temporal",
+  identificador: "Usuario o correo",
+  token: "Enlace",
+  usuario_id: "Usuario",
+  accion: "Acción",
+  entidad: "Entidad",
+  entidad_id: "Registro",
+  desde: "Desde",
+  hasta: "Hasta",
+  page: "Página",
+  page_size: "Tamaño de página",
+};
+
 function textoValidacion(errores: ErrorValidacion[]): string {
   const mensajes = errores.map((e) => {
-    const campo = e.loc.filter((p) => p !== "body" && p !== "query").join(".");
-    return campo ? `${campo}: ${e.msg}` : e.msg;
+    const partes = (e.loc ?? []).filter((p) => p !== "body" && p !== "query" && p !== "path");
+    const clave = partes.length ? String(partes[partes.length - 1]) : "";
+    // Un campo sin traducción no se muestra con su nombre técnico: basta el mensaje.
+    const etiqueta = ETIQUETA_CAMPO[clave];
+    return etiqueta ? `${etiqueta}: ${e.msg}` : e.msg;
   });
-  return mensajes.join(" · ") || MENSAJE_POR_ESTADO[422];
+  return Array.from(new Set(mensajes)).join(" · ") || MENSAJE_POR_ESTADO[422];
 }
 
-async function leerError(resp: Response): Promise<ApiError> {
+const MENSAJE_ORIGEN_RECHAZADO = "Solicitud no permitida";
+
+/**
+ * En desarrollo, el backend rechaza login/refresh/logout con 403 «Solicitud no permitida» si el
+ * Origin del navegador no está en CORS_ORIGINS/FRONTEND_URL (p. ej. Vite en otro puerto).
+ */
+export function pistaOrigenDesarrollo(status: number, detail: string, dev: boolean = import.meta.env.DEV): string {
+  if (!dev || status !== 403 || detail !== MENSAJE_ORIGEN_RECHAZADO) return detail;
+  const origen = typeof window !== "undefined" ? window.location.origin : "este origen";
+  return (
+    `${detail}. Configuración de desarrollo: el backend no acepta el origen ${origen}; ` +
+    "agrégalo a CORS_ORIGINS (o FRONTEND_URL) en backend/.env o abre el frontend en http://localhost:5173."
+  );
+}
+
+async function leerError(resp: Response, ruta = ""): Promise<ApiError> {
   let detail: unknown;
   try {
     const texto = await resp.text();
@@ -174,7 +227,10 @@ async function leerError(resp: Response): Promise<ApiError> {
   } catch {
     detail = undefined;
   }
-  if (typeof detail === "string" && detail.trim()) return new ApiError(resp.status, detail);
+  if (typeof detail === "string" && detail.trim()) {
+    const texto = ruta.startsWith("/auth/") ? pistaOrigenDesarrollo(resp.status, detail) : detail;
+    return new ApiError(resp.status, texto);
+  }
   if (Array.isArray(detail)) {
     const errores = detail.filter(
       (e): e is ErrorValidacion => typeof e === "object" && e !== null && "msg" in e,
@@ -206,23 +262,50 @@ async function conCandado<T>(nombre: string, fn: () => Promise<T>): Promise<T> {
 }
 
 async function hacerRefresh(): Promise<RespuestaSesion | null> {
-  const resp = await ejecutar("/auth/refresh", { method: "POST" }, null);
-  if (resp.ok) {
-    const sesion = await leerCuerpo<RespuestaSesion>(resp);
-    accessToken = sesion.access_token;
-    oyentes.alRenovar?.(sesion);
-    return sesion;
+  // Tiempo límite propio (no AbortSignal.timeout) para que el candado entre pestañas nunca
+  // quede tomado por un refresh colgado; el corte se informa como "sin conexión" (status 0).
+  const control = new AbortController();
+  const temporizador = setTimeout(
+    () => control.abort(new DOMException("El refresh superó el tiempo límite", "TimeoutError")),
+    TIEMPO_LIMITE_REFRESH_MS,
+  );
+  try {
+    const resp = await ejecutar("/auth/refresh", { method: "POST", signal: control.signal }, null);
+    if (resp.ok) {
+      let sesion: RespuestaSesion;
+      try {
+        sesion = await leerCuerpo<RespuestaSesion>(resp);
+      } catch {
+        // Cuerpo cortado o ilegible (proxy): transitorio, la cookie puede seguir vigente.
+        throw new ApiError(0, MENSAJE_SIN_CONEXION);
+      }
+      accessToken = sesion.access_token;
+      oyentes.alRenovar?.(sesion);
+      return sesion;
+    }
+    if (resp.status === 401 || resp.status === 403) {
+      if (resp.status === 403 && import.meta.env.DEV) {
+        // Un Origin no permitido parece "sin sesión": se deja la pista en la consola.
+        const error = await leerError(resp, "/auth/refresh");
+        if (error.detail.startsWith(MENSAJE_ORIGEN_RECHAZADO)) console.warn(error.detail);
+      }
+      accessToken = null;
+      return null;
+    }
+    throw await leerError(resp, "/auth/refresh");
+  } catch (error) {
+    // El corte por tiempo llega como DOMException (TimeoutError/AbortError): sin conexión.
+    if (control.signal.aborted && !(error instanceof ApiError)) throw new ApiError(0, MENSAJE_SIN_CONEXION);
+    throw error;
+  } finally {
+    clearTimeout(temporizador);
   }
-  if (resp.status === 401 || resp.status === 403) {
-    accessToken = null;
-    return null;
-  }
-  throw await leerError(resp);
 }
 
 /**
  * Pide un access token nuevo con la cookie de refresh. Llamadas simultáneas comparten la
- * misma promesa. Devuelve null si no hay sesión que recuperar.
+ * misma promesa. Resuelve null solo si el backend rechazó la sesión (401/403); si no hubo
+ * respuesta útil (red, timeout, 5xx) rechaza con un ApiError transitorio.
  */
 export function refrescarSesion(): Promise<RespuestaSesion | null> {
   if (!refreshEnCurso) {
@@ -248,11 +331,14 @@ export async function solicitar<T>(ruta: string, opciones: OpcionesSolicitud = {
       // Otra petición ya renovó la sesión mientras esta viajaba.
       nuevoToken = accessToken;
     } else {
-      const sesion = await refrescarSesion().catch(() => null);
+      // Si el refresh falla por red, timeout o 5xx, el error se propaga SIN cerrar la sesión:
+      // la cookie puede seguir vigente y el siguiente intento la recuperará.
+      const sesion = await refrescarSesion();
       nuevoToken = sesion?.access_token ?? null;
     }
     if (!nuevoToken) {
-      const error = await leerError(resp);
+      // El backend rechazó el refresh (401/403): la sesión ya no se puede recuperar.
+      const error = await leerError(resp, ruta);
       avisarSesionPerdida();
       throw error;
     }
@@ -261,7 +347,7 @@ export async function solicitar<T>(ruta: string, opciones: OpcionesSolicitud = {
     resp = await ejecutar(ruta, opciones, nuevoToken);
   }
 
-  if (!resp.ok) throw await leerError(resp);
+  if (!resp.ok) throw await leerError(resp, ruta);
   return leerCuerpo<T>(resp);
 }
 
