@@ -62,8 +62,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Paso 2: limpia y prepara el dataset de entrenamiento.")
     parser.add_argument("--config", default=None)
     parser.add_argument("--sin-excel", action="store_true", help="No genera el Excel de revisión.")
+    parser.add_argument("--sin-features-extendidas", action="store_true",
+                        help="Usa solo las features base (para comparar).")
     args = parser.parse_args(argv)
-    ejecutar(load_config(args.config), excel=not args.sin_excel)
+    config = load_config(args.config)
+    if args.sin_features_extendidas:
+        config.preparacion.features_extendidas = False
+    ejecutar(config, excel=not args.sin_excel)
     return 0
 
 

@@ -5,7 +5,8 @@ from riego_ml.modeling.split import cortes_temporales
 
 
 def _plan(pausa=0.0):
-    return PlanRiego(None, None, None, [], [], 5, {"TE01": 3.0}, {"TE01": 13.0}, (2.0, 100.0), pausa_min=pausa)
+    return PlanRiego(modelos={}, features={}, max_ciclos=5, min_por_m3ha={"TE01": 3.0},
+                     area_ha={"TE01": 13.0}, rango_m3ha=(2.0, 100.0), pausa_min=pausa)
 
 
 def test_horario_sin_solapamientos_y_ordenado():

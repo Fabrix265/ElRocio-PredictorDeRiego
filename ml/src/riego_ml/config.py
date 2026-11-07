@@ -72,6 +72,22 @@ class Tuning:
 
 
 @dataclass
+class Especiales:
+    referencias: bool = True          # persistencia, media 7 días, semana pasada
+    transicion: bool = True           # n_ciclos: tabla de transición (Markov)
+    ordinal: bool = True              # n_ciclos: logística ordinal
+    persistencia_segura: bool = True  # n_ciclos: repetir ayer salvo cambio muy probable
+    dosis: bool = True                # m3/ha: clasificador de dosis programadas
+
+
+@dataclass
+class Rangos:
+    habilitado: bool = True
+    inferior: float = 0.1
+    superior: float = 0.9
+
+
+@dataclass
 class ModeloConfig:
     habilitado: bool = True
     clasificacion: dict[str, Any] = field(default_factory=dict)
@@ -87,9 +103,10 @@ class Config:
     plan: Plan = field(default_factory=Plan)
     tuning: Tuning = field(default_factory=Tuning)
     modelos: dict[str, ModeloConfig] = field(default_factory=dict)
+    especiales: Especiales = field(default_factory=Especiales)
+    rangos: Rangos = field(default_factory=Rangos)
     seed: int = 42
     excluir_dias_incompletos_eval: bool = True
-    incluir_persistencia: bool = True
     path: Path | None = None
 
     def modelos_habilitados(self) -> list[str]:
@@ -137,9 +154,10 @@ def load_config(path: str | Path | None = None) -> Config:
         plan=_seccion(Plan, raw.get("plan"), "plan"),
         tuning=_seccion(Tuning, raw.get("tuning"), "tuning"),
         modelos=modelos,
+        especiales=_seccion(Especiales, raw.get("especiales"), "especiales"),
+        rangos=_seccion(Rangos, raw.get("rangos"), "rangos"),
         seed=int(raw.get("seed", 42)),
         excluir_dias_incompletos_eval=bool(raw.get("excluir_dias_incompletos_eval", True)),
-        incluir_persistencia=bool(raw.get("incluir_persistencia", True)),
         path=config_path,
     )
     _validar(config)
@@ -153,6 +171,6 @@ def _validar(config: Config) -> None:
         raise ConfigError("split.test + split.validacion deja muy poco para entrenar.")
     if config.plan.max_ciclos < 1:
         raise ConfigError("plan.max_ciclos debe ser >= 1.")
-    desconocidos = set(config.modelos) - {"random_forest", "xgboost", "svr", "mlp"}
+    desconocidos = set(config.modelos) - {"random_forest", "xgboost", "lightgbm", "catboost", "svr", "mlp"}
     if desconocidos:
         raise ConfigError(f"Modelos no soportados: {sorted(desconocidos)}")

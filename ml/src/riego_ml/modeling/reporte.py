@@ -15,6 +15,8 @@ Hojas del Excel:
 5. Plan_completo    error del plan armado (n predicho -> ciclos -> horario) y derivados
 6. Por_turno        errores en test por turno
 7. Por_mes          errores en test por mes
+   Rangos           cobertura real del intervalo p10–p90 en test
+   Historial        todas las corridas, para ver el efecto de datos/features/modelos
 8. Confusion        matriz de confusión del número de ciclos
 9. Importancias     variables más importantes de los modelos de árboles
 10. Graficos        todos los gráficos
@@ -155,6 +157,67 @@ def tabla_comparacion(comp: pd.DataFrame, target: str, clasificacion: bool, eleg
         fila["n test"] = int(x["n"])
         fila["Seg. entrenamiento"] = x.get("segundos", np.nan)
         filas.append(fila)
+    return pd.DataFrame(filas)
+
+
+def tabla_rangos(comp: pd.DataFrame) -> pd.DataFrame:
+    d = comp[comp["target"].astype(str).str.startswith("rango ")].copy()
+    if d.empty:
+        return pd.DataFrame()
+    nombres = {"rango riego_m3ha": "m3/ha por ciclo", "rango inicio_min": "Hora de inicio (min)"}
+    return pd.DataFrame({
+        "Qué": d["target"].map(nombres),
+        "Modelo": d["modelo"],
+        "Cobertura real en test": d["cobertura"],
+        "Cobertura esperada": d["cobertura_esperada"],
+        "Ancho medio del rango": d["ancho_medio"],
+        "Ciclos": d["n"],
+    })
+
+
+def tabla_historial(carpeta_entrenamientos: Path) -> pd.DataFrame:
+    """Una fila por corrida (se reconstruye leyendo cada carpeta)."""
+    filas = []
+    for carpeta in sorted(p for p in carpeta_entrenamientos.iterdir() if p.is_dir()):
+        resumen_json, comp_csv = carpeta / "datos" / "resumen.json", carpeta / "datos" / "comparacion_modelos.csv"
+        if not (resumen_json.exists() and comp_csv.exists()):
+            continue
+        info = json.loads(resumen_json.read_text(encoding="utf-8"))
+        corrida = info.get("corrida", {})
+        comp = pd.read_csv(comp_csv)
+        elegidos = {r["Target"]: r["Modelo elegido"] for r in info.get("resumen", [])}
+        test = comp[comp["conjunto"] == "test"]
+
+        def metrica(target, metrica, modelo=None):
+            d = test[test["target"] == target]
+            if modelo is not None:
+                d = d[d["modelo"] == modelo]
+            return float(d[metrica].iloc[0]) if len(d) and metrica in d else np.nan
+
+        def del_elegido(target, met):
+            nombre = elegidos.get(target)
+            alias = {"Persistencia (ayer)": "persistencia"}  # nombre usado en corridas anteriores
+            clave = alias.get(nombre) or next((k for k, v in NOMBRES.items() if v == nombre), nombre)
+            return metrica(target, met, clave)
+
+        filas.append({
+            "Corrida": carpeta.name,
+            "Datos usados": corrida.get("Datos usados", ""),
+            "Test": corrida.get("Test", ""),
+            "Features": corrida.get("Features", "base (sin registro)"),
+            "N° ciclos: modelo": elegidos.get("n_ciclos", ""),
+            "N° ciclos: acierto": del_elegido("n_ciclos", "accuracy"),
+            "N° ciclos: F1": del_elegido("n_ciclos", "f1_macro"),
+            "m3/ha: modelo": elegidos.get("riego_m3ha", ""),
+            "m3/ha: RMSE": del_elegido("riego_m3ha", "rmse"),
+            "m3/ha: MAE": del_elegido("riego_m3ha", "mae"),
+            "Inicio: modelo": elegidos.get("inicio_min", ""),
+            "Inicio: RMSE (min)": del_elegido("inicio_min", "rmse"),
+            "Inicio: MAE (min)": del_elegido("inicio_min", "mae"),
+            "Duración: MAE (min)": metrica("duracion_min", "mae", None),
+            "Plan: RMSE total m3/ha": metrica("plan: riego_total_m3ha", "rmse"),
+            "Plan: MAE inicio 1er ciclo (min)": metrica("plan: inicio_primer_min", "mae"),
+        })
     return pd.DataFrame(filas)
 
 
@@ -366,6 +429,16 @@ def escribir_excel(r: ResultadosEntrenamiento, tablas: dict[str, pd.DataFrame], 
     _hoja_tabla(wb, "Por_turno", "Errores en test por turno", "Modelos elegidos. Sesgo > 0 = el modelo sobreestima.",
                 tablas["por_turno"].reset_index())
     _hoja_tabla(wb, "Por_mes", "Errores en test por mes", "Modelos elegidos.", tablas["por_mes"].reset_index())
+    if not tablas["rangos"].empty:
+        _hoja_tabla(wb, "Rangos", "Rangos p10–p90: ¿cuántas veces el valor real cayó dentro?",
+                    "Si la cobertura real se parece a la esperada, el rango es confiable.", tablas["rangos"],
+                    formatos={"Cobertura real en test": "0.0%", "Cobertura esperada": "0.0%",
+                              "Ancho medio del rango": "0.0"})
+    if not tablas["historial"].empty:
+        _hoja_tabla(wb, "Historial", "Historial de entrenamientos",
+                    "Una fila por corrida: sirve para ver cómo influyen los datos nuevos, las features y los modelos.",
+                    tablas["historial"],
+                    formatos={"N° ciclos: acierto": "0.0%", "N° ciclos: F1": "0.000"}, max_ancho=30)
     _hoja_tabla(wb, "Confusion", "Matriz de confusión – número de ciclos (test)",
                 "Filas = real, columnas = predicho. La diagonal son los aciertos.", tablas["confusion"],
                 formatos={"Acierto de la clase": "0.0%"})
@@ -477,6 +550,7 @@ def generar_reporte(r: ResultadosEntrenamiento, carpeta: Path, logger=None) -> P
         "comp_riego_m3ha": tabla_comparacion(r.comparacion, "riego_m3ha", False, r.elegidos["riego_m3ha"]["familia"]),
         "comp_inicio_min": tabla_comparacion(r.comparacion, "inicio_min", False, r.elegidos["inicio_min"]["familia"]),
         "plan": tabla_plan(r.comparacion),
+        "rangos": tabla_rangos(r.comparacion),
         "por_turno": tabla_por_turno(r),
         "por_mes": tabla_por_mes(r),
         "confusion": tabla_confusion(r),
@@ -485,9 +559,6 @@ def generar_reporte(r: ResultadosEntrenamiento, carpeta: Path, logger=None) -> P
         "pred_ciclo": _con_horas(r.pred_ciclo_test).round(2),
         "plan_test": _con_horas(r.plan_test).round(2),
     }
-    imagenes = generar_graficos(r, carpeta / "graficos")
-    escribir_excel(r, tablas, imagenes, carpeta / "metricas_modelos.xlsx")
-
     r.comparacion.to_csv(datos / "comparacion_modelos.csv", index=False)
     r.pred_turno_test.to_csv(datos / "predicciones_test_turno.csv", index=False)
     r.pred_ciclo_test.to_csv(datos / "predicciones_test_ciclo.csv", index=False)
@@ -497,6 +568,13 @@ def generar_reporte(r: ResultadosEntrenamiento, carpeta: Path, logger=None) -> P
                    indent=2, ensure_ascii=False, default=str),
         encoding="utf-8",
     )
+    tablas["historial"] = tabla_historial(carpeta.parent)
+    if not tablas["historial"].empty:
+        from riego_ml.utils.excel import write_excel
+
+        write_excel(carpeta.parent.parent / "historial_entrenamientos.xlsx", {"Historial": tablas["historial"]})
+    imagenes = generar_graficos(r, carpeta / "graficos")
+    escribir_excel(r, tablas, imagenes, carpeta / "metricas_modelos.xlsx")
     if logger:
         logger.info("Reporte: %s (%d gráficos)", carpeta, len(imagenes))
     return carpeta

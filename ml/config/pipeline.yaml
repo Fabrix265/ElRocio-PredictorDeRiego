@@ -37,7 +37,18 @@ plan:
   pausa_min_entre_ciclos: 0            # separación mínima al armar el horario
 
 excluir_dias_incompletos_eval: true    # días con menos turnos registrados no se evalúan
-incluir_persistencia: true             # "repetir lo de ayer" compite como un modelo más
+
+especiales:                            # modelos específicos que compiten con los de ML
+  referencias: true                    # persistencia (ayer), media 7 días, semana pasada
+  transicion: true                     # n_ciclos: P(ciclos hoy | ciclos ayer, mes)
+  ordinal: true                        # n_ciclos: logística ordinal
+  persistencia_segura: true            # n_ciclos: repite ayer salvo cambio muy probable
+  dosis: true                          # m3/ha: elige entre las dosis programadas habituales
+
+rangos:                                # intervalo "casi seguro" para m3/ha e inicio
+  habilitado: true
+  inferior: 0.10
+  superior: 0.90
 
 tuning:                                # búsqueda aleatoria con folds temporales (opcional)
   habilitado: false
@@ -54,11 +65,19 @@ modelos:
     habilitado: true
     clasificacion: {n_estimators: 400, max_depth: 4, learning_rate: 0.05, subsample: 0.9, colsample_bytree: 0.8, min_child_weight: 3}
     regresion: {n_estimators: 500, max_depth: 5, learning_rate: 0.05, subsample: 0.9, colsample_bytree: 0.8, min_child_weight: 3}
-  svr:
+  lightgbm:
     habilitado: true
+    clasificacion: {n_estimators: 400, num_leaves: 31, learning_rate: 0.05, min_child_samples: 20, subsample: 0.9, subsample_freq: 1, colsample_bytree: 0.8, class_weight: balanced}
+    regresion: {n_estimators: 500, num_leaves: 31, learning_rate: 0.05, min_child_samples: 20, subsample: 0.9, subsample_freq: 1, colsample_bytree: 0.8}
+  catboost:
+    habilitado: true
+    clasificacion: {iterations: 600, depth: 6, learning_rate: 0.06, auto_class_weights: Balanced}
+    regresion: {iterations: 800, depth: 6, learning_rate: 0.06}
+  svr:                                 # quedaron por debajo de la persistencia: desactivados
+    habilitado: false
     clasificacion: {C: 3.0, gamma: scale, class_weight: balanced}
     regresion: {C: 10.0, epsilon: 0.1, gamma: scale}
   mlp:
-    habilitado: true
+    habilitado: false
     clasificacion: {hidden_layer_sizes: [64, 32], alpha: 0.001, learning_rate_init: 0.001, max_iter: 400}
     regresion: {hidden_layer_sizes: [64, 32], alpha: 0.001, learning_rate_init: 0.001, max_iter: 400}

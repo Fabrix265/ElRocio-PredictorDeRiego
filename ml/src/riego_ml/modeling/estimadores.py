@@ -1,4 +1,4 @@
-"""Fábrica de modelos: Random Forest, XGBoost, SVR/SVC y MLP.
+"""Fábrica de modelos de ML: Random Forest, XGBoost, LightGBM, CatBoost, SVR/SVC y MLP.
 
 Cada estimador es un ``Pipeline`` de scikit-learn que incluye su propio
 preprocesamiento (imputación por mediana + indicador de faltante, one-hot de
@@ -22,9 +22,58 @@ from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from sklearn.svm import SVC, SVR
 from xgboost import XGBClassifier, XGBRegressor
 
-FAMILIAS = ("random_forest", "xgboost", "svr", "mlp")
-PERSISTENCIA_NOMBRE = "persistencia"
+FAMILIAS = ("random_forest", "xgboost", "lightgbm", "catboost", "svr", "mlp")
 ESCALAN = {"svr", "mlp"}
+
+
+class _ConParams(BaseEstimator):
+    """Base para envoltorios que reciben los parámetros del modelo como ``**params``."""
+
+    def __init__(self, **params: Any):
+        self.params = params
+
+    def get_params(self, deep: bool = True) -> dict[str, Any]:
+        return dict(self.params)
+
+    def set_params(self, **params: Any):
+        self.params.update(params)
+        return self
+
+
+class CatBoostPlano(_ConParams):
+    """CatBoost con salida 1-D (CatBoostClassifier devuelve una columna) y sin logs."""
+
+    def __init__(self, tarea: str = "regresion", **params: Any):
+        super().__init__(**params)
+        self.tarea = tarea
+
+    def get_params(self, deep: bool = True) -> dict[str, Any]:
+        return {"tarea": self.tarea, **self.params}
+
+    def set_params(self, **params: Any):
+        self.tarea = params.pop("tarea", self.tarea)
+        self.params.update(params)
+        return self
+
+    def fit(self, X, y):
+        from catboost import CatBoostClassifier, CatBoostRegressor
+
+        cls = CatBoostClassifier if self.tarea == "clasificacion" else CatBoostRegressor
+        self.model_ = cls(**{"verbose": 0, "allow_writing_files": False, **self.params}).fit(X, y)
+        if self.tarea == "clasificacion":
+            self.classes_ = np.asarray(self.model_.classes_)
+        return self
+
+    def predict(self, X):
+        return np.asarray(self.model_.predict(X)).ravel()
+
+    def predict_proba(self, X):
+        return self.model_.predict_proba(X)
+
+    @property
+    def feature_importances_(self):
+        valores = np.asarray(self.model_.get_feature_importance(), dtype=float)
+        return valores / valores.sum() if valores.sum() else valores
 
 
 class XGBEtiquetado(BaseEstimator, ClassifierMixin):
@@ -57,45 +106,6 @@ class XGBEtiquetado(BaseEstimator, ClassifierMixin):
         return self.model_.feature_importances_
 
 
-class Persistencia(BaseEstimator):
-    """Referencia: repite lo que hizo el mismo turno/ciclo el día anterior.
-
-    Si no hay dato del día anterior usa la mediana (regresión) o la moda
-    (clasificación) de entrenamiento del grupo (p. ej. Turno, n_ciclos, Ciclo).
-    Compite en la selección como un modelo más: si ningún modelo de ML la
-    supera en validación, se usa ella.
-    """
-
-    def __init__(self, columna: str, grupos: tuple[str, ...] = ("Turno",), tarea: str = "regresion"):
-        self.columna = columna
-        self.grupos = grupos
-        self.tarea = tarea
-
-    def fit(self, X, y):
-        y = pd.Series(np.asarray(y), index=X.index)
-        agregar = (lambda s: s.mode().iloc[0]) if self.tarea == "clasificacion" else "median"
-        self.respaldo_ = y.groupby([X[g] for g in self.grupos]).agg(agregar)
-        self.global_ = y.mode().iloc[0] if self.tarea == "clasificacion" else float(y.median())
-        if self.tarea == "clasificacion":
-            self.classes_ = np.sort(y.unique())
-        return self
-
-    def predict(self, X):
-        indice = pd.MultiIndex.from_frame(X[list(self.grupos)]) if len(self.grupos) > 1 else X[self.grupos[0]]
-        respaldo = pd.Series(self.respaldo_.reindex(indice).to_numpy(), index=X.index)
-        pred = X[self.columna].astype(float).fillna(respaldo).fillna(self.global_)
-        if self.tarea == "clasificacion":
-            pred = pred.round().clip(self.classes_.min(), self.classes_.max()).astype(int)
-        return pred.to_numpy()
-
-
-PERSISTENCIA = {
-    "n_ciclos": ("prev_n_ciclos", ("Turno",)),
-    "riego_m3ha": ("prev_ciclo_m3ha", ("Turno", "n_ciclos", "Ciclo")),
-    "inicio_min": ("prev_ciclo_inicio_min", ("Turno", "n_ciclos", "Ciclo")),
-}
-
-
 def _modelo_base(familia: str, tarea: str, params: dict[str, Any], seed: int):
     params = dict(params)
     if "hidden_layer_sizes" in params:
@@ -109,6 +119,13 @@ def _modelo_base(familia: str, tarea: str, params: dict[str, Any], seed: int):
         if clasif:
             return XGBEtiquetado(random_state=seed, n_jobs=-1, **params)
         return XGBRegressor(random_state=seed, n_jobs=-1, **params)
+    if familia == "lightgbm":
+        from lightgbm import LGBMClassifier, LGBMRegressor
+
+        cls = LGBMClassifier if clasif else LGBMRegressor
+        return cls(random_state=seed, n_jobs=-1, verbose=-1, **params)
+    if familia == "catboost":
+        return CatBoostPlano(tarea=tarea, random_seed=seed, thread_count=-1, **params)
     if familia == "svr":
         return SVC(random_state=seed, **params) if clasif else SVR(**params)
     if familia == "mlp":
@@ -180,6 +197,23 @@ def espacio_busqueda(familia: str, tarea: str) -> dict[str, list]:
         if tarea == "regresion":
             espacio["epsilon"] = [0.05, 0.1, 0.2]
         return espacio
+    if familia == "lightgbm":
+        return {
+            "n_estimators": [200, 400, 700],
+            "num_leaves": [15, 31, 63],
+            "learning_rate": [0.02, 0.05, 0.1],
+            "min_child_samples": [10, 20, 50],
+            "subsample": [0.7, 0.9, 1.0],
+            "subsample_freq": [1],
+            "colsample_bytree": [0.5, 0.7, 0.9],
+        }
+    if familia == "catboost":
+        return {
+            "iterations": [300, 600, 900],
+            "depth": [4, 6, 8],
+            "learning_rate": [0.03, 0.06, 0.1],
+            "l2_leaf_reg": [1, 3, 10],
+        }
     if familia == "mlp":
         return {
             "hidden_layer_sizes": [(32,), (64, 32), (128, 64), (64, 64, 32)],
@@ -191,7 +225,7 @@ def espacio_busqueda(familia: str, tarea: str) -> dict[str, list]:
 
 def importancias(estimador) -> dict[str, float]:
     """Importancia de variables si el modelo la expone (árboles)."""
-    if isinstance(estimador, Persistencia):
+    if not isinstance(estimador, (Pipeline, TransformedTargetRegressor)):
         return {}
     pipe = estimador.regressor_ if isinstance(estimador, TransformedTargetRegressor) else estimador
     modelo = pipe.named_steps["modelo"]

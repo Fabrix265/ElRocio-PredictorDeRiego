@@ -2,9 +2,9 @@
 
 Para cada turno-día:
 
-1. El clasificador estima ``n_ciclos``.
-2. Para cada ciclo k = 1..n_ciclos los regresores estiman ``riego_m3ha`` y
-   ``inicio_min``.
+1. El modelo de ``n_ciclos`` estima cuántos ciclos hay.
+2. Para cada ciclo k = 1..n_ciclos se estiman ``riego_m3ha`` e ``inicio_min``
+   (y, si hay modelos de rango, un intervalo p10–p90 para cada uno).
 3. La duración se deriva del volumen con el caudal propio de cada turno
    (``min_por_m3ha``, mediana histórica de duración / m3·ha⁻¹). Así volumen,
    duración y hora de fin son siempre coherentes entre sí.
@@ -20,37 +20,55 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from riego_ml.dataset.features import construir_features_ciclo
+from riego_ml.dataset.features import construir_features_ciclo, features_solo_ciclo
 from riego_ml.dataset.limpieza import CLAVES_TD
 from riego_ml.utils.tiempo import MINUTOS_DIA, minutes_to_hhmm
+
+TARGETS = ("n_ciclos", "riego_m3ha", "inicio_min")
 
 
 @dataclass
 class PlanRiego:
-    modelo_n_ciclos: Any
-    modelo_m3ha: Any
-    modelo_inicio: Any
-    features_turno: list[str]
-    features_ciclo: list[str]
+    modelos: dict[str, Any]
+    features: dict[str, list[str]]
     max_ciclos: int
     min_por_m3ha: dict[str, float]
     area_ha: dict[str, float]
     rango_m3ha: tuple[float, float]
     pausa_min: float = 0.0
+    rangos: dict[str, Any] = field(default_factory=dict)
     elegidos: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ #
+    def columnas_turno(self) -> list[str]:
+        """Columnas turno-día que necesita algún modelo (unión, sin claves ni columnas de ciclo)."""
+        todas = [c for t in TARGETS for c in self.features[t]]
+        for modelo in self.rangos.values():
+            todas += list(getattr(modelo, "columnas_", []))
+        de_ciclo = set(features_solo_ciclo(True))
+        return [c for c in dict.fromkeys(todas) if c not in CLAVES_TD and c not in de_ciclo]
+
     def predecir_n_ciclos(self, features_turno: pd.DataFrame) -> np.ndarray:
-        pred = self.modelo_n_ciclos.predict(features_turno[self.features_turno])
+        pred = self.modelos["n_ciclos"].predict(features_turno[self.features["n_ciclos"]])
         return np.clip(np.rint(np.asarray(pred, dtype=float)), 1, self.max_ciclos).astype(int)
 
     def predecir_ciclos(self, filas_ciclo: pd.DataFrame) -> pd.DataFrame:
-        """Predice m3/ha e inicio para filas con features de ciclo ya construidas."""
+        """Predice m3/ha e inicio (y sus rangos) para filas con features de ciclo."""
         out = filas_ciclo.copy()
-        X = out[self.features_ciclo]
-        out["riego_m3ha"] = np.clip(self.modelo_m3ha.predict(X), *self.rango_m3ha)
-        out["inicio_min"] = np.clip(self.modelo_inicio.predict(X), 0.0, MINUTOS_DIA - 1.0)
+        m3ha = self.modelos["riego_m3ha"].predict(out[self.features["riego_m3ha"]])
+        out["riego_m3ha"] = np.clip(m3ha, *self.rango_m3ha)
+        inicio = self.modelos["inicio_min"].predict(out[self.features["inicio_min"]])
+        out["inicio_min"] = np.clip(inicio, 0.0, MINUTOS_DIA - 1.0)
+        for target, modelo in self.rangos.items():
+            bajo, alto = modelo.predict(out[modelo.columnas_])
+            # el rango siempre contiene a la predicción central
+            out[f"{target}_p10"] = np.minimum(bajo, out[target])
+            out[f"{target}_p90"] = np.maximum(alto, out[target])
+        if "riego_m3ha_p10" in out:
+            out[["riego_m3ha_p10", "riego_m3ha_p90"]] = out[["riego_m3ha_p10", "riego_m3ha_p90"]].clip(*self.rango_m3ha)
+        if "inicio_min_p10" in out:
+            out[["inicio_min_p10", "inicio_min_p90"]] = out[["inicio_min_p10", "inicio_min_p90"]].clip(0, MINUTOS_DIA - 1)
         return out
 
     def duracion(self, turnos: pd.Series, m3ha: pd.Series) -> np.ndarray:
@@ -59,8 +77,8 @@ class PlanRiego:
 
     def predecir(self, features_turno: pd.DataFrame, ciclos_hist: pd.DataFrame) -> pd.DataFrame:
         """Plan en formato largo: 1 fila por ciclo programado."""
-        extra = [c for c in self.features_turno if c not in CLAVES_TD]
-        base = features_turno[[*CLAVES_TD, *extra]].reset_index(drop=True)
+        columnas = [c for c in self.columnas_turno() if c in features_turno.columns]
+        base = features_turno[[*CLAVES_TD, *columnas]].reset_index(drop=True)
         n = self.predecir_n_ciclos(base)
         filas = base.loc[base.index.repeat(n), CLAVES_TD].reset_index(drop=True)
         filas["n_ciclos"] = np.repeat(n, n)
@@ -68,6 +86,9 @@ class PlanRiego:
         filas = construir_features_ciclo(filas, base, ciclos_hist)
         plan = self.predecir_ciclos(filas)
         plan["duracion_min"] = self.duracion(plan["Turno"], plan["riego_m3ha"])
+        if "riego_m3ha_p10" in plan:
+            plan["duracion_min_p10"] = self.duracion(plan["Turno"], plan["riego_m3ha_p10"])
+            plan["duracion_min_p90"] = self.duracion(plan["Turno"], plan["riego_m3ha_p90"])
         return self.armar_horario(plan)
 
     def armar_horario(self, plan: pd.DataFrame) -> pd.DataFrame:
@@ -92,13 +113,19 @@ class PlanRiego:
             *CLAVES_TD, "n_ciclos", "Ciclo", "riego_m3ha", "riego_m3", "duracion_min",
             "hora_inicio", "hora_fin", "fin_dia_siguiente", "inicio_min", "fin_min",
         ]
-        return plan[columnas].round(
-            {"riego_m3ha": 2, "riego_m3": 1, "duracion_min": 1, "inicio_min": 1, "fin_min": 1}
-        )
+        if "riego_m3ha_p10" in plan:
+            columnas += ["riego_m3ha_p10", "riego_m3ha_p90", "duracion_min_p10", "duracion_min_p90"]
+        if "inicio_min_p10" in plan:
+            plan["hora_inicio_desde"] = plan["inicio_min_p10"].map(minutes_to_hhmm)
+            plan["hora_inicio_hasta"] = plan["inicio_min_p90"].map(minutes_to_hhmm)
+            columnas += ["hora_inicio_desde", "hora_inicio_hasta"]
+        redondeo = {c: 2 if "m3ha" in c else 1 for c in columnas if c.startswith(("riego", "duracion", "inicio", "fin_min"))}
+        return plan[columnas].round(redondeo)
 
 
 def plan_ancho(plan: pd.DataFrame, max_ciclos: int) -> pd.DataFrame:
     """1 fila por turno-día: n_ciclos y, por cada ciclo, m3/ha, duración, inicio y fin."""
+    con_rango = "riego_m3ha_p10" in plan
     filas = []
     for claves, g in plan.groupby(CLAVES_TD, sort=True):
         fila = dict(zip(CLAVES_TD, claves))
@@ -109,8 +136,14 @@ def plan_ancho(plan: pd.DataFrame, max_ciclos: int) -> pd.DataFrame:
             c = g[g["Ciclo"] == k]
             vacio = c.empty
             fila[f"ciclo{k}_m3ha"] = np.nan if vacio else c["riego_m3ha"].iloc[0]
+            if con_rango:
+                fila[f"ciclo{k}_m3ha_rango"] = "" if vacio else (
+                    f"{c['riego_m3ha_p10'].iloc[0]:.1f} – {c['riego_m3ha_p90'].iloc[0]:.1f}")
             fila[f"ciclo{k}_duracion_min"] = np.nan if vacio else c["duracion_min"].iloc[0]
             fila[f"ciclo{k}_hora_inicio"] = "" if vacio else c["hora_inicio"].iloc[0]
+            if "hora_inicio_desde" in c:
+                fila[f"ciclo{k}_inicio_rango"] = "" if vacio else (
+                    f"{c['hora_inicio_desde'].iloc[0]} – {c['hora_inicio_hasta'].iloc[0]}")
             fila[f"ciclo{k}_hora_fin"] = "" if vacio else c["hora_fin"].iloc[0]
         filas.append(fila)
     return pd.DataFrame(filas)

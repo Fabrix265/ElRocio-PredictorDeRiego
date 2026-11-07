@@ -33,10 +33,17 @@ from riego_ml.config import Config
 from riego_ml.dataset.limpieza import CLAVES_TD
 from riego_ml.dataset.preparar import cargar_dataset
 from riego_ml.modeling import metricas
-from riego_ml.modeling.estimadores import (
-    PERSISTENCIA,
-    PERSISTENCIA_NOMBRE,
+from riego_ml.modeling.especiales import (
+    REFERENCIAS,
+    ClasificadorDosis,
+    OrdinalLogistico,
     Persistencia,
+    PersistenciaSegura,
+    RangoCuantiles,
+    TransicionNCiclos,
+)
+from riego_ml.modeling.estimadores import (
+    FAMILIAS,
     crear_estimador,
     espacio_busqueda,
     importancias,
@@ -78,6 +85,7 @@ class Entrenador:
         self.categoricas = list(cols["categoricas"])
         self.f_turno = list(cols["features_turno"])
         self.f_ciclo = list(cols["features_ciclo"])
+        self.features_extendidas = bool(cols.get("features_extendidas", False))
         maxc = cfg.plan.max_ciclos
 
         td = ds.turno_dia.copy()
@@ -97,6 +105,7 @@ class Entrenador:
 
         self.min_por_m3ha_train = self._min_por_m3ha(ci[ci["conjunto"] == "train"])
         pred_turno, pred_ciclo = self._tablas_prediccion_test(td, ci)
+        self._evaluar_rangos(ci)
         plan_test, plan_largo = self._evaluar_plan(td, ci)
 
         plan_final = self._reentrenar_final(td, ci)
@@ -142,12 +151,42 @@ class Entrenador:
         modelo = self.config.modelos[familia]
         return dict(modelo.clasificacion if tarea == "clasificacion" else modelo.regresion)
 
+    def _candidatos(self, nombre: str) -> list[str]:
+        """Modelos que compiten para un target: ML habilitados + especiales + referencias."""
+        esp = self.config.especiales
+        candidatos = list(self.config.modelos_habilitados())
+        if nombre == "n_ciclos":
+            candidatos += [m for m, activo in (("transicion", esp.transicion), ("ordinal", esp.ordinal),
+                                                ("persistencia_segura", esp.persistencia_segura)) if activo]
+        if nombre == "riego_m3ha" and esp.dosis:
+            candidatos.append("dosis")
+        # La persistencia siempre compite: es la vara mínima.
+        referencias = list(REFERENCIAS[nombre]) if esp.referencias else ["persistencia"]
+        return candidatos + referencias
+
     def _crear(self, nombre: str, familia: str, tarea: str, features: list[str], params: dict[str, Any]):
-        if familia == PERSISTENCIA_NOMBRE:
-            columna, grupos = PERSISTENCIA[nombre]
-            return Persistencia(columna, grupos, tarea)
         numericas = [c for c in features if c not in self.categoricas]
-        return crear_estimador(familia, tarea, params, self.categoricas, numericas, self.config.seed)
+        seed = self.config.seed
+        lgbm_clf = dict(self.config.modelos["lightgbm"].clasificacion) if "lightgbm" in self.config.modelos else {}
+        if familia in REFERENCIAS[nombre]:
+            columna, grupos = REFERENCIAS[nombre][familia]
+            return Persistencia(columna, grupos, tarea)
+        if familia == "transicion":
+            return TransicionNCiclos()
+        if familia == "ordinal":
+            return OrdinalLogistico(self.categoricas, numericas)
+        if familia == "persistencia_segura":
+            return PersistenciaSegura(self.categoricas, numericas, lgbm_clf, seed)
+        if familia == "dosis":
+            params_dosis = {k: v for k, v in lgbm_clf.items() if k != "class_weight"}
+            return ClasificadorDosis(self.categoricas, numericas, params_dosis, seed=seed)
+        return crear_estimador(familia, tarea, params, self.categoricas, numericas, seed)
+
+    @staticmethod
+    def _features_modelo(estimador, features: list[str]) -> list[str]:
+        """Features del target + columnas extra que necesita el modelo (referencias)."""
+        extra = getattr(estimador, "columnas_requeridas", [])
+        return list(dict.fromkeys([*features, *extra]))
 
     @staticmethod
     def _ajustar(estimador, X: pd.DataFrame, y: pd.Series):
@@ -192,42 +231,46 @@ class Entrenador:
         self.logger.info("Target %s (%s): %d features", nombre, tarea, len(features))
         train = df[df["conjunto"] == "train"]
         evaluacion = {c: df[(df["conjunto"] == c) & self._mascara_eval(df)] for c in ("validacion", "test")}
-        familias = self.config.modelos_habilitados()
-        if self.config.incluir_persistencia:
-            familias = [*familias, PERSISTENCIA_NOMBRE]
+        familias = self._candidatos(nombre)
         clave = "f1_macro" if tarea == "clasificacion" else "rmse"
         candidatos = {}
         self.pred_test[nombre] = {}
         self.importancias[nombre] = {}
         for familia in familias:
             inicio = time.time()
-            es_ml = familia != PERSISTENCIA_NOMBRE
+            es_ml = familia in FAMILIAS
             params = self._params(familia, tarea) if es_ml else {}
             if self.config.tuning.habilitado and es_ml:
                 params = self._buscar(nombre, familia, tarea, features, train, target)
-            estimador = self._ajustar(
-                self._crear(nombre, familia, tarea, features, params), train[features], train[target]
-            )
+            estimador = self._crear(nombre, familia, tarea, features, params)
+            columnas = self._features_modelo(estimador, features)
+            try:
+                estimador = self._ajustar(estimador, train[columnas], train[target])
+            except Exception as exc:  # noqa: BLE001 - un candidato que falla no frena al resto
+                self.logger.warning("  %-20s falló: %s", familia, exc)
+                continue
             segundos = round(time.time() - inicio, 1)
             puntajes = {}
             for conjunto, datos in evaluacion.items():
-                pred = estimador.predict(datos[features])
+                pred = estimador.predict(datos[columnas])
                 if conjunto == "test":
                     self.pred_test[nombre][familia] = np.asarray(pred)
                 puntajes[conjunto] = self._metricas(tarea, datos[target], pred)
                 self._registrar(nombre, familia, conjunto, puntajes[conjunto], segundos=segundos)
-            candidatos[familia] = (puntajes["validacion"][clave], estimador, params, puntajes)
+            candidatos[familia] = (puntajes["validacion"][clave], estimador, params, puntajes, columnas)
             imp = importancias(estimador)
             if imp:
                 self.importancias[nombre][familia] = imp
             self.logger.info(
-                "  %-13s val %s=%.4f | test %s=%.4f (%.0fs)",
+                "  %-20s val %s=%.4f | test %s=%.4f (%.0fs)",
                 familia, clave, puntajes["validacion"][clave], clave, puntajes["test"][clave], segundos,
             )
-        mejor = (max if tarea == "clasificacion" else min)(candidatos, key=lambda f: candidatos[f][0])
-        _, estimador, params, puntajes = candidatos[mejor]
+        # En empate gana el más simple: las referencias van al final de la lista.
+        signo = 1 if tarea == "clasificacion" else -1
+        mejor = max(reversed(list(candidatos)), key=lambda f: round(signo * candidatos[f][0], 9))
+        _, estimador, params, puntajes, columnas = candidatos[mejor]
         self.elegidos[nombre] = {
-            "familia": mejor, "tarea": tarea, "target": target, "features": features, "params": params,
+            "familia": mejor, "tarea": tarea, "target": target, "features": columnas, "params": params,
             "estimador_train": estimador, "validacion": puntajes["validacion"], "test": puntajes["test"],
         }
         self.logger.info("  -> elegido para %s: %s", nombre, mejor)
@@ -270,28 +313,65 @@ class Entrenador:
                         metricas.regresion(ciclo["fin_min_real"], ciclo["fin_min_pred"]))
         return turno.reset_index(drop=True), ciclo.reset_index(drop=True)
 
-    def _plan(self, modelos: dict[str, Any], ciclos: pd.DataFrame, metadata=None) -> PlanRiego:
+    def _plan(self, modelos: dict[str, Any], ciclos: pd.DataFrame, rangos=None, metadata=None) -> PlanRiego:
         return PlanRiego(
-            modelo_n_ciclos=modelos["n_ciclos"],
-            modelo_m3ha=modelos["riego_m3ha"],
-            modelo_inicio=modelos["inicio_min"],
-            features_turno=self.f_turno,
-            features_ciclo=self.f_ciclo,
+            modelos=modelos,
+            features={k: v["features"] for k, v in self.elegidos.items()},
             max_ciclos=self.config.plan.max_ciclos,
             min_por_m3ha=self._min_por_m3ha(ciclos),
             area_ha=self._area(ciclos),
             rango_m3ha=(float(ciclos["riego_m3ha"].quantile(0.001)), float(ciclos["riego_m3ha"].quantile(0.999))),
             pausa_min=self.config.plan.pausa_min_entre_ciclos,
+            rangos=rangos or {},
             elegidos={k: v["familia"] for k, v in self.elegidos.items()},
             metadata=metadata or {},
         )
 
+    def _entrenar_rangos(self, ci: pd.DataFrame, margenes: dict[str, float] | None = None) -> dict[str, Any]:
+        """Modelos p10/p90 para m3/ha e inicio (ajustados con ``ci``)."""
+        cfg = self.config.rangos
+        if not cfg.habilitado:
+            return {}
+        numericas = [c for c in self.f_ciclo if c not in self.categoricas]
+        rangos = {}
+        for target in ("riego_m3ha", "inicio_min"):
+            modelo = RangoCuantiles(self.categoricas, numericas, cfg.inferior, cfg.superior, self.config.seed)
+            rangos[target] = self._ajustar(modelo, ci[self.f_ciclo], ci[target])
+            rangos[target].margen_ = (margenes or {}).get(target, 0.0)
+        return rangos
+
+    def _evaluar_rangos(self, ci: pd.DataFrame) -> None:
+        """Calibra el margen en validación y mide la cobertura real en test."""
+        if not self.config.rangos.habilitado:
+            self.rangos_train, self.margenes_rango = {}, {}
+            return
+        train = ci[ci["conjunto"] == "train"]
+        val = ci[(ci["conjunto"] == "validacion") & self._mascara_eval(ci)]
+        test = ci[(ci["conjunto"] == "test") & self._mascara_eval(ci)]
+        self.rangos_train = self._entrenar_rangos(train)
+        self.margenes_rango = {t: m.calcular_margen(val[self.f_ciclo], val[t]) for t, m in self.rangos_train.items()}
+        esperado = self.config.rangos.superior - self.config.rangos.inferior
+        for target, modelo in self.rangos_train.items():
+            real = test[target].to_numpy()
+            for nombre, margen in (("LightGBM cuantiles (sin calibrar)", 0.0),
+                                   ("LightGBM cuantiles calibrado", self.margenes_rango[target])):
+                modelo.margen_ = margen
+                bajo, alto = modelo.predict(test[self.f_ciclo])
+                self.filas.append({
+                    "target": f"rango {target}", "modelo": nombre, "conjunto": "test",
+                    "n": len(real), "cobertura": float(np.mean((real >= bajo) & (real <= alto))),
+                    "cobertura_esperada": esperado, "ancho_medio": float(np.mean(alto - bajo)),
+                })
+                self.logger.info("  rango %-11s %-34s cobertura test=%.1f%% (esperada %.0f%%) ancho=%.1f",
+                                 target, nombre, 100 * self.filas[-1]["cobertura"], 100 * esperado,
+                                 self.filas[-1]["ancho_medio"])
+
     def _evaluar_plan(self, td, ci) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Plan completo en test: n_ciclos predicho -> ciclos -> horario."""
         modelos = {k: v["estimador_train"] for k, v in self.elegidos.items()}
-        plan = self._plan(modelos, ci[ci["conjunto"] == "train"])
+        plan = self._plan(modelos, ci[ci["conjunto"] == "train"], getattr(self, "rangos_train", {}))
         test = td[(td["conjunto"] == "test") & self._mascara_eval(td)]
-        entrada = test[[*CLAVES_TD, *[c for c in self.f_turno if c not in CLAVES_TD]]]
+        entrada = test
         predicho = plan.predecir(entrada, self.ciclos_hist)
         resumen = (
             predicho.groupby(CLAVES_TD)
@@ -342,7 +422,7 @@ class Entrenador:
             "config": self.config.to_dict(),
             "entorno": environment_info(),
         }
-        return self._plan(modelos, ci, metadata)
+        return self._plan(modelos, ci, self._entrenar_rangos(ci, getattr(self, "margenes_rango", {})), metadata)
 
     # ------------------------------------------------------------------ #
     def _info_corrida(self, td, ci, ruta_modelo) -> dict[str, Any]:
@@ -358,7 +438,10 @@ class Entrenador:
             "Test": f"desde {cortes['inicio_test']} · {conteo['test']} turno-días · {conteo_ci['test']} ciclos",
             "Separación entre bloques": f"{self.config.split.gap_dias} días",
             "Días incompletos en la evaluación": "excluidos" if self.config.excluir_dias_incompletos_eval else "incluidos",
-            "Modelos comparados": ", ".join([*self.config.modelos_habilitados(), PERSISTENCIA_NOMBRE]),
+            "Features": (f"extendidas ({len(self.f_turno)} turno-día / {len(self.f_ciclo)} ciclo)"
+                         if self.features_extendidas
+                         else f"base ({len(self.f_turno)} turno-día / {len(self.f_ciclo)} ciclo)"),
+            "Modelos comparados": " | ".join(f"{t}: {', '.join(self._candidatos(t))}" for t in DESCRIPCION_TARGET),
             "Búsqueda de hiperparámetros": "sí" if self.config.tuning.habilitado else "no (parámetros del YAML)",
             "Modelo final guardado en": str(ruta_modelo),
         }

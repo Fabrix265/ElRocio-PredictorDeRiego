@@ -25,16 +25,32 @@ REAL = "#8a8984"
 COLORES = {
     "random_forest": "#2a78d6",
     "xgboost": "#eb6834",
-    "svr": "#1baf7a",
-    "mlp": "#eda100",
+    "lightgbm": "#1baf7a",
+    "catboost": "#eda100",
+    "transicion": "#e87ba4",
+    "ordinal": "#008300",
+    "persistencia_segura": "#6250d6",
+    "dosis": "#e34948",
+    "svr": "#8a8984",
+    "mlp": "#8a8984",
     "persistencia": "#b5b4ae",
+    "media_7d": "#b5b4ae",
+    "semana_pasada": "#b5b4ae",
 }
 NOMBRES = {
     "random_forest": "Random Forest",
     "xgboost": "XGBoost",
+    "lightgbm": "LightGBM",
+    "catboost": "CatBoost",
+    "transicion": "Transición (Markov)",
+    "ordinal": "Logística ordinal",
+    "persistencia_segura": "Persistencia salvo cambio seguro",
+    "dosis": "Clasificador de dosis",
     "svr": "SVR / SVC",
     "mlp": "MLP",
-    "persistencia": "Persistencia (ayer)",
+    "persistencia": "Ref: persistencia (ayer)",
+    "media_7d": "Ref: media 7 días",
+    "semana_pasada": "Ref: semana pasada",
 }
 VALIDACION = "#86b6ef"
 TEST = "#1c5cab"
@@ -88,7 +104,7 @@ def comparacion_modelos(comparacion: pd.DataFrame, target: str, metrica: str, ti
     tabla = d.pivot_table(index="modelo", columns="conjunto", values=metrica)
     orden = [m for m in NOMBRES if m in tabla.index]
     tabla = tabla.loc[orden]
-    fig, ax = plt.subplots(figsize=(8, 4.2))
+    fig, ax = plt.subplots(figsize=(8.5, 1.2 + 0.62 * len(tabla)))
     y = np.arange(len(tabla))
     alto = 0.36
     ax.barh(y - alto / 2 - 0.01, tabla["validacion"], height=alto, color=VALIDACION, label="Validación")
@@ -98,6 +114,10 @@ def comparacion_modelos(comparacion: pd.DataFrame, target: str, metrica: str, ti
             valor = tabla.loc[modelo, conjunto]
             ax.text(valor, i + desplaz, f" {valor:.3g}", va="center", fontsize=8, color=TINTA_2)
     ax.set_yticks(y, [NOMBRES[m] + ("  ★ elegido" if m == elegido else "") for m in tabla.index])
+    for etiqueta, modelo in zip(ax.get_yticklabels(), tabla.index):
+        if modelo == elegido:
+            etiqueta.set_fontweight("bold")
+            etiqueta.set_color(TINTA)
     ax.invert_yaxis()
     ax.grid(axis="y", visible=False)
     ax.set_xlabel(metrica)
