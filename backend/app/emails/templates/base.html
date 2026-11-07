@@ -1,0 +1,45 @@
+{#- Plantilla base de los correos: marca verde y blanca de Grupo El Rocío. Estilos en línea
+    (los clientes de correo ignoran <style>). Los logos de AvoPeru y Talsa se agregarán como PNG
+    embebido (CID) en el hueco de la cabecera; mientras tanto, texto. -#}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{{ asunto }}</title>
+</head>
+<body style="margin:0;padding:0;background:#F6F4EE;color:#1F1C17;font-family:'IBM Plex Sans','Segoe UI',Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F6F4EE;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+               style="max-width:560px;background:#FFFFFF;border:1px solid #DDD7C9;border-radius:12px;">
+          <tr>
+            <td style="padding:20px 28px;background:#FFFFFF;border-bottom:3px solid #2A7042;border-radius:12px 12px 0 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-size:18px;font-weight:700;color:#1B482C;">Grupo El Rocío</td>
+                  {#- Hueco para los logos (AvoPeru y Talsa) -#}
+                  <td align="right" style="font-size:12px;color:#7A7262;">AvoPeru &middot; Talsa</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px;font-size:15px;line-height:22px;color:#1F1C17;">
+              {% block contenido %}{% endblock %}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 28px;background:#FBFAF7;border-top:1px solid #EDE9DF;border-radius:0 0 12px 12px;font-size:12px;line-height:18px;color:#5F5849;">
+              Sistema de Plan de Riego &middot; Grupo El Rocío<br>
+              Mensaje automático: por favor no respondas a este correo.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

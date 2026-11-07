@@ -1,0 +1,13 @@
+Grupo El Rocío - Sistema de Plan de Riego
+
+Hola, {{ nombre }}:
+
+Recibimos una solicitud para restablecer la contraseña de tu usuario {{ username }}.
+Abre este enlace para elegir una nueva contraseña:
+
+{{ enlace }}
+
+El enlace vence en {{ minutos }} minutos y solo puede usarse una vez.
+Si no pediste este cambio, ignora este correo: tu contraseña sigue siendo la misma.
+
+Mensaje automático: por favor no respondas a este correo.

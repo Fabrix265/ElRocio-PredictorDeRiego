@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.manejadores import registrar_manejadores
 from app.api.v1.router import api_router
 from app.core.config import Settings, get_settings
 
@@ -33,6 +34,8 @@ def create_app(config: Settings | None = None) -> FastAPI:
         redoc_url=None,
         openapi_url=f"{config.api_v1_prefix}/openapi.json" if docs else None,
     )
+
+    registrar_manejadores(app)
 
     app.add_middleware(
         CORSMiddleware,

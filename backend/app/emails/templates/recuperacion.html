@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "_componentes.html" import boton %}
+{% block contenido %}
+<h1 style="margin:0 0 16px;font-size:20px;line-height:28px;font-weight:700;color:#1B482C;">Restablece tu contraseña</h1>
+<p style="margin:0 0 12px;">Hola, {{ nombre }}:</p>
+<p style="margin:0 0 12px;">Recibimos una solicitud para restablecer la contraseña de tu usuario
+  <strong>{{ username }}</strong> en el Sistema de Plan de Riego.</p>
+{{ boton(enlace, "Restablecer contraseña") }}
+<p style="margin:0 0 12px;">El enlace vence en <strong>{{ minutos }} minutos</strong> y solo puede usarse una vez.</p>
+<p style="margin:0 0 12px;color:#5F5849;">Si no pediste este cambio, ignora este correo: tu contraseña sigue siendo la misma.</p>
+<p style="margin:16px 0 0;font-size:12px;line-height:18px;color:#7A7262;">Si el botón no funciona, copia este enlace en tu navegador:<br>
+  <a href="{{ enlace }}" style="color:#2A7042;word-break:break-all;">{{ enlace }}</a></p>
+{% endblock %}

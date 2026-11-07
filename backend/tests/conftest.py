@@ -32,7 +32,9 @@ os.environ.update(
     }
 )
 
+import functools  # noqa: E402
 from collections.abc import Iterator  # noqa: E402
+from email.message import EmailMessage  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 import pytest  # noqa: E402
@@ -151,3 +153,108 @@ def app(db: Session):
 def client(app) -> Iterator[TestClient]:
     with TestClient(app) as cliente:
         yield cliente
+
+
+# --- Usuarios, sesiones y correos ---------------------------------------------
+
+PASSWORD_PRUEBA = "Riego2026segura"
+API = "/api/v1"
+CABECERA_FETCH = {"X-Requested-With": "fetch"}
+
+
+@functools.lru_cache
+def _hash_cacheado(password: str) -> str:
+    # argon2id es lento a propósito: se reutiliza el hash entre tests (sal incluida, sigue válido).
+    from app.core.security import hash_password
+
+    return hash_password(password)
+
+
+@pytest.fixture
+def crear_usuario(db: Session):
+    """Fábrica: ``crear_usuario("ana", rol="encargado", ...)`` inserta un usuario como riego_app."""
+    from app.models import Usuario
+    from app.models.enums import RolUsuario
+
+    def _crear(
+        username: str,
+        *,
+        rol: str | RolUsuario = RolUsuario.admin,
+        password: str = PASSWORD_PRUEBA,
+        activo: bool = True,
+        debe_cambiar_password: bool = False,
+        correo: str | None = None,
+        nombre: str | None = None,
+    ) -> Usuario:
+        usuario = Usuario(
+            username=username,
+            nombre=nombre or f"Usuario {username}",
+            correo=correo or f"{username}@example.com",
+            rol=RolUsuario(rol),
+            password_hash=_hash_cacheado(password),
+            activo=activo,
+            token_version=0,
+            debe_cambiar_password=debe_cambiar_password,
+        )
+        db.add(usuario)
+        db.commit()
+        return usuario
+
+    return _crear
+
+
+def login(client: TestClient, username: str, password: str = PASSWORD_PRUEBA):
+    """POST /auth/login; devuelve la respuesta (el cliente guarda la cookie ``rt``)."""
+    return client.post(f"{API}/auth/login", json={"username": username, "password": password})
+
+
+def token_de(client: TestClient, username: str, password: str = PASSWORD_PRUEBA) -> str:
+    respuesta = login(client, username, password)
+    assert respuesta.status_code == 200, respuesta.text
+    return respuesta.json()["access_token"]
+
+
+def bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def auth(client: TestClient, crear_usuario):
+    """Crea un usuario con el rol pedido y devuelve las cabeceras con su access token."""
+
+    def _auth(rol: str = "admin", username: str | None = None, **kwargs) -> dict[str, str]:
+        username = username or f"{rol}_prueba"
+        crear_usuario(username, rol=rol, **kwargs)
+        return bearer(token_de(client, username, kwargs.get("password", PASSWORD_PRUEBA)))
+
+    return _auth
+
+
+class MailerFalso:
+    """Guarda los correos en memoria (sustituye a SMTP en las pruebas)."""
+
+    def __init__(self) -> None:
+        self.enviados: list[EmailMessage] = []
+
+    def enviar(self, mensaje: EmailMessage) -> None:
+        self.enviados.append(mensaje)
+
+    def texto(self, indice: int = -1) -> str:
+        return self.enviados[indice].get_body(preferencelist=("plain",)).get_content()
+
+    def html(self, indice: int = -1) -> str:
+        return self.enviados[indice].get_body(preferencelist=("html",)).get_content()
+
+
+class MailerQueFalla:
+    def __init__(self) -> None:
+        self.intentos = 0
+
+    def enviar(self, mensaje: EmailMessage) -> None:
+        self.intentos += 1
+        raise ConnectionRefusedError("servidor SMTP caído (password=no-debe-verse)")
+
+
+@pytest.fixture
+def mailer() -> MailerFalso:
+    return MailerFalso()
