@@ -20,6 +20,7 @@ from riego_ml.dataset.features import (
     columnas_features,
     construir_features_ciclo,
     construir_features_turno,
+    suelo_absoluto,
 )
 from riego_ml.dataset.limpieza import CLAVES_TD, limpiar_ciclos, tabla_turno_dia
 
@@ -81,7 +82,7 @@ def preparar_entrenamiento(historial: Historial, config: Config) -> DatasetEntre
     feats_turno = construir_features_turno(
         td_obs[CLAVES_TD], td_obs, historial.ambiente, prep.incluir_meteo_dia
     )
-    features_turno = columnas_features(feats_turno)
+    features_turno = columnas_features(feats_turno, prep.usar_suelo_absoluto)
 
     turno_dia = td_obs.merge(feats_turno, on=CLAVES_TD, how="left", validate="one_to_one")
     turno_dia = _filtrar_fechas(turno_dia, prep.desde, prep.hasta)
@@ -104,10 +105,12 @@ def preparar_entrenamiento(historial: Historial, config: Config) -> DatasetEntre
         "observados_turno": OBSERVADOS_TURNO,
         "observados_ciclo": OBSERVADOS_CICLO,
         "derivados": ["duracion_min", "fin_min", "hora_inicio", "hora_fin"],
+        "excluidas_del_modelo": suelo_absoluto(list(feats_turno.columns)) if not prep.usar_suelo_absoluto else [],
     }
     diag = dict(historial.diagnostico)
     diag.update(_diagnostico(turno_dia, ciclos, features_turno))
-    solo_features_turno = [c for c in features_turno if c not in CLAVES_TD]
+    revision = columnas["excluidas_del_modelo"]
+    solo_features_turno = [c for c in [*features_turno, *revision] if c not in CLAVES_TD]
     solo_features_ciclo = [c for c in FEATURES_SOLO_CICLO if c not in ("Ciclo", "n_ciclos")]
     return DatasetEntrenamiento(
         turno_dia[[*CLAVES_TD, *OBSERVADOS_TURNO, *solo_features_turno]],

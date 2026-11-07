@@ -174,9 +174,22 @@ def construir_features_ciclo(
     return out
 
 
-def columnas_features(features_turno: pd.DataFrame) -> list[str]:
-    """Columnas de entrada del modelo turno-día (sin claves)."""
-    return [c for c in features_turno.columns if c not in CLAVES_TD or c in CATEGORICAS]
+def columnas_features(features_turno: pd.DataFrame, usar_suelo_absoluto: bool = False) -> list[str]:
+    """Columnas de entrada del modelo turno-día (sin claves).
+
+    Los niveles absolutos de humedad del suelo quedan fuera por defecto: el
+    sensor cambió de régimen entre temporadas (p. ej. a 45 cm la media pasa de
+    ~20 % a ~28 %) y los modelos que los usan no generalizan. Se conservan los
+    cambios en 24 h, que son relativos y robustos a recalibraciones.
+    """
+    columnas = [c for c in features_turno.columns if c not in CLAVES_TD or c in CATEGORICAS]
+    if not usar_suelo_absoluto:
+        columnas = [c for c in columnas if c not in suelo_absoluto(columnas)]
+    return columnas
+
+
+def suelo_absoluto(columnas: list[str]) -> list[str]:
+    return [c for c in columnas if c.endswith("_cierre_d1") or c == "dist_linea_estres_d1"]
 
 
 FEATURES_SOLO_CICLO = [
