@@ -18,6 +18,7 @@ Protocolo
 
 from __future__ import annotations
 
+import shutil
 import time
 import warnings
 from datetime import datetime
@@ -49,7 +50,7 @@ from riego_ml.modeling.estimadores import (
     importancias,
     prefijo_params,
 )
-from riego_ml.modeling.planificador import PlanRiego
+from riego_ml.modeling.planificador import COLUMNA_CAUDAL, PlanRiego
 from riego_ml.modeling.reporte import ResultadosEntrenamiento, generar_reporte
 from riego_ml.modeling.split import cortes_temporales, folds_temporales
 from riego_ml.utils.io import save_json
@@ -109,10 +110,17 @@ class Entrenador:
         plan_test, plan_largo = self._evaluar_plan(td, ci)
 
         plan_final = self._reentrenar_final(td, ci)
-        destino = cfg.rutas.modelos_dir / "plan_riego"
+        # Cada entrenamiento queda versionado; "actual" es el que usa predecir.py.
+        version = self.inicio_corrida.strftime("%Y-%m-%d_%H%M")
+        raiz = cfg.rutas.modelos_dir / "plan_riego"
+        destino = raiz / "versiones" / version
         destino.mkdir(parents=True, exist_ok=True)
         joblib.dump(plan_final, destino / NOMBRE_BUNDLE, compress=3)
         save_json(destino / "metadata.json", plan_final.metadata)
+        actual = raiz / "actual"
+        actual.mkdir(parents=True, exist_ok=True)
+        for archivo in (NOMBRE_BUNDLE, "metadata.json"):
+            shutil.copy2(destino / archivo, actual / archivo)
 
         carpeta = cfg.rutas.reportes_dir / "entrenamientos" / self.inicio_corrida.strftime("%Y-%m-%d_%H%M")
         resultados = ResultadosEntrenamiento(
@@ -293,22 +301,27 @@ class Entrenador:
         turno["n_ciclos_pred"] = turno[f"n_ciclos_{self.elegidos['n_ciclos']['familia']}"]
 
         c = ci[(ci["conjunto"] == "test") & self._mascara_eval(ci)]
-        ciclo = c[[*CLAVES_TD, "Ciclo", "n_ciclos", "riego_m3ha", "inicio_min", "duracion_min", "fin_min"]].copy()
+        ciclo = c[[*CLAVES_TD, "Ciclo", "n_ciclos", "riego_m3ha", "inicio_min", "duracion_min", "fin_min",
+                   COLUMNA_CAUDAL]].copy()
         ciclo = ciclo.rename(columns={"riego_m3ha": "riego_m3ha_real", "inicio_min": "inicio_min_real",
                                       "duracion_min": "duracion_min_real", "fin_min": "fin_min_real"})
         for target in ("riego_m3ha", "inicio_min"):
             for familia, pred in self.pred_test[target].items():
                 ciclo[f"{target}_{familia}"] = pred
             ciclo[f"{target}_pred"] = ciclo[f"{target}_{self.elegidos[target]['familia']}"]
-        ratio = ciclo["Turno"].map(self.min_por_m3ha_train)
+        historico = ciclo["Turno"].map(self.min_por_m3ha_train)
+        ratio = ciclo[COLUMNA_CAUDAL].fillna(historico)  # caudal de los últimos 30 días
         ciclo["duracion_min_pred"] = ciclo["riego_m3ha_pred"] * ratio
         ciclo["fin_min_pred"] = ciclo["inicio_min_pred"] + ciclo["duracion_min_pred"]
+        ciclo = ciclo.drop(columns=[COLUMNA_CAUDAL])
 
-        modelo = f"{self.elegidos['riego_m3ha']['familia']} + caudal del turno"
+        modelo = f"{self.elegidos['riego_m3ha']['familia']} + caudal 30 días"
         self._registrar("duracion_min", modelo, "test",
                         metricas.regresion(ciclo["duracion_min_real"], ciclo["duracion_min_pred"]))
-        self._registrar("duracion_min", "caudal del turno (con m3/ha real)", "test",
+        self._registrar("duracion_min", "caudal 30 días (con m3/ha real)", "test",
                         metricas.regresion(ciclo["duracion_min_real"], ciclo["riego_m3ha_real"] * ratio))
+        self._registrar("duracion_min", "caudal histórico (con m3/ha real)", "test",
+                        metricas.regresion(ciclo["duracion_min_real"], ciclo["riego_m3ha_real"] * historico))
         self._registrar("fin_min", modelo, "test",
                         metricas.regresion(ciclo["fin_min_real"], ciclo["fin_min_pred"]))
         return turno.reset_index(drop=True), ciclo.reset_index(drop=True)
@@ -322,6 +335,7 @@ class Entrenador:
             area_ha=self._area(ciclos),
             rango_m3ha=(float(ciclos["riego_m3ha"].quantile(0.001)), float(ciclos["riego_m3ha"].quantile(0.999))),
             pausa_min=self.config.plan.pausa_min_entre_ciclos,
+            caudal_dinamico=True,
             rangos=rangos or {},
             elegidos={k: v["familia"] for k, v in self.elegidos.items()},
             metadata=metadata or {},
@@ -408,6 +422,7 @@ class Entrenador:
         metadata = {
             "entrenado": datetime.now().isoformat(timespec="seconds"),
             "rango_datos": f"{td['Fecha'].min():%Y-%m-%d} a {td['Fecha'].max():%Y-%m-%d}",
+            "version": self.inicio_corrida.strftime("%Y-%m-%d_%H%M"),
             "turno_dias": len(td),
             "ciclos": len(ci),
             "elegidos": {

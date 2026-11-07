@@ -21,7 +21,12 @@ from riego_ml.modeling.planificador import PlanRiego
 
 
 def cargar_plan(config: Config, ruta: str | Path | None = None) -> PlanRiego:
-    ruta = Path(ruta) if ruta else config.rutas.modelos_dir / "plan_riego" / NOMBRE_BUNDLE
+    if ruta:
+        ruta = Path(ruta)
+        if ruta.is_dir():
+            ruta = ruta / NOMBRE_BUNDLE
+    else:
+        ruta = config.rutas.modelos_dir / "plan_riego" / "actual" / NOMBRE_BUNDLE
     if not ruta.exists():
         raise FileNotFoundError(f"No existe el modelo {ruta}. Ejecuta primero entrenar.py.")
     plan = joblib.load(ruta)

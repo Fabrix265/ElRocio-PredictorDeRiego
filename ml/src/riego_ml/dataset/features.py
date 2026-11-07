@@ -179,6 +179,10 @@ def features_riego_previo(turno_dia: pd.DataFrame, fecha_max: pd.Timestamp) -> p
             n.shift(1).rolling(3, min_periods=2).mean() - n.shift(1).rolling(14, min_periods=7).mean()
         )
         f["_riego_acum7"] = total.shift(1).rolling(7, min_periods=5).sum()
+        # Minutos por cada m3/ha del turno en los últimos 30 días (refleja el caudal
+        # actual de la válvula, que cambia con el tiempo). Se usa para derivar la duración.
+        ratio = (g["duracion_total_min"] / total.where(total > 0))
+        f["min_por_m3ha_30d"] = ratio.shift(1).rolling(30, min_periods=5).median()
 
         for nombre, valor in zip(CLAVES_TURNO, claves):
             f[nombre] = valor

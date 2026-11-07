@@ -3,7 +3,7 @@
 seed: 42
 
 rutas:
-  riego: ml/data/raw/data_riego.xlsx
+  riego: ml/data/raw/data_riego_historico.xlsx   # MOD5: abr-2021 a nov-2026 (redshift + talgil)
   meteo: ml/data/raw/data_metereologica.xlsx
   phytech: ml/data/raw/data_phytech.xlsx
   phytech_crudo: ml/data/raw/phytech/completo   # para NDVI

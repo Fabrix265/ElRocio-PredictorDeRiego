@@ -25,6 +25,7 @@ from riego_ml.dataset.limpieza import CLAVES_TD
 from riego_ml.utils.tiempo import MINUTOS_DIA, minutes_to_hhmm
 
 TARGETS = ("n_ciclos", "riego_m3ha", "inicio_min")
+COLUMNA_CAUDAL = "min_por_m3ha_30d"
 
 
 @dataclass
@@ -37,6 +38,7 @@ class PlanRiego:
     rango_m3ha: tuple[float, float]
     pausa_min: float = 0.0
     rangos: dict[str, Any] = field(default_factory=dict)
+    caudal_dinamico: bool = False  # True: duración con el caudal de los últimos 30 días
     elegidos: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -47,6 +49,7 @@ class PlanRiego:
         for modelo in self.rangos.values():
             todas += list(getattr(modelo, "columnas_", []))
         de_ciclo = set(features_solo_ciclo(True))
+        todas.append(COLUMNA_CAUDAL)  # siempre se necesita para derivar la duración
         return [c for c in dict.fromkeys(todas) if c not in CLAVES_TD and c not in de_ciclo]
 
     def predecir_n_ciclos(self, features_turno: pd.DataFrame) -> np.ndarray:
@@ -71,9 +74,15 @@ class PlanRiego:
             out[["inicio_min_p10", "inicio_min_p90"]] = out[["inicio_min_p10", "inicio_min_p90"]].clip(0, MINUTOS_DIA - 1)
         return out
 
-    def duracion(self, turnos: pd.Series, m3ha: pd.Series) -> np.ndarray:
-        ratio = turnos.map(self.min_por_m3ha).fillna(np.nanmedian(list(self.min_por_m3ha.values())))
-        return np.asarray(m3ha, dtype=float) * ratio.to_numpy(dtype=float)
+    def factor_duracion(self, filas: pd.DataFrame) -> np.ndarray:
+        """Minutos por m3/ha: caudal reciente del turno (30 días) o, si falta, el histórico."""
+        historico = filas["Turno"].map(self.min_por_m3ha).fillna(np.nanmedian(list(self.min_por_m3ha.values())))
+        if self.caudal_dinamico and COLUMNA_CAUDAL in filas:
+            return filas[COLUMNA_CAUDAL].fillna(historico).to_numpy(dtype=float)
+        return historico.to_numpy(dtype=float)
+
+    def duracion(self, filas: pd.DataFrame, m3ha: pd.Series) -> np.ndarray:
+        return np.asarray(m3ha, dtype=float) * self.factor_duracion(filas)
 
     def predecir(self, features_turno: pd.DataFrame, ciclos_hist: pd.DataFrame) -> pd.DataFrame:
         """Plan en formato largo: 1 fila por ciclo programado."""
@@ -85,10 +94,10 @@ class PlanRiego:
         filas["Ciclo"] = np.concatenate([np.arange(1, k + 1) for k in n])
         filas = construir_features_ciclo(filas, base, ciclos_hist)
         plan = self.predecir_ciclos(filas)
-        plan["duracion_min"] = self.duracion(plan["Turno"], plan["riego_m3ha"])
+        plan["duracion_min"] = self.duracion(plan, plan["riego_m3ha"])
         if "riego_m3ha_p10" in plan:
-            plan["duracion_min_p10"] = self.duracion(plan["Turno"], plan["riego_m3ha_p10"])
-            plan["duracion_min_p90"] = self.duracion(plan["Turno"], plan["riego_m3ha_p90"])
+            plan["duracion_min_p10"] = self.duracion(plan, plan["riego_m3ha_p10"])
+            plan["duracion_min_p90"] = self.duracion(plan, plan["riego_m3ha_p90"])
         return self.armar_horario(plan)
 
     def armar_horario(self, plan: pd.DataFrame) -> pd.DataFrame:

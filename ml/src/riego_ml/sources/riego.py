@@ -52,7 +52,12 @@ def leer_riego(path: str | Path, hoja: str = HOJA_RIEGO) -> tuple[pd.DataFrame, 
     df = raw[list(COLUMNAS_ORIGEN)].rename(columns=COLUMNAS_ORIGEN)
     diag: dict = {"Riego: filas originales": len(df)}
 
-    df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce").dt.normalize()
+    fecha = pd.to_datetime(df["Fecha"], errors="coerce")
+    # Algunas exportaciones traen la hora de inicio dentro de "fecha": solo importa el día.
+    diag["Riego: filas con hora dentro de 'fecha' (se usa solo el día)"] = int(
+        (fecha.notna() & (fecha != fecha.dt.normalize())).sum()
+    )
+    df["Fecha"] = fecha.dt.normalize()
     for columna in ("Fundo", "Modulo", "Turno"):
         df[columna] = norm_text(df[columna])
     for columna in ("duracion_min", "riego_m3", "riego_m3ha"):
@@ -83,6 +88,9 @@ def leer_riego(path: str | Path, hoja: str = HOJA_RIEGO) -> tuple[pd.DataFrame, 
         df["area_ha"] = np.where(df["riego_m3ha"] > 0, df["riego_m3"] / df["riego_m3ha"], np.nan)
 
     df = df.sort_values(["Fecha", "Turno", "inicio_min"], kind="stable").reset_index(drop=True)
+    diag["Riego: filas duplicadas exactas (se descartan en la limpieza)"] = int(
+        df.duplicated(["Fecha", "Turno", "inicio_min", "duracion_min", "riego_m3"]).sum()
+    )
     diag["Riego: rango de fechas"] = f"{df['Fecha'].min():%Y-%m-%d} a {df['Fecha'].max():%Y-%m-%d}"
     diag["Riego: turnos"] = ", ".join(sorted(df["Turno"].dropna().unique()))
     return df[COLUMNAS_RIEGO], diag
