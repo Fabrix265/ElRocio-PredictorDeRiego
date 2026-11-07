@@ -37,13 +37,20 @@ npm run dev
 
 ## Machine learning
 
-Desde la raíz del repositorio:
+Predice el plan de riego diario de cada turno del módulo 5 de ENSUEÑO 1: número de ciclos y,
+por ciclo, m3/ha, duración y horario (con rangos de confianza). Pipeline:
+Phytech crudo → unir (riego + meteo + Phytech) → preparar → entrenar → predecir.
 
 ```powershell
 python -m venv ml/.venv
 ml\.venv\Scripts\Activate.ps1
 pip install -r ml/requirements.txt
+python ml/src/riego_ml/pipelines/ejecutar_todo.py   # entrena (pasos 1-3)
+python ml/src/riego_ml/pipelines/predecir.py        # plan del día siguiente
 ```
+
+- Detalle técnico, modelos y métricas: [ml/README.md](ml/README.md)
+- Operación del piloto (rutinas diaria, semanal y mensual): [ml/OPERACION.md](ml/OPERACION.md)
 
 Los scripts de extraccion viven en `ml/src/riego_ml/data_extraction/` y estan ignorados por git. Las credenciales se pasan como variables de entorno en la sesion, no se leen desde un archivo `.env`:
 

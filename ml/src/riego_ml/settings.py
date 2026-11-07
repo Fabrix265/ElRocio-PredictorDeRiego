@@ -1,17 +1,29 @@
+"""Rutas del proyecto y constantes de los scripts de extracción."""
+
 from pathlib import Path
 
 ML_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = ML_ROOT.parent
 DATA_DIR = ML_ROOT / "data"
 DATA_RAW_DIR = DATA_DIR / "raw"
+DATA_INTERIM_DIR = DATA_DIR / "interim"
+DATA_PROCESSED_DIR = DATA_DIR / "processed"
 CACHE_DIR = ML_ROOT / "cache"
 LOGS_DIR = ML_ROOT / "logs"
+CONFIG_DIR = ML_ROOT / "config"
+DEFAULT_CONFIG = CONFIG_DIR / "pipeline.yaml"
+MODELS_DIR = ML_ROOT / "models"
+REPORTS_DIR = ML_ROOT / "reports"
 
+# --------------------------------------------------------------------------- #
+# Extracción (data_extraction/descargar_*.py)
+# --------------------------------------------------------------------------- #
 MAX_FILAS_POR_HOJA = 1_000_000
 ZONA_HORARIA_POR_DEFECTO = "America/Lima"
 PAUSA_ENTRE_LLAMADAS_SEG = 0.5
 MAX_REINTENTOS = 5
 
-#Datos de Phytech
+# Datos de Phytech
 PHYTECH_MODO = "COMPLETO"
 PHYTECH_MAX_AREAS_MUESTRA = 1
 PHYTECH_DIAS_MUESTRA = 7
@@ -42,7 +54,7 @@ PHYTECH_RAW_SUBDIR = "phytech"
 PHYTECH_CACHE_SUBDIR = ""
 PHYTECH_LOG_PATH = LOGS_DIR / "log_descarga_phytech.txt"
 
-#Datos de WeatherLink
+# Datos de WeatherLink
 WEATHERLINK_MODO = "COMPLETO"
 WEATHERLINK_MAX_ESTACIONES_MUESTRA = 1
 WEATHERLINK_DIAS_MUESTRA = 3
