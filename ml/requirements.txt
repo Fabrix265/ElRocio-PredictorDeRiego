@@ -3,6 +3,10 @@ pandas
 numpy
 scikit-learn
 xgboost
+lightgbm
+catboost
+holidays
+matplotlib
 joblib
 PyYAML
 openpyxl

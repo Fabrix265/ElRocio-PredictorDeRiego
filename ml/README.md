@@ -45,7 +45,8 @@ ml/
     sources/                      Lectura y saneamiento de cada fuente
       riego.py                    Registro MOD5 (base): horas, cruce de medianoche, área
       meteo.py                    Estación cada 30 min -> resumen diario
-      phytech.py                  Suelo (medio y al cierre del día) + planta
+      phytech.py                  Suelo (medio, al cierre y rango diario) + planta
+      ndvi.py                     NDVI del plot (imágenes satelitales de Phytech)
       phytech_crudo.py            Descargas crudas de la API -> data_phytech.xlsx
     dataset/
       unir.py                     Paso 1: riego + ambiente del mismo día y calendario diario
@@ -53,7 +54,9 @@ ml/
       features.py                 Features sin fuga (todo lo conocido a las 00:00 del día)
       preparar.py                 Paso 2: tablas de entrenamiento y features para predecir
     modeling/
-      estimadores.py              RF, XGBoost, SVR/SVC, MLP y persistencia
+      estimadores.py              RF, XGBoost, LightGBM, CatBoost, SVR/SVC, MLP
+      especiales.py               Referencias, transición, ordinal, dosis y rangos por cuantiles
+      reporte.py / graficos.py    Excel, gráficos e historial de corridas
       split.py                    Split temporal con gap
       metricas.py                 Métricas de regresión y clasificación
       entrenamiento.py            Paso 3: compara, selecciona y reentrena
@@ -107,6 +110,21 @@ Features (todas conocidas a las 00:00 del día D, verificado en `tests/test_feat
 - Riego previo del mismo turno (ciclos, m3/ha, horarios de ayer y medias 3/7 días) y del
   mismo número de ciclo (para los modelos por ciclo).
 
+Features extendidas (`preparacion.features_extendidas: true`):
+
+- Rotación de turnos: orden y hora de arranque de cada turno ayer, desfase respecto del
+  arranque del módulo y del turno anterior; inicio de hace 7 días.
+- Estabilidad: días desde el último cambio de n° de ciclos, cambios en 14 días, tendencia.
+- Agua: balance hídrico 7 días (ETo × 10 − riego aplicado) y reposición (riego / ETo).
+- Horas con T > 30 °C, tendencia de la ETo, anomalía del MDS, crecimiento acumulado,
+  respuesta diaria del suelo (rango de humedad a 45/60 cm), NDVI y feriados de Perú.
+- Por ciclo: m3/ha e inicio de hace 7 días, dosis habitual (mediana 7 días), desfase del ciclo.
+
+Fuentes revisadas que **todavía no se usan** porque no se cruzan con el histórico de riego:
+`PROGRAMA DE RIEGO 2026-2027.xlsx` (semanas 27-44 de 2026), etapa de la hoja `siga` (un solo
+valor), riegos planificados / recomendaciones Daisy / pronóstico de Phytech (una sola captura).
+Con el `data_riego` actualizado a 2026 el programa de riego pasa a ser candidato.
+
 > **Niveles absolutos de humedad del suelo fuera del modelo** (`usar_suelo_absoluto: false`).
 > El sensor cambió de régimen entre temporadas (a 45 cm la media pasa de ~20 % en el período
 > de entrenamiento a ~28 % en el de test; 15/30 cm y zona radicular casi no existen antes de
@@ -126,8 +144,17 @@ La **duración** se deriva del volumen con el caudal de cada turno
 duración y volumen son proporcionales por turno, así que volumen, duración y hora de fin
 siempre quedan coherentes. El horario final ordena los ciclos y evita solapamientos.
 
-Familias comparadas: Random Forest, XGBoost, SVR/SVC y MLP, más la **persistencia**
-("repetir lo de ayer") como un candidato más. Protocolo:
+Candidatos que compiten por cada target (todos en el mismo reporte):
+
+| Tipo | Modelos | Target |
+|---|---|---|
+| ML | Random Forest, XGBoost, LightGBM, CatBoost (SVR y MLP desactivados) | los tres |
+| Referencias | persistencia (ayer), media 7 días, semana pasada | los tres |
+| Específicos | transición tipo Markov, logística ordinal, persistencia salvo cambio seguro | `n_ciclos` |
+| Específicos | clasificador de dosis programadas | `riego_m3ha` |
+
+Además se entrenan **rangos p10–p90** (LightGBM por cuantiles) para m3/ha e inicio, con un
+margen calibrado en validación para que el rango cubra ~80 % de los casos. Protocolo:
 
 - Split temporal por fechas: train → (7 días) → validación → (7 días) → test.
 - Cada target elige el modelo con mejor **validación** (F1 macro para `n_ciclos`, RMSE para
@@ -142,16 +169,22 @@ Familias comparadas: Random Forest, XGBoost, SVR/SVC y MLP, más la **persistenc
 | `n_ciclos` | persistencia | acierto 0,81 · ±1 ciclo 0,96 | — |
 | `riego_m3ha` | Random Forest | RMSE 4,6 · MAE 3,0 · R² 0,54 | RMSE 5,3 · MAE 2,4 |
 | `inicio_min` | Random Forest | RMSE 148 min · R² 0,76 | RMSE 199 min |
-| `duracion_min` (derivada) | RF + caudal del turno | RMSE 14 min · R² 0,45 | — |
+| `duracion_min` (derivada) | RF + caudal del turno | MAE 10 min · R² 0,45 | — |
+| Rangos p10–p90 | LightGBM cuantiles calibrado | cobertura 73–78 % (esperada 80 %) | — |
 
-Para `n_ciclos` ningún modelo de ML superó a "repetir lo de ayer" (RF: acierto 0,74): el
-número de ciclos depende de decisiones operativas con mucha inercia que las variables
-disponibles no explican. La persistencia queda elegida de forma automática por validación;
-si con más datos un modelo la supera, se elegirá ese.
+- Para `n_ciclos` ningún modelo supera a "repetir lo de ayer" (mejor alternativa: transición
+  tipo Markov, acierto 0,79). El número de ciclos depende de decisiones operativas con mucha
+  inercia que las variables disponibles no explican.
+- Las features extendidas y los modelos nuevos (LightGBM, CatBoost) quedan prácticamente
+  empatados con la versión anterior (diferencias < 1 %). Con los datos actuales el límite no
+  es el algoritmo sino la información: hay que volver a evaluar cuando llegue el
+  `data_riego` actualizado (el historial de corridas lo registra).
 
 ### Reportes de cada entrenamiento
 
-Cada corrida crea su propia carpeta (las anteriores se conservan para comparar):
+Cada corrida crea su propia carpeta (las anteriores se conservan para comparar) y se
+agrega una fila a `reports/historial_entrenamientos.xlsx` (datos usados, features, modelo
+elegido y métricas de test). Así se ve el efecto de actualizar datos, features o modelos.
 
 ```text
 reports/entrenamientos/<AAAA-MM-DD_HHMM>/
@@ -167,6 +200,8 @@ Hojas de `metricas_modelos.xlsx`:
 | `Resumen` | Datos de la corrida (fechas del split, tamaños) y modelo elegido por target vs persistencia |
 | `Comp_n_ciclos`, `Comp_m3ha`, `Comp_inicio` | Todos los modelos, validación y test (elegido en azul, mejor valor en verde) |
 | `Plan_completo` | Error del plan armado de punta a punta y de duración/fin derivados |
+| `Rangos` | Cobertura real del rango p10–p90 en test (sin calibrar y calibrado) |
+| `Historial` | Todas las corridas anteriores, para comparar |
 | `Por_turno`, `Por_mes` | Errores en test por turno y por mes |
 | `Confusion` | Matriz de confusión del número de ciclos |
 | `Importancias` | Variables más importantes de RF y XGBoost |
@@ -182,6 +217,8 @@ python ml/src/riego_ml/pipelines/predecir.py --fecha 2025-04-25 --dias 3
 ```
 
 Genera `Plan_por_turno` (1 fila por turno con los ciclos en columnas) y `Plan_por_ciclo`.
+Cada ciclo trae también su rango: `riego_m3ha_p10`/`p90`, `duracion_min_p10`/`p90` y
+`hora_inicio_desde`/`hasta` (≈80 % de probabilidad de caer dentro).
 Usa el historial del paso 1 para las features del día anterior: cuando lleguen datos
 nuevos, volver a correr `unir_datos.py`. Para varios días, la predicción es recursiva (el
 plan del día D se usa como "riego de ayer" del día D+1).
