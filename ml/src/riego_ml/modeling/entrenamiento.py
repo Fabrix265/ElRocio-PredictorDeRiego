@@ -4,15 +4,16 @@ Protocolo
 ---------
 * Split temporal por fechas: train -> (gap) -> validación -> (gap) -> test.
 * Para cada target (``n_ciclos``, ``riego_m3ha``, ``inicio_min``) se entrenan
-  las familias habilitadas (RF, XGBoost, SVR, MLP) solo con train.
+  las familias habilitadas (RF, XGBoost, SVR, MLP) solo con train, y la
+  persistencia ("repetir lo de ayer") compite como un candidato más.
 * El modelo de cada target se elige por su desempeño en VALIDACIÓN
   (F1 macro para ``n_ciclos``, RMSE para los regresores). El test solo se usa
   para reportar, nunca para elegir.
-* Referencia "persistencia": repetir lo que hizo el mismo turno/ciclo el día
-  anterior. Un modelo que no la supera no aporta valor.
 * Se evalúa el plan completo en test (n_ciclos predicho -> ciclos -> horario).
 * El modelo final se reentrena con todos los datos y se guarda como un único
   ``PlanRiego`` en ``modelos_dir/plan_riego/modelo_plan_riego.joblib``.
+* Los reportes de cada corrida quedan en
+  ``reportes_dir/entrenamientos/<AAAA-MM-DD_HHMM>/`` (Excel, gráficos y CSV).
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from datetime import datetime
 from typing import Any
 
 import joblib
+import numpy as np
 import pandas as pd
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.model_selection import RandomizedSearchCV
@@ -40,13 +42,18 @@ from riego_ml.modeling.estimadores import (
     importancias,
     prefijo_params,
 )
-from riego_ml.modeling.planificador import PlanRiego, plan_ancho
+from riego_ml.modeling.planificador import PlanRiego
+from riego_ml.modeling.reporte import ResultadosEntrenamiento, generar_reporte
 from riego_ml.modeling.split import cortes_temporales, folds_temporales
-from riego_ml.utils.excel import dict_to_frame, write_excel
 from riego_ml.utils.io import save_json
 from riego_ml.utils.reproducibility import environment_info, set_seeds
 
 NOMBRE_BUNDLE = "modelo_plan_riego.joblib"
+DESCRIPCION_TARGET = {
+    "n_ciclos": "Número de ciclos del turno en el día",
+    "riego_m3ha": "Volumen de cada ciclo (m3/ha)",
+    "inicio_min": "Hora de inicio de cada ciclo (min desde 00:00)",
+}
 
 
 class Entrenador:
@@ -55,7 +62,9 @@ class Entrenador:
         self.logger = logger
         self.filas: list[dict[str, Any]] = []
         self.elegidos: dict[str, dict[str, Any]] = {}
-        self.importancias: dict[str, dict[str, float]] = {}
+        self.importancias: dict[str, dict[str, dict[str, float]]] = {}
+        self.pred_test: dict[str, dict[str, np.ndarray]] = {}
+        self.inicio_corrida = datetime.now()
 
     # ------------------------------------------------------------------ #
     def ejecutar(self) -> dict[str, Any]:
@@ -81,27 +90,44 @@ class Entrenador:
         ci["conjunto"] = self.cortes.asignar(ci["Fecha"])
         self._log_split(td, ci)
 
-        etiquetas = list(range(1, maxc + 1))
-        self._comparar("n_ciclos", "clasificacion", td, "n_ciclos_clase", self.f_turno, etiquetas)
+        self.etiquetas = list(range(1, maxc + 1))
+        self._comparar("n_ciclos", "clasificacion", td, "n_ciclos_clase", self.f_turno)
         self._comparar("riego_m3ha", "regresion", ci, "riego_m3ha", self.f_ciclo)
         self._comparar("inicio_min", "regresion", ci, "inicio_min", self.f_ciclo)
 
-        train = ci[ci["conjunto"] == "train"]
-        self.min_por_m3ha_train = self._min_por_m3ha(train)
-        self._evaluar_derivados(ci)
-        plan_test = self._evaluar_plan(td, ci)
+        self.min_por_m3ha_train = self._min_por_m3ha(ci[ci["conjunto"] == "train"])
+        pred_turno, pred_ciclo = self._tablas_prediccion_test(td, ci)
+        plan_test, plan_largo = self._evaluar_plan(td, ci)
 
         plan_final = self._reentrenar_final(td, ci)
         destino = cfg.rutas.modelos_dir / "plan_riego"
         destino.mkdir(parents=True, exist_ok=True)
         joblib.dump(plan_final, destino / NOMBRE_BUNDLE, compress=3)
         save_json(destino / "metadata.json", plan_final.metadata)
-        self._guardar_reportes(plan_test)
+
+        carpeta = cfg.rutas.reportes_dir / "entrenamientos" / self.inicio_corrida.strftime("%Y-%m-%d_%H%M")
+        resultados = ResultadosEntrenamiento(
+            comparacion=pd.DataFrame(self.filas),
+            elegidos={k: {c: v[c] for c in ("familia", "tarea", "params", "validacion", "test")}
+                      for k, v in self.elegidos.items()},
+            descripcion_targets=DESCRIPCION_TARGET,
+            importancias=self.importancias,
+            pred_turno_test=pred_turno,
+            pred_ciclo_test=pred_ciclo,
+            plan_test=plan_test,
+            plan_test_largo=plan_largo,
+            ciclos_reales=ci,
+            etiquetas=self.etiquetas,
+            info_corrida=self._info_corrida(td, ci, destino / NOMBRE_BUNDLE),
+            features={"turno": self.f_turno, "ciclo": self.f_ciclo,
+                      "excluidas": cols.get("excluidas_del_modelo", [])},
+        )
+        generar_reporte(resultados, carpeta, self.logger)
 
         resumen = {
             "elegidos": {k: v["familia"] for k, v in self.elegidos.items()},
             "modelo": str(destino / NOMBRE_BUNDLE),
-            "reportes": str(cfg.rutas.reportes_dir),
+            "reporte": str(carpeta),
         }
         self.logger.info("Entrenamiento finalizado: %s", resumen)
         return resumen
@@ -116,18 +142,15 @@ class Entrenador:
         modelo = self.config.modelos[familia]
         return dict(modelo.clasificacion if tarea == "clasificacion" else modelo.regresion)
 
-    def _numericas(self, features: list[str]) -> list[str]:
-        return [c for c in features if c not in self.categoricas]
-
     def _crear(self, nombre: str, familia: str, tarea: str, features: list[str], params: dict[str, Any]):
         if familia == PERSISTENCIA_NOMBRE:
             columna, grupos = PERSISTENCIA[nombre]
             return Persistencia(columna, grupos, tarea)
-        return crear_estimador(
-            familia, tarea, params, self.categoricas, self._numericas(features), self.config.seed
-        )
+        numericas = [c for c in features if c not in self.categoricas]
+        return crear_estimador(familia, tarea, params, self.categoricas, numericas, self.config.seed)
 
-    def _ajustar(self, estimador, X: pd.DataFrame, y: pd.Series):
+    @staticmethod
+    def _ajustar(estimador, X: pd.DataFrame, y: pd.Series):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ConvergenceWarning)
             warnings.simplefilter("ignore", UserWarning)
@@ -154,9 +177,9 @@ class Entrenador:
         self.logger.info("    tuning %s/%s -> %s", target, familia, mejores)
         return {**self._params(familia, tarea), **mejores}
 
-    def _metricas(self, tarea, y, pred, etiquetas=None) -> dict[str, Any]:
+    def _metricas(self, tarea, y, pred) -> dict[str, Any]:
         if tarea == "clasificacion":
-            return metricas.clasificacion(y, pred, etiquetas)
+            return metricas.clasificacion(y, pred, self.etiquetas)
         return metricas.regresion(y, pred)
 
     def _registrar(self, target, modelo, conjunto, valores: dict[str, Any], **extra) -> None:
@@ -165,14 +188,17 @@ class Entrenador:
         self.filas.append(fila)
 
     # ------------------------------------------------------------------ #
-    def _comparar(self, nombre, tarea, df, target, features, etiquetas=None) -> None:
+    def _comparar(self, nombre, tarea, df, target, features) -> None:
         self.logger.info("Target %s (%s): %d features", nombre, tarea, len(features))
         train = df[df["conjunto"] == "train"]
         evaluacion = {c: df[(df["conjunto"] == c) & self._mascara_eval(df)] for c in ("validacion", "test")}
-        candidatos = {}
         familias = self.config.modelos_habilitados()
         if self.config.incluir_persistencia:
             familias = [*familias, PERSISTENCIA_NOMBRE]
+        clave = "f1_macro" if tarea == "clasificacion" else "rmse"
+        candidatos = {}
+        self.pred_test[nombre] = {}
+        self.importancias[nombre] = {}
         for familia in familias:
             inicio = time.time()
             es_ml = familia != PERSISTENCIA_NOMBRE
@@ -185,31 +211,25 @@ class Entrenador:
             segundos = round(time.time() - inicio, 1)
             puntajes = {}
             for conjunto, datos in evaluacion.items():
-                valores = self._metricas(tarea, datos[target], estimador.predict(datos[features]), etiquetas)
-                puntajes[conjunto] = valores
-                self._registrar(nombre, familia, conjunto, valores, segundos=segundos)
-            clave = "f1_macro" if tarea == "clasificacion" else "rmse"
-            score = puntajes["validacion"][clave]
-            candidatos[familia] = (score, estimador, params, puntajes)
+                pred = estimador.predict(datos[features])
+                if conjunto == "test":
+                    self.pred_test[nombre][familia] = np.asarray(pred)
+                puntajes[conjunto] = self._metricas(tarea, datos[target], pred)
+                self._registrar(nombre, familia, conjunto, puntajes[conjunto], segundos=segundos)
+            candidatos[familia] = (puntajes["validacion"][clave], estimador, params, puntajes)
+            imp = importancias(estimador)
+            if imp:
+                self.importancias[nombre][familia] = imp
             self.logger.info(
                 "  %-13s val %s=%.4f | test %s=%.4f (%.0fs)",
-                familia, clave, score, clave, puntajes["test"][clave], segundos,
+                familia, clave, puntajes["validacion"][clave], clave, puntajes["test"][clave], segundos,
             )
         mejor = (max if tarea == "clasificacion" else min)(candidatos, key=lambda f: candidatos[f][0])
-        score, estimador, params, puntajes = candidatos[mejor]
+        _, estimador, params, puntajes = candidatos[mejor]
         self.elegidos[nombre] = {
-            "familia": mejor,
-            "tarea": tarea,
-            "target": target,
-            "features": features,
-            "params": params,
-            "estimador_train": estimador,
-            "validacion": puntajes["validacion"],
-            "test": puntajes["test"],
+            "familia": mejor, "tarea": tarea, "target": target, "features": features, "params": params,
+            "estimador_train": estimador, "validacion": puntajes["validacion"], "test": puntajes["test"],
         }
-        imp = importancias(estimador)
-        if imp:
-            self.importancias[nombre] = imp
         self.logger.info("  -> elegido para %s: %s", nombre, mejor)
 
     @staticmethod
@@ -221,18 +241,34 @@ class Entrenador:
     def _area(ciclos: pd.DataFrame) -> dict[str, float]:
         return ciclos.groupby("Turno")["area_ha"].median().round(4).to_dict()
 
-    def _evaluar_derivados(self, ci) -> None:
-        """Duración y fin derivados (con el n_ciclos real) en test."""
-        test = ci[(ci["conjunto"] == "test") & self._mascara_eval(ci)]
-        m3ha = self.elegidos["riego_m3ha"]["estimador_train"].predict(test[self.f_ciclo])
-        inicio = self.elegidos["inicio_min"]["estimador_train"].predict(test[self.f_ciclo])
-        ratio = test["Turno"].map(self.min_por_m3ha_train).to_numpy()
-        duracion = m3ha * ratio
+    def _tablas_prediccion_test(self, td, ci) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Observado vs predicho en test (cada familia + el elegido) y derivados."""
+        t = td[(td["conjunto"] == "test") & self._mascara_eval(td)]
+        turno = t[[*CLAVES_TD, "dia_incompleto"]].assign(n_ciclos_real=t["n_ciclos_clase"].to_numpy())
+        for familia, pred in self.pred_test["n_ciclos"].items():
+            turno[f"n_ciclos_{familia}"] = pred
+        turno["n_ciclos_pred"] = turno[f"n_ciclos_{self.elegidos['n_ciclos']['familia']}"]
+
+        c = ci[(ci["conjunto"] == "test") & self._mascara_eval(ci)]
+        ciclo = c[[*CLAVES_TD, "Ciclo", "n_ciclos", "riego_m3ha", "inicio_min", "duracion_min", "fin_min"]].copy()
+        ciclo = ciclo.rename(columns={"riego_m3ha": "riego_m3ha_real", "inicio_min": "inicio_min_real",
+                                      "duracion_min": "duracion_min_real", "fin_min": "fin_min_real"})
+        for target in ("riego_m3ha", "inicio_min"):
+            for familia, pred in self.pred_test[target].items():
+                ciclo[f"{target}_{familia}"] = pred
+            ciclo[f"{target}_pred"] = ciclo[f"{target}_{self.elegidos[target]['familia']}"]
+        ratio = ciclo["Turno"].map(self.min_por_m3ha_train)
+        ciclo["duracion_min_pred"] = ciclo["riego_m3ha_pred"] * ratio
+        ciclo["fin_min_pred"] = ciclo["inicio_min_pred"] + ciclo["duracion_min_pred"]
+
         modelo = f"{self.elegidos['riego_m3ha']['familia']} + caudal del turno"
-        self._registrar("duracion_min (derivada)", modelo, "test", metricas.regresion(test["duracion_min"], duracion))
-        self._registrar("duracion_min (con m3ha real)", "caudal del turno", "test",
-                        metricas.regresion(test["duracion_min"], test["riego_m3ha"].to_numpy() * ratio))
-        self._registrar("fin_min (derivado)", modelo, "test", metricas.regresion(test["fin_min"], inicio + duracion))
+        self._registrar("duracion_min", modelo, "test",
+                        metricas.regresion(ciclo["duracion_min_real"], ciclo["duracion_min_pred"]))
+        self._registrar("duracion_min", "caudal del turno (con m3/ha real)", "test",
+                        metricas.regresion(ciclo["duracion_min_real"], ciclo["riego_m3ha_real"] * ratio))
+        self._registrar("fin_min", modelo, "test",
+                        metricas.regresion(ciclo["fin_min_real"], ciclo["fin_min_pred"]))
+        return turno.reset_index(drop=True), ciclo.reset_index(drop=True)
 
     def _plan(self, modelos: dict[str, Any], ciclos: pd.DataFrame, metadata=None) -> PlanRiego:
         return PlanRiego(
@@ -250,7 +286,7 @@ class Entrenador:
             metadata=metadata or {},
         )
 
-    def _evaluar_plan(self, td, ci) -> pd.DataFrame:
+    def _evaluar_plan(self, td, ci) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Plan completo en test: n_ciclos predicho -> ciclos -> horario."""
         modelos = {k: v["estimador_train"] for k, v in self.elegidos.items()}
         plan = self._plan(modelos, ci[ci["conjunto"] == "train"])
@@ -266,15 +302,20 @@ class Entrenador:
         )
         comparado = test[[*CLAVES_TD, "n_ciclos", "riego_total_m3ha", "duracion_total_min",
                           "inicio_primer_min", "fin_ultimo_min"]].merge(resumen, on=CLAVES_TD)
+        comparado = comparado.rename(columns={
+            "n_ciclos": "n_ciclos_real", "riego_total_m3ha": "riego_total_m3ha_real",
+            "duracion_total_min": "duracion_total_min_real", "inicio_primer_min": "inicio_primer_min_real",
+            "fin_ultimo_min": "fin_ultimo_min_real",
+        })
         for target in ("riego_total_m3ha", "duracion_total_min", "inicio_primer_min", "fin_ultimo_min"):
             self._registrar(f"plan: {target}", "plan completo", "test",
-                            metricas.regresion(comparado[target], comparado[f"{target}_pred"]))
-        acierto = (comparado["n_ciclos"].clip(upper=self.config.plan.max_ciclos) == comparado["n_ciclos_pred"]).mean()
+                            metricas.regresion(comparado[f"{target}_real"], comparado[f"{target}_pred"]))
+        acierto = (comparado["n_ciclos_real"].clip(upper=self.config.plan.max_ciclos)
+                   == comparado["n_ciclos_pred"]).mean()
         self.logger.info("Plan en test: acierto n_ciclos=%.3f | RMSE total m3/ha=%.2f", acierto,
-                         metricas.regresion(comparado["riego_total_m3ha"], comparado["riego_total_m3ha_pred"])["rmse"])
-        ancho = plan_ancho(predicho, self.config.plan.max_ciclos)
-        return comparado.merge(ancho.drop(columns=["n_ciclos", "riego_total_m3ha", "duracion_total_min"]),
-                               on=CLAVES_TD, how="left")
+                         metricas.regresion(comparado["riego_total_m3ha_real"],
+                                            comparado["riego_total_m3ha_pred"])["rmse"])
+        return comparado, predicho
 
     def _reentrenar_final(self, td, ci) -> PlanRiego:
         """Reentrena los modelos elegidos con todos los datos disponibles."""
@@ -304,48 +345,29 @@ class Entrenador:
         return self._plan(modelos, ci, metadata)
 
     # ------------------------------------------------------------------ #
+    def _info_corrida(self, td, ci, ruta_modelo) -> dict[str, Any]:
+        conteo = {c: int((td["conjunto"] == c).sum()) for c in ("train", "validacion", "test")}
+        conteo_ci = {c: int((ci["conjunto"] == c).sum()) for c in ("train", "validacion", "test")}
+        cortes = self.cortes.to_dict()
+        return {
+            "Fecha de la corrida": self.inicio_corrida.strftime("%Y-%m-%d %H:%M"),
+            "Datos usados": f"{td['Fecha'].min():%Y-%m-%d} a {td['Fecha'].max():%Y-%m-%d}",
+            "Train": f"hasta {cortes['fin_train']} · {conteo['train']} turno-días · {conteo_ci['train']} ciclos",
+            "Validación": f"{cortes['inicio_validacion']} a {cortes['fin_validacion']} · "
+                          f"{conteo['validacion']} turno-días · {conteo_ci['validacion']} ciclos",
+            "Test": f"desde {cortes['inicio_test']} · {conteo['test']} turno-días · {conteo_ci['test']} ciclos",
+            "Separación entre bloques": f"{self.config.split.gap_dias} días",
+            "Días incompletos en la evaluación": "excluidos" if self.config.excluir_dias_incompletos_eval else "incluidos",
+            "Modelos comparados": ", ".join([*self.config.modelos_habilitados(), PERSISTENCIA_NOMBRE]),
+            "Búsqueda de hiperparámetros": "sí" if self.config.tuning.habilitado else "no (parámetros del YAML)",
+            "Modelo final guardado en": str(ruta_modelo),
+        }
+
     def _log_split(self, td, ci) -> None:
         self.logger.info("Split temporal: %s", self.cortes.to_dict())
         for conjunto in ("train", "validacion", "test", "gap"):
             self.logger.info("  %-10s turno-días=%5d ciclos=%6d", conjunto,
                              int((td["conjunto"] == conjunto).sum()), int((ci["conjunto"] == conjunto).sum()))
-
-    def _guardar_reportes(self, plan_test: pd.DataFrame) -> None:
-        carpeta = self.config.rutas.reportes_dir
-        carpeta.mkdir(parents=True, exist_ok=True)
-        comparacion = pd.DataFrame(self.filas)
-        resumen = pd.DataFrame([
-            {"target": k, "modelo_elegido": v["familia"],
-             **{f"val_{m}": x for m, x in v["validacion"].items() if m in ("f1_macro", "accuracy", "rmse", "mae", "r2")},
-             **{f"test_{m}": x for m, x in v["test"].items() if m in ("f1_macro", "accuracy", "accuracy_pm1", "rmse", "mae", "r2")},
-             "params": str(v["params"])}
-            for k, v in self.elegidos.items()
-        ])
-        etiquetas = list(range(1, self.config.plan.max_ciclos + 1))
-        confusion = pd.DataFrame(
-            self.elegidos["n_ciclos"]["test"]["confusion"],
-            index=[f"real_{e}" for e in etiquetas], columns=[f"pred_{e}" for e in etiquetas],
-        ).reset_index(names="n_ciclos")
-        imp = pd.DataFrame(
-            [(t, f, round(v, 5)) for t, d in self.importancias.items() for f, v in list(d.items())[:25]],
-            columns=["target", "feature", "importancia"],
-        )
-        plan_test.to_csv(carpeta / "predicciones_test_plan.csv", index=False)
-        comparacion.to_csv(carpeta / "comparacion_modelos.csv", index=False)
-        write_excel(carpeta / "metricas_modelos.xlsx", {
-            "Resumen": resumen,
-            "Comparacion": comparacion.round(4),
-            "Confusion_n_ciclos": confusion,
-            "Importancias": imp,
-            "Plan_test": plan_test.round(2),
-            "Split": dict_to_frame(self.cortes.to_dict(), "Corte", "Fecha"),
-        })
-        save_json(carpeta / "metricas.json", {
-            "resumen": resumen.to_dict(orient="records"),
-            "comparacion": comparacion.to_dict(orient="records"),
-            "split": self.cortes.to_dict(),
-        })
-        self.logger.info("Reportes en %s", carpeta)
 
 
 def entrenar(config: Config, logger) -> dict[str, Any]:

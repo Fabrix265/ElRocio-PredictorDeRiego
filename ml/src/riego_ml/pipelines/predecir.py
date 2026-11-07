@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fecha", default=None, help="YYYY-MM-DD (def. día siguiente al último riego registrado).")
     parser.add_argument("--dias", type=int, default=1, help="Cantidad de días consecutivos a planificar.")
     parser.add_argument("--modelo", default=None, help="Ruta a un modelo_plan_riego.joblib alternativo.")
-    parser.add_argument("--salida", default=None, help="Archivo .xlsx o .csv (def. ml/reports/plan_riego_<fecha>.xlsx).")
+    parser.add_argument("--salida", default=None, help="Archivo .xlsx o .csv (def. ml/reports/predicciones/plan_riego_<fecha>.xlsx).")
     args = parser.parse_args(argv)
     logger = configure_logging()
 
@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
 
     resultado = planificar(plan, historial, fechas, config)
     ancho = plan_ancho(resultado, plan.max_ciclos)
-    salida = Path(args.salida) if args.salida else config.rutas.reportes_dir / f"plan_riego_{fechas[0]:%Y-%m-%d}.xlsx"
+    salida = Path(args.salida) if args.salida else config.rutas.reportes_dir / "predicciones" / f"plan_riego_{fechas[0]:%Y-%m-%d}.xlsx"
     if salida.suffix.lower() == ".csv":
         salida.parent.mkdir(parents=True, exist_ok=True)
         resultado.to_csv(salida, index=False)

@@ -18,8 +18,8 @@ data/raw/data_riego.xlsx (base) ┐
 data/raw/data_metereologica.xlsx├─(1) unir_datos ──► data/interim/  riego_unido.csv, ambiente_diario.csv, dataset_unido.xlsx
 data/raw/data_phytech.xlsx      ┘
                                   (2) preparar_dataset ──► data/processed/  turno_dia.csv, ciclos.csv, columnas.json, dataset_entrenamiento.xlsx
-                                  (3) entrenar ──► models/plan_riego/modelo_plan_riego.joblib + reports/metricas_modelos.xlsx
-                                  (4) predecir ──► reports/plan_riego_<fecha>.xlsx
+                                  (3) entrenar ──► models/plan_riego/modelo_plan_riego.joblib + reports/entrenamientos/<fecha_hora>/
+                                  (4) predecir ──► reports/predicciones/plan_riego_<fecha>.xlsx
 ```
 
 Desde la raíz del repositorio:
@@ -149,8 +149,30 @@ número de ciclos depende de decisiones operativas con mucha inercia que las var
 disponibles no explican. La persistencia queda elegida de forma automática por validación;
 si con más datos un modelo la supera, se elegirá ese.
 
-Reporte: `reports/metricas_modelos.xlsx` (hojas `Resumen`, `Comparacion`,
-`Confusion_n_ciclos`, `Importancias`, `Plan_test`, `Split`).
+### Reportes de cada entrenamiento
+
+Cada corrida crea su propia carpeta (las anteriores se conservan para comparar):
+
+```text
+reports/entrenamientos/<AAAA-MM-DD_HHMM>/
+  metricas_modelos.xlsx      Reporte principal
+  graficos/                  01_comparacion_n_ciclos.png ... 16_horario_dia_tipico.png
+  datos/                     comparacion_modelos.csv, predicciones_test_*.csv, resumen.json
+```
+
+Hojas de `metricas_modelos.xlsx`:
+
+| Hoja | Contenido |
+|---|---|
+| `Resumen` | Datos de la corrida (fechas del split, tamaños) y modelo elegido por target vs persistencia |
+| `Comp_n_ciclos`, `Comp_m3ha`, `Comp_inicio` | Todos los modelos, validación y test (elegido en azul, mejor valor en verde) |
+| `Plan_completo` | Error del plan armado de punta a punta y de duración/fin derivados |
+| `Por_turno`, `Por_mes` | Errores en test por turno y por mes |
+| `Confusion` | Matriz de confusión del número de ciclos |
+| `Importancias` | Variables más importantes de RF y XGBoost |
+| `Graficos` | Todos los gráficos incrustados |
+| `Pred_turno_test`, `Pred_ciclo_test`, `Plan_test` | Real vs predicho, fila por fila |
+| `Features` | Variables usadas y excluidas |
 
 ## Paso 4 – Predicción
 
