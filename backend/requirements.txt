@@ -1,4 +1,26 @@
-fastapi
-uvicorn[standard]
-pydantic-settings
-python-dotenv
+-r ../ml/requirements.txt
+# Versiones fijas del backend (Python 3.11.9). El stack de ML viene de ml/requirements.txt.
+# Después de instalar: pip install -e ../ml  (paquete riego_ml, solo empaquetado).
+
+# API
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+pydantic-settings==2.16.2
+python-dotenv==1.2.4
+python-multipart==0.0.33
+email-validator==2.3.0
+
+# Base de datos (PostgreSQL / Supabase)
+SQLAlchemy==2.1.8
+alembic==1.20.1
+psycopg[binary]==3.3.8
+
+# Seguridad
+PyJWT==2.15.1
+argon2-cffi==25.1.0
+defusedxml==0.7.1
+
+# Tareas, integraciones y correos
+APScheduler==3.11.3
+httpx==0.28.1
+Jinja2==3.1.6

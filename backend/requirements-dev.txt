@@ -1,0 +1,5 @@
+-r requirements.txt
+# Pruebas (pytest ya viene fijado en ml/requirements.txt)
+time-machine==3.6.0
+# Cliente HTTP que usa starlette.testclient (TestClient) desde Starlette 1.x
+httpx2==2.16.0
