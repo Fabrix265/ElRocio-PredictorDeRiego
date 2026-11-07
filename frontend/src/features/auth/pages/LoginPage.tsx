@@ -56,7 +56,7 @@ export function LoginPage() {
       <form onSubmit={enviar} noValidate className="flex flex-col gap-4">
         {error && <Alert tono="error">{error}</Alert>}
         <Field label="Usuario" error={errors.username?.message}>
-          <Input autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus {...register("username")} />
+          <Input autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus maxLength={254} {...register("username")} />
         </Field>
         <Field label="Contraseña" error={errors.password?.message}>
           <PasswordInput autoComplete="current-password" {...register("password")} />

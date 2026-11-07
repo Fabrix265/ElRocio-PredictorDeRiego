@@ -8,6 +8,7 @@ import { Alert } from "../../../components/ui/Alert";
 import { Button, clasesBoton } from "../../../components/ui/Button";
 import { Field } from "../../../components/ui/Field";
 import { PasswordInput } from "../../../components/ui/PasswordInput";
+import { PASSWORD_MAX } from "../../../lib/password";
 import { mensajeDeError } from "../../../services/httpClient";
 import { authApi } from "../api";
 import { AuthLayout } from "../AuthLayout";
@@ -94,11 +95,11 @@ export function RestablecerPage() {
           </Alert>
         )}
         <Field label="Nueva contraseña" error={errors.password?.message}>
-          <PasswordInput autoComplete="new-password" autoFocus {...register("password")} />
+          <PasswordInput autoComplete="new-password" maxLength={PASSWORD_MAX} autoFocus {...register("password")} />
         </Field>
         <ReglasPassword password={password ?? ""} />
         <Field label="Repite la nueva contraseña" error={errors.confirmar?.message}>
-          <PasswordInput autoComplete="new-password" {...register("confirmar")} />
+          <PasswordInput autoComplete="new-password" maxLength={PASSWORD_MAX} {...register("confirmar")} />
         </Field>
         <Button type="submit" tamano="lg" cargando={isSubmitting} icono={<KeyRound aria-hidden="true" />} className="w-full">
           Guardar contraseña

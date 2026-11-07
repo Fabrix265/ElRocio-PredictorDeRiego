@@ -12,6 +12,7 @@ import { PageHeader } from "../../../components/ui/PageHeader";
 import { PasswordInput } from "../../../components/ui/PasswordInput";
 import { notificar } from "../../../components/ui/Toast";
 import { sanearNext } from "../../../lib/next";
+import { PASSWORD_MAX } from "../../../lib/password";
 import { mensajeDeError } from "../../../services/httpClient";
 import { AppLayout } from "../../layout/AppLayout";
 import { AuthLayout } from "../AuthLayout";
@@ -58,11 +59,11 @@ function FormCambiarPassword({ obligatorio }: { obligatorio: boolean }) {
         <PasswordInput autoComplete="current-password" autoFocus={obligatorio} {...register("actual")} />
       </Field>
       <Field label="Nueva contraseña" error={errors.nueva?.message}>
-        <PasswordInput autoComplete="new-password" {...register("nueva")} />
+        <PasswordInput autoComplete="new-password" maxLength={PASSWORD_MAX} {...register("nueva")} />
       </Field>
       <ReglasPassword password={nueva ?? ""} username={usuario.username} />
       <Field label="Repite la nueva contraseña" error={errors.confirmar?.message}>
-        <PasswordInput autoComplete="new-password" {...register("confirmar")} />
+        <PasswordInput autoComplete="new-password" maxLength={PASSWORD_MAX} {...register("confirmar")} />
       </Field>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <Button type="submit" tamano="lg" cargando={isSubmitting} icono={<KeyRound aria-hidden="true" />} className={obligatorio ? "w-full" : ""}>

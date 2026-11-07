@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { EllipsisVertical, FilterX, KeyRound, Pencil, Power, PowerOff, Search, UserPlus, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router";
 
 import { Alert } from "../../components/ui/Alert";
 import { Badge } from "../../components/ui/Badge";
@@ -24,6 +25,7 @@ import { formatearFechaHora } from "../../lib/fechas";
 import { ETIQUETA_ROL, ROLES, type Rol } from "../../lib/roles";
 import { mensajeDeError } from "../../services/httpClient";
 import type { Usuario } from "../../services/tipos";
+import { RUTA_CAMBIAR_PASSWORD } from "../auth/acceso";
 import { useUsuario } from "../auth/AuthProvider";
 import { claveUsuarios, usuariosApi, type FiltrosUsuarios } from "./api";
 import { DialogoEditarUsuario, DialogoEstadoUsuario, DialogoNuevoUsuario, DialogoPasswordTemporal } from "./DialogosUsuario";
@@ -51,8 +53,12 @@ function useDebounce<T>(valor: T, ms = 300): T {
   return v;
 }
 
+/** Límite de `q` en el backend (GET /usuarios). */
+const BUSQUEDA_MAX = 100;
+
 export default function UsuariosPage() {
   const yo = useUsuario();
+  const navigate = useNavigate();
   const [busqueda, setBusqueda] = useState("");
   const [rol, setRol] = useState("todos");
   const [estado, setEstado] = useState("todos");
@@ -139,9 +145,16 @@ export default function UsuariosPage() {
                 <DropdownMenuItem icono={<Pencil aria-hidden="true" />} onSelect={() => setDialogo({ tipo: "editar", usuario: u })}>
                   Editar
                 </DropdownMenuItem>
-                <DropdownMenuItem icono={<KeyRound aria-hidden="true" />} onSelect={() => setDialogo({ tipo: "password", usuario: u })}>
-                  Asignar contraseña temporal
-                </DropdownMenuItem>
+                {esYo ? (
+                  // Asignarse una temporal cerraría la propia sesión al instante: se cambia la propia.
+                  <DropdownMenuItem icono={<KeyRound aria-hidden="true" />} onSelect={() => navigate(RUTA_CAMBIAR_PASSWORD)}>
+                    Cambiar mi contraseña
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem icono={<KeyRound aria-hidden="true" />} onSelect={() => setDialogo({ tipo: "password", usuario: u })}>
+                    Asignar contraseña temporal
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
                 {u.activo ? (
                   <DropdownMenuItem
@@ -163,7 +176,7 @@ export default function UsuariosPage() {
         },
       },
     ],
-    [yo.id],
+    [yo.id, navigate],
   );
 
   const cerrar = () => setDialogo(null);
@@ -195,6 +208,7 @@ export default function UsuariosPage() {
                 type="search"
                 placeholder="Nombre, usuario o correo"
                 value={busqueda}
+                maxLength={BUSQUEDA_MAX}
                 onChange={(e) => setBusqueda(e.target.value)}
                 className="pl-9"
               />

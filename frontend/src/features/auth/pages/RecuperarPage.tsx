@@ -37,7 +37,7 @@ export function RecuperarPage() {
   return (
     <AuthLayout
       titulo="Recuperar contraseña"
-      descripcion="Escribe tu usuario o tu correo. Te enviaremos un enlace para crear una contraseña nueva; vence en 30 minutos."
+      descripcion="Escribe tu usuario o tu correo. Te enviaremos un enlace para crear una contraseña nueva; es de un solo uso y vence en poco tiempo."
     >
       {enviado ? (
         <div className="flex flex-col gap-4">
@@ -53,7 +53,7 @@ export function RecuperarPage() {
         <form onSubmit={enviar} noValidate className="flex flex-col gap-4">
           {error && <Alert tono="error">{error}</Alert>}
           <Field label="Usuario o correo" error={errors.identificador?.message}>
-            <Input autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus {...register("identificador")} />
+            <Input autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus maxLength={254} {...register("identificador")} />
           </Field>
           <Button type="submit" tamano="lg" cargando={isSubmitting} icono={<Mail aria-hidden="true" />} className="w-full">
             Enviar enlace

@@ -1,12 +1,14 @@
 /**
- * Política de contraseña (la misma que valida el backend, propuesta §7):
- * mínimo 10 caracteres, con letras y números, y distinta del usuario.
+ * Política de contraseña (la misma que valida el backend, propuesta §7 y
+ * backend/app/core/security.py): de 10 a 128 caracteres, con letras y números, y distinta del usuario.
  */
 export const PASSWORD_MIN = 10;
+export const PASSWORD_MAX = 128;
 
 export function erroresPassword(password: string, username?: string | null): string[] {
   const errores: string[] = [];
   if (password.length < PASSWORD_MIN) errores.push(`Debe tener al menos ${PASSWORD_MIN} caracteres.`);
+  if (password.length > PASSWORD_MAX) errores.push(`No puede tener más de ${PASSWORD_MAX} caracteres.`);
   if (!/\p{L}/u.test(password)) errores.push("Debe incluir al menos una letra.");
   if (!/\p{Nd}/u.test(password)) errores.push("Debe incluir al menos un número.");
   const usuario = username?.trim().toLowerCase();

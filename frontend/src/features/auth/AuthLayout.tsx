@@ -24,7 +24,7 @@ export function AuthLayout({ titulo, descripcion, children }: AuthLayoutProps) {
         <div className="flex max-w-md flex-col gap-2.5">
           <span className="text-xs font-semibold tracking-[0.08em] text-green-100 uppercase">Grupo El Rocío</span>
           <p className="text-2xl leading-8 font-semibold text-balance sm:text-[28px] sm:leading-9">
-            Plan de riego diario del módulo 5
+            Plan de riego diario
           </p>
           <p className="hidden text-green-50 sm:block">
             Cronogramas generados con el modelo, revisados por el encargado y confirmados en campo.

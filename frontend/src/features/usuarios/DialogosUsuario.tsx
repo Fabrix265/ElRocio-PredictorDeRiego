@@ -17,12 +17,15 @@ import type { Usuario } from "../../services/tipos";
 import { claveUsuarios, usuariosApi, type CambiosUsuario } from "./api";
 import { CamposPasswordTemporal } from "./CamposPasswordTemporal";
 import {
+  CORREO_MAX,
   crearEsquemaPasswordTemporal,
   esquemaEditarUsuario,
   esquemaNuevoUsuario,
   type DatosEditarUsuario,
   type DatosNuevoUsuario,
   type DatosPasswordTemporal,
+  NOMBRE_MAX,
+  USERNAME_MAX,
 } from "./esquemas";
 
 const OPCIONES_ROL = ROLES.map((r) => ({ value: r, label: ETIQUETA_ROL[r] }));
@@ -58,7 +61,7 @@ export function DialogoNuevoUsuario({ alTerminar }: { alTerminar: () => void }) 
 
   const mutacion = useMutation({
     mutationFn: ({ confirmar: _c, ...datos }: DatosNuevoUsuario) =>
-      usuariosApi.crear({ ...datos, username: datos.username.trim(), correo: datos.correo.trim() }),
+      usuariosApi.crear({ ...datos, username: datos.username.trim().toLowerCase(), correo: datos.correo.trim() }),
     onSuccess: async (u) => {
       await invalidar();
       notificar.exito("Usuario creado", `${u.nombre} deberá cambiar la contraseña temporal al ingresar.`);
@@ -98,10 +101,23 @@ export function DialogoNuevoUsuario({ alTerminar }: { alTerminar: () => void }) 
           </Alert>
         )}
         <Field label="Nombre completo" error={errors.nombre?.message} requerido className="sm:col-span-2">
-          <Input autoComplete="off" autoFocus {...register("nombre")} />
+          <Input autoComplete="off" autoFocus maxLength={NOMBRE_MAX} {...register("nombre")} />
         </Field>
-        <Field label="Usuario" error={errors.username?.message} requerido ayuda="Con este nombre ingresará al sistema.">
-          <Input autoComplete="off" autoCapitalize="none" spellCheck={false} {...register("username")} />
+        <Field
+          label="Usuario"
+          error={errors.username?.message}
+          requerido
+          ayuda="Con este nombre ingresará al sistema. Se guarda en minúsculas."
+        >
+          {/* `lowercase` muestra lo mismo que se guardará (el esquema lo pasa a minúsculas). */}
+          <Input
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            maxLength={USERNAME_MAX}
+            className="lowercase"
+            {...register("username")}
+          />
         </Field>
         <Field label="Rol" error={errors.rol?.message} requerido>
           <Controller
@@ -113,7 +129,7 @@ export function DialogoNuevoUsuario({ alTerminar }: { alTerminar: () => void }) 
           />
         </Field>
         <Field label="Correo" error={errors.correo?.message} requerido className="sm:col-span-2" ayuda="Recibe las notificaciones y el enlace para recuperar la contraseña.">
-          <Input type="email" autoComplete="off" inputMode="email" {...register("correo")} />
+          <Input type="email" autoComplete="off" inputMode="email" maxLength={CORREO_MAX} {...register("correo")} />
         </Field>
         <div className="sm:col-span-2">
           <CamposPasswordTemporal
@@ -198,10 +214,10 @@ export function DialogoEditarUsuario({
       <form id="form-editar-usuario" noValidate onSubmit={enviar} className="flex flex-col gap-4">
         {mutacion.isError && <Alert tono="error">{mensajeDeError(mutacion.error)}</Alert>}
         <Field label="Nombre completo" error={errors.nombre?.message} requerido>
-          <Input autoComplete="off" {...register("nombre")} />
+          <Input autoComplete="off" maxLength={NOMBRE_MAX} {...register("nombre")} />
         </Field>
         <Field label="Correo" error={errors.correo?.message} requerido>
-          <Input type="email" autoComplete="off" inputMode="email" {...register("correo")} />
+          <Input type="email" autoComplete="off" inputMode="email" maxLength={CORREO_MAX} {...register("correo")} />
         </Field>
         <Field label="Rol" error={errors.rol?.message} requerido>
           <Controller

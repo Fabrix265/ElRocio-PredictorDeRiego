@@ -4,6 +4,7 @@ import type { UseFormRegisterReturn } from "react-hook-form";
 import { Button } from "../../components/ui/Button";
 import { Field } from "../../components/ui/Field";
 import { PasswordInput } from "../../components/ui/PasswordInput";
+import { PASSWORD_MAX } from "../../lib/password";
 import { ReglasPassword } from "../auth/ReglasPassword";
 
 interface Props {
@@ -35,11 +36,11 @@ export function CamposPasswordTemporal({
         </Button>
       </div>
       <Field label="Contraseña temporal" error={errorPassword} requerido>
-        <PasswordInput autoComplete="new-password" {...registroPassword} />
+        <PasswordInput autoComplete="new-password" maxLength={PASSWORD_MAX} {...registroPassword} />
       </Field>
       <ReglasPassword password={valor} username={username} />
       <Field label="Repite la contraseña temporal" error={errorConfirmar} requerido>
-        <PasswordInput autoComplete="new-password" {...registroConfirmar} />
+        <PasswordInput autoComplete="new-password" maxLength={PASSWORD_MAX} {...registroConfirmar} />
       </Field>
       <p className="text-xs text-texto-2">
         Entrégala al usuario por un medio seguro. Deberá cambiarla la primera vez que ingrese.

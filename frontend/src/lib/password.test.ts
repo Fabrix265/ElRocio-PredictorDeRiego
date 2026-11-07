@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { esquemaNuevoUsuario } from "../features/usuarios/esquemas";
+import { esquemaNuevoUsuario, MENSAJE_USERNAME } from "../features/usuarios/esquemas";
 import { erroresPassword, generarPasswordTemporal, passwordValida } from "./password";
 
 describe("política de contraseña (igual que el backend)", () => {
@@ -25,6 +25,11 @@ describe("política de contraseña (igual que el backend)", () => {
     expect(passwordValida("JCastillo26", "jcastillo26")).toBe(false);
     expect(erroresPassword("jcastillo26", "  jcastillo26 ")).toContain("No puede ser igual al nombre de usuario.");
     expect(passwordValida("jcastillo26x", "jcastillo26")).toBe(true);
+  });
+
+  it("no admite más de 128 caracteres (mismo tope que el backend)", () => {
+    expect(erroresPassword("a1".repeat(64))).toEqual([]);
+    expect(erroresPassword("a1".repeat(64) + "b")).toContain("No puede tener más de 128 caracteres.");
   });
 
   it("sin usuario solo aplica longitud, letras y números", () => {
@@ -60,6 +65,22 @@ describe("esquema de alta de usuario", () => {
     const caminos = r.success ? [] : r.error.issues.map((i) => i.path.join("."));
     expect(caminos).toContain("password_temporal");
     expect(caminos).toContain("confirmar");
+  });
+
+  it("username con el mismo contrato que el backend: 3 a 60, se guarda en minúsculas", () => {
+    const largo60 = "a".repeat(60);
+    const ok = esquemaNuevoUsuario.safeParse({ ...base, username: `  ${largo60.toUpperCase()} ` });
+    expect(ok.success).toBe(true);
+    expect(ok.success && ok.data.username).toBe(largo60);
+    const mixto = esquemaNuevoUsuario.safeParse({ ...base, username: "L.Paredes_2" });
+    expect(mixto.success && mixto.data.username).toBe("l.paredes_2");
+
+    for (const malo of ["ab", "a".repeat(61), "josé", "con espacio"]) {
+      const r = esquemaNuevoUsuario.safeParse({ ...base, username: malo });
+      expect(r.success, malo).toBe(false);
+      expect(r.success ? "" : r.error.issues[0].message).toBe(MENSAJE_USERNAME);
+    }
+    expect(MENSAJE_USERNAME).toContain("de 3 a 60 caracteres");
   });
 
   it("rechaza correo inválido y rol desconocido", () => {
