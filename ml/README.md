@@ -14,11 +14,11 @@ Predice, **antes de que empiece el día**, el plan de riego de cada turno del m�
 
 ```text
 data/raw/phytech/completo/*  ──(0) limpiar_phytech ──► data/raw/data_phytech.xlsx
-data/raw/data_riego.xlsx (base) ┐
+data/raw/data_riego_historico.xlsx (base) ┐
 data/raw/data_metereologica.xlsx├─(1) unir_datos ──► data/interim/  riego_unido.csv, ambiente_diario.csv, dataset_unido.xlsx
 data/raw/data_phytech.xlsx      ┘
                                   (2) preparar_dataset ──► data/processed/  turno_dia.csv, ciclos.csv, columnas.json, dataset_entrenamiento.xlsx
-                                  (3) entrenar ──► models/plan_riego/modelo_plan_riego.joblib + reports/entrenamientos/<fecha_hora>/
+                                  (3) entrenar ──► models/plan_riego/{actual,versiones/<corrida>}/ + reports/entrenamientos/<corrida>/
                                   (4) predecir ──► reports/predicciones/plan_riego_<fecha>.xlsx
 ```
 
@@ -139,10 +139,11 @@ Tres modelos componen el plan:
 2. **Regresor `riego_m3ha`** por ciclo.
 3. **Regresor `inicio_min`** por ciclo.
 
-La **duración** se deriva del volumen con el caudal de cada turno
-(`duracion = m3/ha × min_por_m3ha`, mediana histórica): el registro muestra que
-duración y volumen son proporcionales por turno, así que volumen, duración y hora de fin
-siempre quedan coherentes. El horario final ordena los ciclos y evita solapamientos.
+La **duración** se deriva del volumen con el caudal reciente de cada turno
+(`duracion = m3/ha × minutos por m3/ha del turno en los últimos 30 días`). El caudal de las
+válvulas subió 8–18 % desde 2024, por eso se usa el reciente y no la mediana histórica
+(con el m3/ha real: error ±1,5 min contra ±5,2 min). Así volumen, duración y hora de fin
+quedan coherentes. El horario final ordena los ciclos y evita solapamientos.
 
 Candidatos que compiten por cada target (todos en el mismo reporte):
 
@@ -162,23 +163,24 @@ margen calibrado en validación para que el rango cubra ~80 % de los casos. Prot
 - Se evalúa también el **plan completo** en test (con `n_ciclos` predicho).
 - `--tuning` activa una búsqueda aleatoria de hiperparámetros con folds temporales.
 
-### Resultados actuales (test: 2024-06-23 a 2025-04-24, no usado para elegir)
+### Resultados actuales
 
-| Target | Elegido (por validación) | Test | Persistencia en test |
-|---|---|---|---|
-| `n_ciclos` | persistencia | acierto 0,81 · ±1 ciclo 0,96 | — |
-| `riego_m3ha` | Random Forest | RMSE 4,6 · MAE 3,0 · R² 0,54 | RMSE 5,3 · MAE 2,4 |
-| `inicio_min` | Random Forest | RMSE 148 min · R² 0,76 | RMSE 199 min |
-| `duracion_min` (derivada) | RF + caudal del turno | MAE 10 min · R² 0,45 | — |
-| Rangos p10–p90 | LightGBM cuantiles calibrado | cobertura 73–78 % (esperada 80 %) | — |
+Datos: `data_riego_historico.xlsx`, abr-2021 a nov-2026 (20.764 ciclos válidos).
+Test de la corrida: 2025-09-23 a 2026-11-04 (no usado para elegir).
 
-- Para `n_ciclos` ningún modelo supera a "repetir lo de ayer" (mejor alternativa: transición
-  tipo Markov, acierto 0,79). El número de ciclos depende de decisiones operativas con mucha
-  inercia que las variables disponibles no explican.
-- Las features extendidas y los modelos nuevos (LightGBM, CatBoost) quedan prácticamente
-  empatados con la versión anterior (diferencias < 1 %). Con los datos actuales el límite no
-  es el algoritmo sino la información: hay que volver a evaluar cuando llegue el
-  `data_riego` actualizado (el historial de corridas lo registra).
+| Target | Elegido (por validación) | Test |
+|---|---|---|
+| `n_ciclos` | persistencia salvo cambio seguro | acierto 0,81 · ±1 ciclo 0,97 |
+| `riego_m3ha` | XGBoost | RMSE 4,9 · MAE 3,2 |
+| `inicio_min` | XGBoost | RMSE 155 min · MAE 1 h 56 min |
+| `duracion_min` (derivada, caudal 30 días) | XGBoost + caudal | MAE 8,7 min · sesgo +0,5 min |
+| Plan: riego total turno-día | — | RMSE 9,4 m3/ha |
+
+Comparación justa (mismo período 2025-09-23 → 2026-11-04, que ninguno vio):
+modelo anterior (datos hasta abr-2025) vs. modelo nuevo reentrenado con datos hasta
+2025-09-15 (`evaluar_modelo.py --reentrenar-hasta 2025-09-15`): m3/ha MAE 3,33 → 3,10,
+duración MAE 10,5 → 8,4 min (sesgo +4,7 → −0,4), plan total RMSE 9,9 → 9,3, cobertura de
+rangos 68 % → 75 %; n° de ciclos igual (81 %); hora de inicio algo peor (MAE 113 → 119 min).
 
 ### Reportes de cada entrenamiento
 
@@ -208,6 +210,19 @@ Hojas de `metricas_modelos.xlsx`:
 | `Graficos` | Todos los gráficos incrustados |
 | `Pred_turno_test`, `Pred_ciclo_test`, `Plan_test` | Real vs predicho, fila por fila |
 | `Features` | Variables usadas y excluidas |
+
+### Versiones y evaluación de modelos
+
+Cada entrenamiento se guarda en `models/plan_riego/versiones/<corrida>/` y se copia a
+`models/plan_riego/actual/` (el que usa `predecir.py`). Para comparar modelos sobre el
+mismo período:
+
+```powershell
+python ml/src/riego_ml/pipelines/evaluar_modelo.py --desde 2025-09-23 `
+  --modelos ml/models/plan_riego/versiones/2026-11-07_0841 --reentrenar-hasta 2025-09-15
+```
+
+Genera `reports/evaluaciones/evaluacion_<desde>_<hasta>.xlsx`.
 
 ## Paso 4 – Predicción
 

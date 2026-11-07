@@ -104,3 +104,50 @@ def tabla_comparativa(resultados: pd.DataFrame) -> pd.DataFrame:
             fila[modelo] = float(d[metrica].iloc[0]) if len(d) and metrica in d and pd.notna(d[metrica].iloc[0]) else np.nan
         filas.append(fila)
     return pd.DataFrame(filas)
+
+
+TAREAS = {
+    "n_ciclos": ("clasificacion", "n_ciclos_clase"),
+    "riego_m3ha": ("regresion", "riego_m3ha"),
+    "inicio_min": ("regresion", "inicio_min"),
+}
+
+
+def reentrenar_hasta(config, plan_ref: PlanRiego, turno_dia: pd.DataFrame, ciclos: pd.DataFrame,
+                     columnas: dict, fecha: str, logger=None) -> PlanRiego:
+    """Rearma ``plan_ref`` (mismos modelos y parámetros) usando solo datos hasta ``fecha``.
+
+    Permite comparar modelos "como si se hubieran entrenado ese día" sobre un
+    período que ninguno de los dos vio.
+    """
+    from riego_ml.modeling.entrenamiento import Entrenador
+
+    corte = pd.Timestamp(fecha)
+    maxc = plan_ref.max_ciclos
+    td = turno_dia[turno_dia["Fecha"] <= corte].copy()
+    td["n_ciclos_clase"] = td["n_ciclos"].clip(upper=maxc).astype(int)
+    ci = ciclos[(ciclos["Fecha"] <= corte) & (ciclos["n_ciclos"] <= maxc)].copy()
+
+    ent = Entrenador(config, logger)
+    ent.categoricas = list(columnas["categoricas"])
+    ent.f_turno = list(columnas["features_turno"])
+    ent.f_ciclo = list(columnas["features_ciclo"])
+    ent.etiquetas = list(range(1, maxc + 1))
+    meta = plan_ref.metadata["elegidos"]
+    ent.elegidos = {
+        t: {"familia": meta[t]["familia"], "tarea": TAREAS[t][0], "target": TAREAS[t][1],
+            "features": plan_ref.features[t], "params": meta[t]["params"]}
+        for t in TAREAS
+    }
+    modelos = {}
+    for t, info in ent.elegidos.items():
+        datos = td if info["tarea"] == "clasificacion" else ci
+        est = ent._crear(t, info["familia"], info["tarea"], info["features"], info["params"])
+        modelos[t] = ent._ajustar(est, datos[info["features"]], datos[info["target"]])
+    margenes = {t: getattr(m, "margen_", 0.0) for t, m in plan_ref.rangos.items()}
+    rangos = ent._entrenar_rangos(ci, margenes) if plan_ref.rangos else {}
+    return ent._plan(modelos, ci, rangos, metadata={
+        "version": f"{plan_ref.metadata.get('version', 'actual')} reentrenado",
+        "rango_datos": f"{td['Fecha'].min():%Y-%m-%d} a {td['Fecha'].max():%Y-%m-%d}",
+        "elegidos": meta,
+    })
