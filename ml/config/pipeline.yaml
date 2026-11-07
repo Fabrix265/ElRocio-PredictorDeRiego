@@ -1,0 +1,58 @@
+# Configuración única del pipeline de predicción del plan de riego.
+# Rutas relativas a la raíz del repositorio.
+seed: 42
+
+rutas:
+  riego: ml/data/raw/data_riego.xlsx
+  meteo: ml/data/raw/data_metereologica.xlsx
+  phytech: ml/data/raw/data_phytech.xlsx
+  interim_dir: ml/data/interim         # paso 1: dataset unido
+  processed_dir: ml/data/processed     # paso 2: tablas listas para entrenar
+  modelos_dir: ml/models
+  reportes_dir: ml/reports
+
+fuentes:
+  hoja_riego: MOD5
+  phytech_project_id: 907557           # sensor Phytech del plot ENSUEÑO 1
+
+preparacion:
+  desde: null                          # YYYY-MM-DD, recorta el histórico de entrenamiento
+  hasta: null
+  min_duracion_min: 5.0                # ciclos más cortos = apertura fallida
+  min_riego_m3ha: 2.0                  # ciclos con menos m3/ha = apertura fallida
+  incluir_meteo_dia: false             # true solo si en producción habrá pronóstico del día
+
+split:                                 # temporal: train -> validación -> test
+  test: 0.20
+  validacion: 0.15
+  gap_dias: 7                          # días descartados entre bloques (evita fuga por lags)
+
+plan:
+  max_ciclos: 5                        # 5 = "5 o más" (clase de cola)
+  pausa_min_entre_ciclos: 0            # separación mínima al armar el horario
+
+excluir_dias_incompletos_eval: true    # días con menos turnos registrados no se evalúan
+
+tuning:                                # búsqueda aleatoria con folds temporales (opcional)
+  habilitado: false
+  n_iter: 15
+  folds: 3
+  n_jobs: -1
+
+modelos:
+  random_forest:
+    habilitado: true
+    clasificacion: {n_estimators: 400, min_samples_leaf: 3, max_features: sqrt, class_weight: balanced}
+    regresion: {n_estimators: 400, min_samples_leaf: 3, max_features: 0.5}
+  xgboost:
+    habilitado: true
+    clasificacion: {n_estimators: 400, max_depth: 4, learning_rate: 0.05, subsample: 0.9, colsample_bytree: 0.8, min_child_weight: 3}
+    regresion: {n_estimators: 500, max_depth: 5, learning_rate: 0.05, subsample: 0.9, colsample_bytree: 0.8, min_child_weight: 3}
+  svr:
+    habilitado: true
+    clasificacion: {C: 3.0, gamma: scale, class_weight: balanced}
+    regresion: {C: 10.0, epsilon: 0.1, gamma: scale}
+  mlp:
+    habilitado: true
+    clasificacion: {hidden_layer_sizes: [64, 32], alpha: 0.001, learning_rate_init: 0.001, max_iter: 400}
+    regresion: {hidden_layer_sizes: [64, 32], alpha: 0.001, learning_rate_init: 0.001, max_iter: 400}
