@@ -1,3 +1,5 @@
+"""Guardado de JSON tolerante a tipos de numpy/pandas."""
+
 from __future__ import annotations
 
 import json
@@ -33,11 +35,3 @@ def save_json(path: str | Path, payload: dict[str, Any]) -> Path:
         json.dump(payload, handle, ensure_ascii=False, indent=2, default=_json_default)
     return target
 
-
-def load_json(path: str | Path) -> dict[str, Any]:
-    with Path(path).open("r", encoding="utf-8") as handle:
-        return json.load(handle)
-
-
-def dataframe_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
-    return json.loads(df.to_json(orient="records", date_format="iso"))

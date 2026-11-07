@@ -1,12 +1,13 @@
-requests
+# Pipeline de datos y modelos
 pandas
 numpy
 scikit-learn
 xgboost
-matplotlib
-seaborn
 joblib
 PyYAML
-xlsxwriter
 openpyxl
+# Scripts de extracción (data_extraction/)
+requests
 tzdata
+# Tests
+pytest

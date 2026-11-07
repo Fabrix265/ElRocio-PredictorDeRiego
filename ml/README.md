@@ -1,247 +1,177 @@
-# Machine learning
+# Machine learning – Plan de riego El Rocío
 
-Módulo de extracción de datos y pipeline de predicción de riego por turno para El Rocío.
+Predice, **antes de que empiece el día**, el plan de riego de cada turno del módulo:
 
-El pipeline trabaja a nivel **turno**. Para cada turno predice:
+| Salida | Descripción |
+|---|---|
+| `Fecha`, `Turno` | Día y turno (TE01–TE05) planificados |
+| `n_ciclos` | Número de ciclos del turno ese día (1–5; 5 = "5 o más") |
+| `riego_m3ha` / `riego_m3` | Volumen de cada ciclo (m3/ha y m3) |
+| `duracion_min` | Duración de cada ciclo en minutos |
+| `hora_inicio` / `hora_fin` | Horario de cada ciclo (HH:MM) |
 
-- `N_ciclos`: cantidad de ciclos de riego (clasificación 1, 2 o 3).
-- Para cada ciclo `k = 1..max_cycles`:
-  - `Riego_ciclo_k_m3`: volumen del ciclo en m3.
-  - `Hora_inicio_k`: hora de inicio.
-  - `Tiempo_ciclo_k_min`: duración en minutos.
-  - `Hora_fin_k`: se deriva como `Hora_inicio_k + Tiempo_ciclo_k_min`.
-- `Riego_total_m3`: se deriva como la suma de los ciclos activos según `N_ciclos` predicho.
+## Pipeline
 
-La decisión de predecir inicio y duración, y derivar la hora de fin, evita inconsistencias entre las tres variables de horario. El modo de fin derivado está configurado con `schedule.end_mode: derived`.
-
-## Instalación
+```text
+data/raw/phytech/completo/*  ──(0) limpiar_phytech ──► data/raw/data_phytech.xlsx
+data/raw/data_riego.xlsx (base) ┐
+data/raw/data_metereologica.xlsx├─(1) unir_datos ──► data/interim/  riego_unido.csv, ambiente_diario.csv, dataset_unido.xlsx
+data/raw/data_phytech.xlsx      ┘
+                                  (2) preparar_dataset ──► data/processed/  turno_dia.csv, ciclos.csv, columnas.json, dataset_entrenamiento.xlsx
+                                  (3) entrenar ──► models/plan_riego/modelo_plan_riego.joblib + reports/metricas_modelos.xlsx
+                                  (4) predecir ──► reports/plan_riego_<fecha>.xlsx
+```
 
 Desde la raíz del repositorio:
 
 ```powershell
-python -m venv ml/.venv
-ml\.venv\Scripts\Activate.ps1
 pip install -r ml/requirements.txt
+python ml/src/riego_ml/pipelines/ejecutar_todo.py               # pasos 1-3
+python ml/src/riego_ml/pipelines/predecir.py --fecha 2025-04-25  # paso 4
 ```
 
-Dependencias principales: `pandas`, `numpy`, `scikit-learn`, `xgboost`, `matplotlib`, `joblib`, `PyYAML`, `openpyxl` y `xlsxwriter`.
+Cada paso también se puede correr por separado (`limpiar_phytech.py`, `unir_datos.py`,
+`preparar_dataset.py`, `entrenar.py`, `predecir.py`). Toda la configuración está en
+[`config/pipeline.yaml`](config/pipeline.yaml).
 
 ## Estructura
 
 ```text
 ml/
-  config/
-    train.yaml                 Configuración principal del entrenamiento
-  data/
-    raw/                       Datos originales (no versionados)
-    processed/                 Datasets procesados, incluida la muestra actual
-  models/                      Artefactos entrenados por modelo (no versionados)
-  reports/                     Excel, métricas, datasets procesados y figuras (no versionados)
+  config/pipeline.yaml            Configuración única (rutas, limpieza, split, modelos)
   src/riego_ml/
-    config/                    Carga y validación del YAML
-    data/                      Fuentes de datos, carga y validación
-    preprocessing/             Limpieza de ciclos, parseo de horas y split
-    features/                  Agregación ciclo -> turno, features, targets y horarios
-    training/
-      base.py                  Clase base multi-target
-      registry.py              Registro de modelos
-      trainer.py               Orquestador del entrenamiento
-      models/                  Random Forest, XGBoost, SVR y MLP
-    evaluation/                Métricas, gráficos y reporte Excel
-    inference/                 Carga de modelos y predicción
-    pipelines/                 CLIs de entrenamiento y predicción
-    utils/                     Logs, rutas, JSON, reproducibilidad
+    config.py                     Carga y validación del YAML
+    settings.py                   Rutas del proyecto y constantes de extracción
+    sources/                      Lectura y saneamiento de cada fuente
+      riego.py                    Registro MOD5 (base): horas, cruce de medianoche, área
+      meteo.py                    Estación cada 30 min -> resumen diario
+      phytech.py                  Suelo (medio y al cierre del día) + planta
+      phytech_crudo.py            Descargas crudas de la API -> data_phytech.xlsx
+    dataset/
+      unir.py                     Paso 1: riego + ambiente del mismo día y calendario diario
+      limpieza.py                 Reglas de descarte de ciclos y tabla turno-día
+      features.py                 Features sin fuga (todo lo conocido a las 00:00 del día)
+      preparar.py                 Paso 2: tablas de entrenamiento y features para predecir
+    modeling/
+      estimadores.py              RF, XGBoost, SVR/SVC, MLP y persistencia
+      split.py                    Split temporal con gap
+      metricas.py                 Métricas de regresión y clasificación
+      entrenamiento.py            Paso 3: compara, selecciona y reentrena
+      planificador.py             PlanRiego: n_ciclos -> ciclos -> horario
+      prediccion.py               Predicción de una o varias fechas
+    pipelines/                    CLIs de cada paso + ejecutar_todo.py
+    utils/                        Excel, horas, logging, JSON
+    data_extraction/              Descarga de APIs (fuera de git)
+  tests/                          Pruebas de horas, limpieza, features, split y horario
 ```
 
-## Datos de entrada
+## Paso 0 – Phytech crudo
 
-El dataset de muestra está en:
+`limpiar_phytech.py` toma `data/raw/phytech/completo/` (archivos `SoilHourlyData_*` y
+`ProjectsDailyData_*` del área 12537, plot 70208 "ENSUEÑO 1") y genera `data_phytech.xlsx`
+con las hojas `Suelo_horario`, `Suelo_diario`, `Planta_diario`, `Leyenda` y `Diagnostico`.
 
-```text
-ml/data/processed/dataset_riego_muestra.xlsx
-```
+- Humedad fuera de 5–60 % se anula (las lecturas ~0 % son sonda sin contacto, no suelo seco).
+- Temperatura de suelo fuera de 5–45 °C se anula.
+- Lecturas alineadas a la hora y rejilla horaria completa (las horas sin dato quedan visibles).
+- No se interpola ni se rellena nada.
 
-Hoja `Dataset`, con una fila por ciclo de riego. Columnas esperadas por defecto:
+## Paso 1 – Unión (riego como base)
 
-- `Fecha`, `Fundo`, `Modulo`, `Turno`
-- `Nro_ciclo`, `Riego_ciclo_m3`, `Riego_total_m3`
-- `Hora_inicio`, `Hora_fin`
-- `Temperatura_C`, `Humedad_rel_pct`, `Contraccion_planta_um`, `Radiacion_W_m2`
+- **Riego** (`MOD5`): `Fecha` es el día de inicio. Las horas de fin mayores a 24 h que Excel
+  guarda como `1900-01-01 HH:MM` se interpretan como del día siguiente. `inicio_min` y
+  `fin_min` son minutos desde las 00:00 de `Fecha`.
+- **Meteorología**: se sanea cada lectura de 30 min antes de agregar (sensor caído con
+  T = 0 y HR = 0, rangos físicos, ETo > 0,8 mm en 30 min, lecturas fuera de la grilla que
+  duplicaban bloques). Un día con < 75 % de lecturas válidas deja esa variable vacía.
+- **Phytech**: sensor 907557; humedad media del día y "al cierre" (21–23 h) por profundidad;
+  MDS, crecimiento del tronco e índice de estrés.
+- Llave de unión: `Fundo` + `Fecha`. `ambiente_diario.csv` es un calendario continuo para
+  poder calcular rezagos sin huecos.
 
-La agregación a nivel turno calcula:
+## Paso 2 – Limpieza y features
 
-- `N_ciclos` y `Riego_total_m3` a partir de los ciclos.
-- Los targets de cada slot: volumen, inicio y duración.
-- Agregados ambientales diarios por fecha: `_mean`, `_min`, `_max`, `_std`.
-- Features de fecha: `anio`, `mes`, `dia`, `dia_anio`, `dia_semana`, `semana_iso`.
-- `Turno_orden`, derivado del número final del turno (`TA1 -> 1`, `TA2 -> 2`, etc.).
+Reglas de limpieza (los descartados quedan en la hoja `Descartados` con su motivo):
 
-## Configuración
+- Apertura fallida: duración < 5 min o volumen < 2 m3/ha.
+- Duplicados (mismo turno, fecha e inicio).
+- Los ciclos se renumeran por hora de inicio; los que se solapan con el anterior se marcan.
+- `dia_incompleto = 1` si ese día se registraron menos turnos que los habituales (no se evalúa).
 
-Toda la configuración está en `ml/config/train.yaml`.
+Features (todas conocidas a las 00:00 del día D, verificado en `tests/test_features.py`):
 
-Secciones principales:
+- Calendario: mes, día de la semana, estacionalidad (`doy_sin`, `doy_cos`), turno.
+- Meteo del día anterior y ventanas (ETo media 3/7 días, lluvia acumulada 7 días…).
+- Suelo: cambios en 24 h de la humedad (zona radicular y 45 cm).
+- Planta del día anterior (MDS, crecimiento, estrés) y MDS medio 3 días.
+- Riego previo del mismo turno (ciclos, m3/ha, horarios de ayer y medias 3/7 días) y del
+  mismo número de ciclo (para los modelos por ciclo).
 
-- `data.source`: tipo (`excel`, `csv`, `parquet`), ruta, hoja y `column_map`.
-- `data.categorical_features`: columnas categóricas, por defecto `Fundo`, `Modulo`, `Turno`.
-- `data.numeric_features`: features numéricas adicionales. Puede quedar vacío.
-- `data.environmental_features`: columnas ambientales que se agregan por fecha.
-- `data.max_cycles`: cantidad máxima de ciclos modelados.
-- `data.nro_ciclo_column`, `cycle_volume_column`, `start_column`, `end_column`: nombres de columnas del dataset.
-- `split`: `group_shuffle` agrupado por `Turno`, con tamaños de test y validación.
-- `targets`: columna y clases de `N_ciclos`, columna de total y opción de modelo directo del total.
-- `schedule`: separación mínima entre ciclos y modo de hora de fin.
-- `models`: parámetros y early stopping por modelo.
-- `evaluation`: métricas, gráficos, Excel y cantidad de turnos para los gráficos Gantt.
+> **Niveles absolutos de humedad del suelo fuera del modelo** (`usar_suelo_absoluto: false`).
+> El sensor cambió de régimen entre temporadas (a 45 cm la media pasa de ~20 % en el período
+> de entrenamiento a ~28 % en el de test; 15/30 cm y zona radicular casi no existen antes de
+> 2023). Con esas variables el error de m3/ha en test pasaba de ~4,6 a ~12,5 m3/ha. Se
+> conservan en el dataset para revisión.
 
-`column_map` permite adaptar datos externos sin renombrar el archivo. El formato es `nombre_canonico: nombre_en_el_archivo`, por ejemplo:
+## Paso 3 – Modelos
 
-```yaml
-column_map:
-  Fecha: fecha_riego
-  Turno: turno_operativo
-  Riego_ciclo_m3: volumen_m3
-```
+Tres modelos componen el plan:
 
-## Entrenamiento
+1. **Clasificador `n_ciclos`** (tabla turno-día).
+2. **Regresor `riego_m3ha`** por ciclo.
+3. **Regresor `inicio_min`** por ciclo.
 
-Desde la raíz del repositorio:
+La **duración** se deriva del volumen con el caudal de cada turno
+(`duracion = m3/ha × min_por_m3ha`, mediana histórica): el registro muestra que
+duración y volumen son proporcionales por turno, así que volumen, duración y hora de fin
+siempre quedan coherentes. El horario final ordena los ciclos y evita solapamientos.
+
+Familias comparadas: Random Forest, XGBoost, SVR/SVC y MLP, más la **persistencia**
+("repetir lo de ayer") como un candidato más. Protocolo:
+
+- Split temporal por fechas: train → (7 días) → validación → (7 días) → test.
+- Cada target elige el modelo con mejor **validación** (F1 macro para `n_ciclos`, RMSE para
+  regresión). El test solo se reporta. Luego el elegido se reentrena con todos los datos.
+- Se evalúa también el **plan completo** en test (con `n_ciclos` predicho).
+- `--tuning` activa una búsqueda aleatoria de hiperparámetros con folds temporales.
+
+### Resultados actuales (test: 2024-06-23 a 2025-04-24, no usado para elegir)
+
+| Target | Elegido (por validación) | Test | Persistencia en test |
+|---|---|---|---|
+| `n_ciclos` | persistencia | acierto 0,81 · ±1 ciclo 0,96 | — |
+| `riego_m3ha` | Random Forest | RMSE 4,6 · MAE 3,0 · R² 0,54 | RMSE 5,3 · MAE 2,4 |
+| `inicio_min` | Random Forest | RMSE 148 min · R² 0,76 | RMSE 199 min |
+| `duracion_min` (derivada) | RF + caudal del turno | RMSE 14 min · R² 0,45 | — |
+
+Para `n_ciclos` ningún modelo de ML superó a "repetir lo de ayer" (RF: acierto 0,74): el
+número de ciclos depende de decisiones operativas con mucha inercia que las variables
+disponibles no explican. La persistencia queda elegida de forma automática por validación;
+si con más datos un modelo la supera, se elegirá ese.
+
+Reporte: `reports/metricas_modelos.xlsx` (hojas `Resumen`, `Comparacion`,
+`Confusion_n_ciclos`, `Importancias`, `Plan_test`, `Split`).
+
+## Paso 4 – Predicción
 
 ```powershell
-python ml/src/riego_ml/pipelines/train.py --config ml/config/train.yaml
+python ml/src/riego_ml/pipelines/predecir.py                          # día siguiente al último registro
+python ml/src/riego_ml/pipelines/predecir.py --fecha 2025-04-25 --dias 3
 ```
 
-También se puede ejecutar como módulo:
+Genera `Plan_por_turno` (1 fila por turno con los ciclos en columnas) y `Plan_por_ciclo`.
+Usa el historial del paso 1 para las features del día anterior: cuando lleguen datos
+nuevos, volver a correr `unir_datos.py`. Para varios días, la predicción es recursiva (el
+plan del día D se usa como "riego de ayer" del día D+1).
+
+## Pruebas
 
 ```powershell
-$env:PYTHONPATH="ml/src"
-python -m riego_ml.pipelines.train --config ml/config/train.yaml
+python -m pytest ml/tests -q
 ```
-
-Opciones útiles:
-
-```powershell
-python ml/src/riego_ml/pipelines/train.py --models random_forest,xgboost
-python ml/src/riego_ml/pipelines/train.py --seed 123 --test-size 0.25
-python ml/src/riego_ml/pipelines/train.py --name prueba_riego
-```
-
-## Predicción
-
-Con un modelo ya entrenado:
-
-```powershell
-python ml/src/riego_ml/pipelines/predict.py `
-  --config ml/config/train.yaml `
-  --model random_forest `
-  --input ml/data/processed/dataset_riego_muestra.xlsx `
-  --output ml/reports/predicciones_random_forest.xlsx
-```
-
-Si se omite `--input`, se usa `data.source.path` del YAML. La salida puede ser `.xlsx` o `.csv`. El Excel incluye dos hojas: `Predicciones` con todas las columnas y `Resumen` con el horario legible en formato `HH:MM`.
-
-## Modelos
-
-Se entrenan cuatro familias, cada una con un clasificador para `N_ciclos` y un regresor por cada target de ciclo:
-
-- `random_forest`: `RandomForestClassifier` y `RandomForestRegressor`. Early stopping por `warm_start`, agregando árboles por bloques y evaluando en validación.
-- `xgboost`: `XGBClassifier` y `XGBRegressor`. Early stopping nativo con `eval_set` y `early_stopping_rounds`.
-- `svr`: `SVC` para clasificación y `SVR` para regresión. No usa early stopping; requiere escalado.
-- `mlp`: `MLPClassifier` y `MLPRegressor`. Early stopping por épocas con `partial_fit`, paciencia y restauración del mejor modelo.
-
-Los modelos de árboles no escalan las features numéricas. SVR y MLP sí usan `StandardScaler`.
-
-## Validación
-
-El split por defecto es `GroupShuffleSplit` agrupado por `Turno`, de modo que un turno no aparece en train y test a la vez. Se separa primero test y luego validación dentro del resto. El pipeline intenta varias semillas para que las clases de `N_ciclos` estén presentes en train.
-
-Con el dataset de muestra hay muy pocos turnos con un solo ciclo, por lo que puede ocurrir que test no contenga la clase 1. En ese caso las métricas de clasificación se calculan con las clases presentes; el modelo sí aprende la clase 1 si aparece en train.
-
-## Métricas
-
-Regresión:
-
-- `RMSE`, `MAE`, `R2`, `MBE`, `Pearson r`, `KGE`, `NSE`, `PBIAS`, `sMAPE`, `Willmott d`, `MedAE`, `MaxError`.
-
-Clasificación:
-
-- `accuracy`, `balanced_accuracy`, `F1 macro`, `Cohen kappa` y matriz de confusión.
-
-Horarios:
-
-- MAE y RMSE por ciclo para inicio, duración y fin.
-- Porcentaje de turnos con orden de horarios válido antes de ajustar solapamientos.
-
-## Salidas
-
-Después de entrenar:
-
-```text
-ml/models/<modelo>/
-  model.joblib                 Modelo multi-target
-  preprocessor.joblib          ColumnTransformer ajustado
-  metadata.json                Features, targets, split, métricas y entorno
-  metrics.json                 Métricas del modelo
-  histories.json               Historial de early stopping
-
-ml/reports/
-  metricas_modelos.xlsx        Reporte consolidado
-  dataset_turno.csv            Dataset agregado por turno
-  dataset_ciclo_limpio.csv     Dataset de ciclos limpio
-  dataset_resumen.json         Resumen del dataset
-  config_usada.yaml/json       Configuración efectiva
-  run_metadata.json            Metadatos de la corrida
-  figures/<modelo>/            Gráficos por modelo y target
-  figures/comparacion/         Comparación entre modelos
-```
-
-Hojas del Excel:
-
-- `Resumen_Regresion`, `Resumen_Clasificacion`, `Horarios`, `Ranking`
-- `Predicciones_Turno`, `Predicciones_Ciclo`
-- `Confusion_N_Ciclos`, `Errores_Top`, `Metricas_Grupo`
-- `Targets`, `Modelos`, `Configuracion`
-
-## Cambiar a datos reales
-
-1. Copiar el archivo real a `ml/data/raw/` o a `ml/data/processed/`.
-2. Actualizar `data.source.path`, `data.source.type` y `data.source.sheet` en `ml/config/train.yaml`.
-3. Si los nombres de columnas cambian, usar `column_map`.
-4. Ajustar `data.environmental_features` y `data.max_cycles` según los datos disponibles.
-5. Verificar que existan las columnas de ciclo, volumen, inicio y fin configuradas.
-6. Ejecutar el entrenamiento y revisar `ml/reports/metricas_modelos.xlsx` y las figuras.
-
-El pipeline no requiere cambiar código para pasar de Excel a CSV o Parquet, siempre que la configuración apunte a la fuente correcta.
 
 ## Extracción de datos
 
-Los scripts de extracción están en `ml/src/riego_ml/data_extraction/` y se mantienen fuera de git.
-
-Las credenciales se leen de variables de entorno:
-
-```powershell
-$env:PHYTECH_API_KEY="..."
-$env:PHYTECH_API_SECRET="..."
-$env:PHYTECH_API_BASE_URL="https://us-api.phytech.com"
-
-$env:WEATHERLINK_API_KEY="..."
-$env:WEATHERLINK_API_SECRET="..."
-$env:WEATHERLINK_API_BASE_URL="https://api.weatherlink.com/v2"
-```
-
-Ejecución:
-
-```powershell
-python ml/src/riego_ml/data_extraction/descargar_phytech.py
-python ml/src/riego_ml/data_extraction/descargar_weatherlink.py
-```
-
-Salidas de extracción:
-
-- `ml/data/raw/phytech/`
-- `ml/data/raw/WeatherLink/`
-- `ml/cache/`
-- `ml/logs/log_descarga_phytech.txt`
-- `ml/logs/log_descarga_weatherlink.txt`
-
-Los datos, cachés, logs, modelos, reportes y scripts de extracción no se versionan.
+Los scripts de `src/riego_ml/data_extraction/` se mantienen fuera de git y leen las
+credenciales de variables de entorno (`PHYTECH_API_KEY`, `PHYTECH_API_SECRET`,
+`WEATHERLINK_API_KEY`, `WEATHERLINK_API_SECRET`, …). Ver el README raíz.
