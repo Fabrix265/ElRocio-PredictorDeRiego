@@ -36,7 +36,7 @@ def leer_ndvi(carpeta: str | Path, area_id: int, plot_id: int, fundo: str) -> tu
     out = (
         df.dropna(subset=["Fecha", "ndvi_medio"])
         .groupby(["Fundo", "Fecha"], as_index=False)["ndvi_medio"].mean()
-        .round(4)
+        .round({"ndvi_medio": 4})
     )
     diag = {
         "NDVI: imágenes del plot": len(out),

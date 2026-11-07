@@ -26,7 +26,7 @@ def _style_sheet(sheet, frame: pd.DataFrame) -> None:
     for index, column in enumerate(frame.columns, start=1):
         width = len(str(column)) + 2
         if len(frame):
-            sample = frame[column].head(SAMPLE_ROWS).astype(str).str.len().max()
+            sample = frame[column].head(SAMPLE_ROWS).map(lambda v: len(str(v))).max()
             width = max(width, int(sample) + 2)
         sheet.column_dimensions[get_column_letter(index)].width = min(max(width, 10), MAX_WIDTH)
 

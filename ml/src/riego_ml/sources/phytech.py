@@ -74,7 +74,9 @@ def leer_phytech(path: str | Path, project_id: int = PROJECT_ID_DEFAULT) -> tupl
     planta = planta[[*claves, *PLANTA_VARS]]
 
     diario = suelo.merge(planta, on=claves, how="outer").sort_values(claves)
-    diario = diario.round(3).reset_index(drop=True)
+    numericas = diario.select_dtypes("number").columns
+    diario[numericas] = diario[numericas].round(3)
+    diario = diario.reset_index(drop=True)
     diag = {
         "Phytech: sensor usado": project_id,
         "Phytech: días con suelo": int(diario["suelo_horas"].notna().sum()),

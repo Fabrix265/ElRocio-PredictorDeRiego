@@ -294,6 +294,11 @@ def tabla_importancias(r: ResultadosEntrenamiento, top: int = 20) -> pd.DataFram
     return pd.DataFrame(filas)
 
 
+def _redondear(df: pd.DataFrame, decimales: int = 2) -> pd.DataFrame:
+    numericas = df.select_dtypes("number").columns
+    return df.assign(**{c: df[c].round(decimales) for c in numericas})
+
+
 def _con_horas(df: pd.DataFrame) -> pd.DataFrame:
     """Agrega la versión HH:MM de cada columna de minutos de inicio/fin."""
     out = df.copy()
@@ -359,7 +364,7 @@ def _escribir_tabla(ws, df: pd.DataFrame, fila: int, formatos: dict[str, str] | 
                 celda.fill = FILL_MEJOR
                 celda.font = Font(name=FUENTE, size=10, bold=True, color="0B5D33")
     for j, col in enumerate(df.columns, start=1):
-        muestra = df[col].head(200).astype(str).str.len().max() if len(df) else 0
+        muestra = df[col].head(200).map(lambda v: len(str(v))).max() if len(df) else 0
         ancho = max(len(str(col)) * 0.9, (muestra or 0) + 2, 10)
         letra = get_column_letter(j)
         ws.column_dimensions[letra].width = max(ws.column_dimensions[letra].width or 0, min(ancho, max_ancho))
@@ -556,8 +561,8 @@ def generar_reporte(r: ResultadosEntrenamiento, carpeta: Path, logger=None) -> P
         "confusion": tabla_confusion(r),
         "importancias": tabla_importancias(r),
         "pred_turno": r.pred_turno_test,
-        "pred_ciclo": _con_horas(r.pred_ciclo_test).round(2),
-        "plan_test": _con_horas(r.plan_test).round(2),
+        "pred_ciclo": _redondear(_con_horas(r.pred_ciclo_test)),
+        "plan_test": _redondear(_con_horas(r.plan_test)),
     }
     r.comparacion.to_csv(datos / "comparacion_modelos.csv", index=False)
     r.pred_turno_test.to_csv(datos / "predicciones_test_turno.csv", index=False)

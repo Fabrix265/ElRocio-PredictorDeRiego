@@ -40,7 +40,7 @@ Desde la raíz del repositorio:
 
 ```powershell
 python -m venv ml/.venv; ml\.venv\Scripts\Activate.ps1
-pip install -r ml/requirements.txt
+pip install -r ml/requirements.txt   # versiones fijas: si se cambian, reentrenar
 python ml/src/riego_ml/pipelines/ejecutar_todo.py               # pasos 1-3 (entrena)
 python ml/src/riego_ml/pipelines/predecir.py --fecha 2026-11-05  # paso 4 (plan del día)
 ```
@@ -188,16 +188,19 @@ Test de la corrida: 2025-09-23 a 2026-11-04 (no usado para elegir).
 | Target | Elegido (por validación) | Test |
 |---|---|---|
 | `n_ciclos` | persistencia salvo cambio seguro | acierto 0,81 · ±1 ciclo 0,97 |
-| `riego_m3ha` | XGBoost | RMSE 4,9 · MAE 3,2 |
+| `riego_m3ha` | LightGBM | RMSE 4,9 · MAE 3,2 · R² 0,69 |
 | `inicio_min` | XGBoost | RMSE 155 min · MAE 1 h 56 min |
-| `duracion_min` (derivada, caudal 30 días) | XGBoost + caudal | MAE 8,7 min · sesgo +0,5 min |
+| `duracion_min` (derivada, caudal 30 días) | LightGBM + caudal | MAE 8,8 min · sesgo +0,1 min |
 | Plan: riego total turno-día | — | RMSE 9,4 m3/ha |
+
+Modelo actual: versión `2026-11-07_1115` (entrenado en `ml/.venv` con las versiones fijas de
+`requirements.txt`).
 
 Comparación justa (mismo período 2025-09-23 → 2026-11-04, que ninguno vio):
 modelo anterior (datos hasta abr-2025) vs. modelo nuevo reentrenado con datos hasta
-2025-09-15 (`evaluar_modelo.py --reentrenar-hasta 2025-09-15`): m3/ha MAE 3,33 → 3,10,
-duración MAE 10,5 → 8,4 min (sesgo +4,7 → −0,4), plan total RMSE 9,9 → 9,3, cobertura de
-rangos 68 % → 75 %; n° de ciclos igual (81 %); hora de inicio algo peor (MAE 113 → 119 min).
+2025-09-15 (`evaluar_modelo.py --reentrenar-hasta 2025-09-15`): n° de ciclos 81,2 → 82,3 %,
+m3/ha MAE 3,33 → 3,13, duración MAE 10,5 → 8,6 min (sesgo +4,7 → −0,3), plan total RMSE
+9,9 → 8,8, cobertura rango inicio 68 % → 75 %; hora de inicio algo peor (MAE 113 → 119 min).
 
 ### Reportes de cada entrenamiento
 

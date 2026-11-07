@@ -8,8 +8,9 @@ que realmente se regó. Para el detalle técnico del pipeline ver [README.md](RE
 
 | Qué | Estado |
 |---|---|
-| Modelo actual | `models/plan_riego/actual/` – versión `2026-11-07_1031`, datos abr-2021 a 04/11/2026 |
-| N° de ciclos | ✅ Usable · acierta ~81 % de los días (97 % con ±1 ciclo) |
+| Modelo actual | `models/plan_riego/actual/` – versión `2026-11-07_1115`, datos abr-2021 a 04/11/2026, entrenado en `ml/.venv` |
+| Modelos elegidos | n° de ciclos: persistencia salvo cambio seguro · m3/ha: LightGBM · inicio: XGBoost · duración: m3/ha × caudal 30 días |
+| N° de ciclos | ✅ Usable · acierta ~81–82 % de los días (97 % con ±1 ciclo) |
 | m3/ha por ciclo | ✅ Usable como sugerencia · error típico ±3 m3/ha |
 | Duración por ciclo | ✅ Usable · error típico ±9 min (usa el caudal de los últimos 30 días) |
 | Hora de inicio y fin | ⚠️ Solo orientativa · error típico ±2 h; no programar el controlador con estos horarios |
@@ -29,6 +30,11 @@ pip install -r ml/requirements.txt
 python -m pytest ml/tests -q          # debe terminar en "passed"
 ```
 
+`requirements.txt` tiene **versiones fijas**: el modelo guardado se carga con las mismas
+versiones con que se entrenó (scikit-learn 1.9.1, pandas 3.1.0, etc.). Si se actualiza alguna
+librería, hay que reentrenar (`ejecutar_todo.py`). Todos los comandos de esta guía se corren
+con el venv activado.
+
 Credenciales de las APIs (solo para descargar datos):
 
 ```powershell
@@ -43,7 +49,7 @@ $env:WEATHERLINK_API_SECRET="..."
 | Fuente | Archivo que lee el pipeline | Cómo se actualiza |
 |---|---|---|
 | Riego (base) | `ml/data/raw/data_riego_historico.xlsx`, hoja `MOD5` | Reemplazar el Excel por la versión nueva que envían (mismas columnas) |
-| Meteorología | `ml/data/raw/data_metereologica.xlsx` | Reemplazar por el export nuevo (mismo formato). La API de WeatherLink ya descarga datos a `data/raw/WeatherLink/`, pero el pipeline todavía no los lee |
+| Meteorología | `ml/data/raw/data_metereologica.xlsx` | Reemplazar por el export nuevo (mismo formato). La API de WeatherLink (estación 28494 "AVO PERU – ENSUEÑO 1") ya descarga datos a `data/raw/WeatherLink/`, pero el pipeline todavía no los lee |
 | Phytech (suelo, planta, NDVI) | `ml/data/raw/data_phytech.xlsx` (se genera) | `descargar_phytech.py` (API) + `limpiar_phytech.py` |
 
 La ruta de cada archivo se cambia en [`config/pipeline.yaml`](config/pipeline.yaml), sección `rutas`.
@@ -58,6 +64,7 @@ con menos precisión.
 # 1) Actualizar fuentes
 #    - copiar el data_riego_historico.xlsx nuevo a ml/data/raw/
 #    - copiar el data_metereologica.xlsx nuevo a ml/data/raw/
+#    - en ml/src/riego_ml/settings.py: PHYTECH_ANIOS = [2026] (año en curso)
 python ml/src/riego_ml/data_extraction/descargar_phytech.py
 python ml/src/riego_ml/pipelines/limpiar_phytech.py
 
