@@ -101,6 +101,13 @@ class Settings(BaseSettings):
         return f"{hora:02d}:{minuto:02d}"
 
     @model_validator(mode="after")
+    def _validar_cors(self) -> Settings:
+        # Con credenciales, "*" haría que Starlette refleje cualquier origen.
+        if "*" in _lista(self.cors_origins):
+            raise ValueError("CORS_ORIGINS no puede contener '*' (se usan cookies de sesión)")
+        return self
+
+    @model_validator(mode="after")
     def _validar_produccion(self) -> Settings:
         if self.app_env != "production":
             return self
@@ -115,6 +122,16 @@ class Settings(BaseSettings):
             problemas.append("falta DATABASE_URL")
         if not self.frontend_url.startswith("https://"):
             problemas.append("FRONTEND_URL debe usar https")
+        # §7: en producción CORS solo con FRONTEND_URL.
+        frontend = self.frontend_url.rstrip("/")
+        ajenos = [o for o in _lista(self.cors_origins) if o.rstrip("/") != frontend]
+        if ajenos:
+            problemas.append(
+                "CORS_ORIGINS solo puede contener FRONTEND_URL (o quedar vacío); sobran: "
+                + ", ".join(ajenos)
+            )
+        if self.cookie_samesite != "strict":
+            problemas.append("COOKIE_SAMESITE debe ser strict")
         if problemas:
             raise ValueError("Configuración inválida para producción: " + "; ".join(problemas))
         return self

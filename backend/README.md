@@ -71,17 +71,41 @@ En `.env`: `DATABASE_URL_MIGRACIONES=postgresql+psycopg://postgres@localhost:543
   sola política para `riego_app`, y `REVOKE` para `PUBLIC`, `anon` y `authenticated`.
 - `0002_datos_semilla`: AVO PERÚ S.A.C. y Talsa, fundo ENSUEÑO 1, módulo EN01-MOD5, turnos
   TE01–TE05, 22 lotes y los motivos de corrección. Idempotente.
+- `0003_endurecimiento`: tipo de intento `cambiar_password`, gracia única del refresh
+  (`sesion_refresh.gracia_usada_at`), `riego_registro` inmutable (la app solo puede pasar
+  `vigente` de true a false; no borra ni reescribe versiones, también por trigger) y
+  `updated_at` mantenido por trigger (`riego.fijar_updated_at`, cubre upserts y SQL directo).
 - `alembic downgrade base` deja el esquema vacío (conserva `riego.alembic_version` y el rol).
-- `configurar-rol-app` cifra la contraseña (SCRAM-SHA-256) en el cliente antes del `ALTER ROLE`.
+- `configurar-rol-app` solo hace `ALTER ROLE riego_app WITH LOGIN PASSWORD ...` (los demás
+  atributos los fija la migración 0001; así funciona con un dueño no superusuario, como en
+  Supabase), cifra la contraseña (SCRAM-SHA-256) en el cliente y se niega si `riego_app` tiene
+  SUPERUSER, BYPASSRLS, CREATEROLE o CREATEDB.
 - `verificar-seguridad-bd` termina con código 1 si alguna tabla quedó sin RLS, con políticas para
-  otros roles, con privilegios para `PUBLIC`/`anon`/`authenticated`, si `riego_app` tiene
-  privilegios de más o falta algún trigger.
+  otros roles, con privilegios para `PUBLIC`/`anon`/`authenticated` (también EXECUTE sobre
+  funciones), si `riego_app` tiene privilegios de más o le faltan SELECT/INSERT, o falta algún
+  trigger.
+- **Migraciones nuevas (F2–F5)**: cada tabla nueva con `preparar_tabla("tabla", modo="crud"|
+  "insercion")` y cada función con `preparar_funcion("nombre(args)")` (`app/db/migraciones.py`):
+  GRANT para `riego_app`, RLS con su política, secuencias, y nada para PUBLIC/`anon`/
+  `authenticated`. Postgres no aplica los `ALTER DEFAULT PRIVILEGES IN SCHEMA ... REVOKE` sobre el
+  EXECUTE de PUBLIC, así que sin estas ayudas una función nueva nacería ejecutable por todos.
 
 ### Supabase
 
-1. `DATABASE_URL_MIGRACIONES` = conexión directa `db.<ref>.supabase.co:5432` con `postgres`.
+1. `DATABASE_URL_MIGRACIONES` con el rol `postgres` y el puerto 5432:
+   - conexión directa `postgresql://postgres:<clave>@db.<ref>.supabase.co:5432/postgres` (solo
+     IPv6 si el proyecto no tiene el complemento IPv4), o
+   - *Session pooler* `postgresql://postgres.<ref>:<clave>@aws-0-<region>.pooler.supabase.com:5432/postgres`
+     (funciona por IPv4 y admite DDL; usar este desde redes o hosting solo IPv4).
+   El pooler en modo transacción (6543) se rechaza para migrar.
 2. `alembic upgrade head`, luego `configurar-rol-app` y `verificar-seguridad-bd`.
-3. `DATABASE_URL` = pooler 6543 con el usuario `riego_app.<ref>` y la contraseña definida.
+   Sin conexión posible: `PYTHONUTF8=1 .venv/Scripts/python -m alembic upgrade head --sql > riego.sql`
+   genera el SQL completo (con los datos semilla) para pegarlo en el editor SQL de Supabase; luego
+   `ALTER ROLE riego_app WITH LOGIN PASSWORD '<clave>';` desde el mismo editor.
+3. `DATABASE_URL` = pooler 6543 con el usuario `riego_app.<ref>` y la contraseña definida. La API
+   comprueba al arrancar que se conecta como `riego_app` (sin SUPERUSER, BYPASSRLS ni ser dueño
+   del esquema): en producción no arranca si no; en desarrollo avisa en el log y `/health` queda
+   `degradado` con `rol_bd: "inseguro"`.
 4. `crear-admin` (abajo) para el primer administrador.
 
 La Data API de Supabase solo publica `public`; el esquema `riego` queda fuera y, además, sin
@@ -107,15 +131,19 @@ el primer ingreso. Queda auditado como `usuario_creado` con actor `sistema`.
 .venv/Scripts/python -m uvicorn app.main:app --reload --port 8000
 
 # Producción (detrás de un proxy; 1 worker: el modelo usa todos los núcleos)
-.venv/Scripts/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 \
-    --proxy-headers --forwarded-allow-ips="$TRUSTED_PROXIES"
+.venv/Scripts/python -m app        # HOST/PORT del entorno (por defecto 0.0.0.0:8000)
 ```
 
-- **IP real**: uvicorn reemplaza la IP del cliente por la de `X-Forwarded-For` solo si la conexión
-  viene de una IP de `--forwarded-allow-ips` (usar el mismo valor que `TRUSTED_PROXIES`). La app
-  nunca lee `X-Forwarded-For` por su cuenta; esa IP es la que se audita y la que cuentan los
-  límites de intentos.
-- `GET /api/v1/health` → `{status, app, entorno, bd, modelo}` (503 si la BD no responde).
+- **IP real**: `python -m app` arranca uvicorn con `--proxy-headers` y
+  `--forwarded-allow-ips=TRUSTED_PROXIES` leído de `backend/.env`: la IP del cliente se toma de
+  `X-Forwarded-For` solo si la conexión viene de un proxy de confianza. La app nunca lee
+  `X-Forwarded-For` por su cuenta; esa IP es la que se audita y la que cuentan los límites. En
+  producción avisa si `TRUSTED_PROXIES` quedó en `127.0.0.1` (detrás de un PaaS todos los clientes
+  tendrían la IP del proxy y el límite por IP sería global).
+- `GET /api/v1/health` → `{status, app, entorno, bd, rol_bd, modelo}` (503 si la BD no responde;
+  `status: "degradado"` si el rol de la conexión no es `riego_app` o tiene privilegios de más).
+- `DEBUG=true` solo cambia el nivel de log: los errores no controlados nunca devuelven el
+  traceback al cliente.
 - Documentación interactiva en `http://localhost:8000/docs` (deshabilitada en producción).
 
 ## Autenticación y seguridad (§7)
@@ -137,23 +165,39 @@ el primer ingreso. Queda auditado como `usuario_creado` con actor `sistema`.
   `token_version` (desactivado, cambio de rol, cambio o restablecimiento de contraseña), el token
   deja de servir al instante.
 - Refresh token opaco (7 días) en la cookie `rt` (`HttpOnly`, `Secure` según `COOKIE_SECURE`,
-  `SameSite` según `COOKIE_SAMESITE`, `Path=/api/v1/auth`); en la BD solo su SHA-256. Reusar un
-  refresh ya rotado: dentro de 30 s (dos pestañas) entrega otro de la misma familia; después, se
-  revoca toda la familia. Refresh y logout exigen `X-Requested-With: fetch` y validan `Origin`.
+  `SameSite` según `COOKIE_SAMESITE`, `Path=/api/v1/auth`); en la BD solo su SHA-256. Cada uso
+  extiende la sesión 7 días, con un tope de 30 días desde el login. Reusar un refresh ya rotado:
+  dentro de 30 s (respuesta perdida) entrega **una sola vez** un sucesor y revoca la hoja anterior
+  (nunca hay más de una sesión activa por familia); un segundo reuso, uno fuera de plazo o usar la
+  hoja revocada por la gracia revocan toda la familia. Refresh y logout exigen
+  `X-Requested-With: fetch` y validan `Origin`.
 - Mientras `debe_cambiar_password` sea true, todo responde 403 «Debes cambiar tu contraseña»
   salvo `me`, `cambiar-password` y `logout`.
 - Límites contados en la BD (`intento_login`): login 5 fallos/15 min por usuario+IP, 30 por IP,
-  10 por usuario; recuperar 3/h por usuario y 10/h por IP; restablecer 10/15 min por IP. Usuario
-  inexistente: se verifica contra un hash ficticio y el mensaje es siempre el mismo.
+  10 por usuario; recuperar 3/h por usuario y 10/h por IP; restablecer 10/15 min por IP; cambiar
+  contraseña 5 fallos/15 min por usuario (al quinto se cierran todos sus accesos: podría ser un
+  access token robado). El intento se registra (con commit) **antes** de verificar la contraseña,
+  así las peticiones simultáneas se cuentan entre sí. El usuario intentado se guarda como
+  HMAC-SHA256, nunca el texto escrito. Usuario inexistente: se verifica contra un hash ficticio y
+  el mensaje es siempre el mismo.
+- IDs y páginas acotados (`IdPath`, `IdQuery`, `Pagina` en `app/api/deps.py`; usarlos en F2–F5):
+  fuera de rango responden 422.
+- Producción exige además `COOKIE_SAMESITE=strict` y `CORS_ORIGINS` vacío o igual a
+  `FRONTEND_URL`; `CORS_ORIGINS=*` se rechaza siempre.
 - Errores siempre como `{"detail": "mensaje en español"}`; los de validación (422) como lista
   `[{loc, msg, type}]` con `msg` en español y sin repetir lo enviado.
 - Cabeceras: `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, CSP
   `frame-ancestors 'none'`, `Cache-Control: no-store` y HSTS solo en producción.
 - Logs: un filtro redacta contraseñas, tokens, `Authorization`, `X-Api-Secret`, cookies,
-  `api-key=` y cualquier JWT; httpx/httpcore en WARNING.
+  `api-key=`, claves con prefijo o sufijo (`phytech_api_secret=`, `secret_key:`, `token_hash`,
+  `api-signature=`...) y cualquier JWT; httpx/httpcore en WARNING.
 - Auditoría de login, login_fallido, logout, recuperar_solicitado, password_restablecido,
-  password_cambiado, usuario_creado/editado, rol_cambiado, usuario_activado/desactivado y
-  password_temporal_asignado, con antes/después en lista blanca (nunca hashes ni tokens).
+  password_cambiado, password_cambio_fallido, usuario_creado/editado, rol_cambiado,
+  usuario_activado/desactivado y password_temporal_asignado, con antes/después en lista blanca
+  (nunca hashes ni tokens). Un login fallido de un usuario inexistente se audita sin usuario (lo
+  escrito podría ser una contraseña); `recuperar_solicitado` va sin actor (es anónimo).
+- Cambiar la contraseña, asignar una temporal, cambiar el rol, desactivar o cambiar el correo
+  invalidan los enlaces de recuperación pendientes.
 
 ## Correos y tareas programadas
 
@@ -176,7 +220,8 @@ genera al enviar (en la BD su SHA-256) y el enlace es `FRONTEND_URL/restablecer#
 - **Modo archivo**: con `SMTP_HOST` vacío cada correo se guarda como `.eml` en `backend/var/correos/`
   (ignorado por git); el log solo dice «correo guardado en archivo». Ábrelo con cualquier
   cliente de correo para ver el enlace.
-- Mantenimiento: a las 03:15 (Lima) se borran los intentos de ingreso de más de 30 días.
+- Mantenimiento: a las 03:15 (Lima) se borran los intentos de ingreso de más de 30 días y las
+  sesiones de refresh y enlaces de recuperación vencidos, revocados o usados hace más de 30 días.
 
 ## Pruebas
 

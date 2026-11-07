@@ -53,7 +53,9 @@ def test_auditoria_filtra_y_pagina(client: TestClient, auth, crear_usuario, db: 
 
     assert consultar(accion="login_fallido")["total"] == 1
     por_usuario = consultar(usuario_id=uli.id)
-    assert por_usuario["total"] == 2 and {i["accion"] for i in por_usuario["items"]} == {"login"}
+    # El login fallido de un usuario existente queda a su nombre (aparece en su filtro).
+    assert por_usuario["total"] == 3
+    assert sorted(i["accion"] for i in por_usuario["items"]) == ["login", "login", "login_fallido"]
     assert consultar(entidad="usuario", entidad_id=str(uli.id))["total"] == 3
 
     pagina = consultar(page=2, page_size=2)
@@ -129,3 +131,30 @@ def test_motivos_de_correccion(client: TestClient, auth):
         "operacion_personal", "otro",
     ]
     assert motivos[1]["nombre"] == "Criterio agronómico"
+
+
+ENORME = "99999999999999999999"  # más que un bigint
+
+
+@pytest.mark.parametrize(
+    ("metodo", "ruta", "params", "cuerpo"),
+    [
+        ("get", "/auditoria", {"page": ENORME}, None),
+        ("get", "/auditoria", {"page": "100001"}, None),
+        ("get", "/auditoria", {"usuario_id": ENORME}, None),
+        ("get", "/auditoria", {"usuario_id": "0"}, None),
+        ("get", f"/usuarios/{ENORME}", None, None),
+        ("get", "/usuarios/0", None, None),
+        ("patch", f"/usuarios/{ENORME}", None, {"nombre": "X"}),
+        ("post", f"/usuarios/{ENORME}/password-temporal", None, {"password_temporal": "Temporal2026x"}),
+    ],
+)
+def test_ids_y_paginas_fuera_de_rango_dan_422(client: TestClient, auth, metodo, ruta, params, cuerpo):
+    cabeceras = auth("admin", username="jefa_rangos")
+    kwargs = {"headers": cabeceras, "params": params}
+    if cuerpo is not None:
+        kwargs["json"] = cuerpo
+    respuesta = getattr(client, metodo)(f"{API}{ruta}", **kwargs)
+    assert respuesta.status_code == 422, respuesta.text
+    assert "Traceback" not in respuesta.text
+    assert isinstance(respuesta.json()["detail"], list)

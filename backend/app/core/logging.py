@@ -2,8 +2,9 @@
 
 El filtro :class:`FiltroRedaccion` se instala en los *handlers* (raíz, uvicorn y APScheduler) y
 reemplaza por ``[REDACTADO]`` contraseñas, tokens, cabeceras ``Authorization``/``X-Api-Secret``/
-``X-Api-Key``/``Cookie``, el parámetro ``api-key=`` de WeatherLink y cualquier texto con forma de
-JWT. httpx y httpcore quedan en WARNING (en INFO registran URLs completas, con la query).
+``X-Api-Key``/``Cookie``, el parámetro ``api-key=`` de WeatherLink, cualquier clave con nombre
+sensible aunque tenga prefijo o sufijo (``phytech_api_secret=``, ``secret_key:``, ``token_hash``)
+y cualquier texto con forma de JWT. httpx y httpcore quedan en WARNING (en INFO registran URLs completas, con la query).
 """
 
 from __future__ import annotations
@@ -14,12 +15,18 @@ import sys
 
 REDACTADO = "[REDACTADO]"
 
-_CLAVES = (
-    r"password|password_[a-z]+|passwd|contrase(?:ñ|n)a|access_token|refresh_token|id_token|token|"
-    r"secret|api[_-]?secret(?:[_-]key)?|api[_-]?key|client_secret|rt"
-)
+# Nombres de clave sensibles, también con prefijo o sufijo (phytech_api_secret, secret_key,
+# token_hash, api-signature, password_nueva...). "rt" es la cookie del refresh token.
+_PALABRAS = r"password|passwd|contrase(?:ñ|n)a|secret|token|api[_-]?key|signature"
+_CLAVES = rf"[\w-]*(?:{_PALABRAS})[\w-]*|rt"
 
-_PATRONES: list[tuple[re.Pattern[str], str]] = [
+
+def _redactar_valor(coincidencia: re.Match[str]) -> str:
+    comilla = coincidencia.group("comilla") or ""
+    return f"{coincidencia.group('clave')}{coincidencia.group('sep')}{comilla}{REDACTADO}{comilla}"
+
+
+_PATRONES: list[tuple[re.Pattern[str], object]] = [
     # Cabeceras HTTP: "Authorization: Bearer xxx", "X-Api-Secret: xxx", "Cookie: rt=xxx"
     (
         re.compile(
@@ -28,13 +35,20 @@ _PATRONES: list[tuple[re.Pattern[str], str]] = [
         ),
         rf"\1\2\3{REDACTADO}",
     ),
-    # Pares clave/valor estilo JSON o repr: "password": "xxx" / 'token': 'xxx'
+    # Pares clave/valor estilo JSON o repr: "password": "xxx" / 'token_hash': 'xxx'
     (
         re.compile(rf"(?i)(['\"](?:{_CLAVES})['\"]\s*:\s*)(['\"])(?:\\.|(?!\2).)*\2"),
         rf"\1\2{REDACTADO}\2",
     ),
-    # Query string, formularios o kwargs: api-key=xxx, password=xxx, token=xxx
-    (re.compile(rf"(?i)\b({_CLAVES})=([^&\s'\",;)]+)"), rf"\1={REDACTADO}"),
+    # Clave sin comillas con "=" o ":" (query string, formularios, kwargs, settings):
+    # api-key=xxx, password=xxx, #token=xxx, phytech_api_secret="xxx", api_key: xxx
+    (
+        re.compile(
+            rf"(?i)(?<![\w-])(?P<clave>{_CLAVES})(?P<sep>\s*[:=]\s*)(?!\[REDACTADO\])"
+            r"(?:(?P<comilla>['\"])(?:\\.|(?!(?P=comilla)).)*(?P=comilla)|[^&\s'\",;)}\]]+)"
+        ),
+        _redactar_valor,
+    ),
     # Enlaces de recuperación: #token=xxx (cubierto arriba) y Bearer suelto
     (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"), f"Bearer {REDACTADO}"),
     # Cualquier JWT

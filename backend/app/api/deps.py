@@ -14,7 +14,7 @@ from collections.abc import Callable
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, Request
+from fastapi import Depends, Path, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -33,6 +33,16 @@ MENSAJE_SOLICITUD_NO_PERMITIDA = "Solicitud no permitida"
 _bearer = HTTPBearer(auto_error=False)
 
 DbSesion = Annotated[Session, Depends(get_db)]
+
+# --- Parámetros acotados ------------------------------------------------------
+# Los enteros sin tope desbordan bigint en Postgres (500). Usar estos tipos en todos los IDs y
+# paginaciones (también en F2–F5): fuera de rango responden 422.
+MAX_ID_BD = 2**63 - 1  # bigint
+MAX_PAGINA = 100_000
+
+IdPath = Annotated[int, Path(ge=1, le=MAX_ID_BD, description="ID (entero positivo)")]
+IdQuery = Annotated[int | None, Query(ge=1, le=MAX_ID_BD, description="ID (entero positivo)")]
+Pagina = Annotated[int, Query(ge=1, le=MAX_PAGINA, description="Página, desde 1")]
 
 
 def contexto_peticion(request: Request) -> ContextoPeticion:

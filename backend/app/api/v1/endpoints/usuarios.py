@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
-from app.api.deps import Contexto, DbSesion, requiere_rol
+from app.api.deps import Contexto, DbSesion, IdPath, requiere_rol
 from app.models import Usuario
 from app.models.enums import RolUsuario
 from app.repositories import usuarios as repo_usuarios
@@ -48,13 +48,13 @@ def crear(datos: UsuarioCrear, admin: Admin, db: DbSesion, contexto: Contexto) -
 
 
 @router.get("/{usuario_id}", response_model=UsuarioSalida)
-def obtener(usuario_id: int, _admin: Admin, db: DbSesion) -> Usuario:
+def obtener(usuario_id: IdPath, _admin: Admin, db: DbSesion) -> Usuario:
     return usuario_service.obtener(db, usuario_id)
 
 
 @router.patch("/{usuario_id}", response_model=UsuarioSalida)
 def editar(
-    usuario_id: int, datos: UsuarioEditar, admin: Admin, db: DbSesion, contexto: Contexto
+    usuario_id: IdPath, datos: UsuarioEditar, admin: Admin, db: DbSesion, contexto: Contexto
 ) -> Usuario:
     cambios = datos.model_dump(exclude_unset=True, exclude_none=True)
     return usuario_service.editar(db, usuario_id, cambios, actor=admin, contexto=contexto)
@@ -62,7 +62,7 @@ def editar(
 
 @router.post("/{usuario_id}/password-temporal", response_model=UsuarioSalida)
 def password_temporal(
-    usuario_id: int, datos: PasswordTemporalEntrada, admin: Admin, db: DbSesion, contexto: Contexto
+    usuario_id: IdPath, datos: PasswordTemporalEntrada, admin: Admin, db: DbSesion, contexto: Contexto
 ) -> Usuario:
     return usuario_service.asignar_password_temporal(
         db, usuario_id, datos.password_temporal, actor=admin, contexto=contexto

@@ -89,6 +89,16 @@ def test_produccion_rechaza_configuracion_insegura():
         ("cookie: rt=refresh-opaco-123", "refresh-opaco-123"),
         ("enlace http://x/restablecer#token=abcDEF123", "abcDEF123"),
         ("password=Secreta2026&otro=1", "Secreta2026"),
+        # Claves con prefijo o sufijo, y con dos puntos (nombres de settings de F2).
+        ('phytech_api_secret="S3CR3T"', "S3CR3T"),
+        ("PHYTECH_API_KEY=pk-123456", "pk-123456"),
+        ("weatherlink_api_secret: wl-789", "wl-789"),
+        ("{'weatherlink_api_key': 'wk-456'}", "wk-456"),
+        ("secret_key=SECRETO", "SECRETO"),
+        ("api_key: SECRETO", "SECRETO"),
+        ("api-signature=firma123", "firma123"),
+        ("[parameters: {'token_hash': 'abc123', 'param_1': 50}]", "abc123"),
+        ("smtp_password = 'clave smtp'", "clave smtp"),
     ],
 )
 def test_redaccion_de_secretos(texto: str, secreto: str):
@@ -234,3 +244,52 @@ def test_tarea_enviar_correos(client: TestClient, crear_usuario, db: Session, ma
     resultado = tareas.enviar_correos(mailer)
     assert resultado.enviados == 1
     assert db.scalars(select(NotificacionCorreo)).one().estado == EstadoCorreo.enviado
+
+
+def test_error_no_controlado_sin_traceback_aunque_debug_sea_true(monkeypatch):
+    """Con DEBUG=true (desarrollo) un 500 tampoco devuelve el traceback al cliente."""
+    from app.main import create_app
+
+    config = Settings(app_env="development", debug=True, database_url="postgresql://x@localhost/x")
+    aplicacion = create_app(config)
+    assert aplicacion.debug is False
+
+    @aplicacion.get("/explota")
+    def _explota():
+        raise RuntimeError("SELECT secreto FROM tabla WHERE param_1 = 123")
+
+    with TestClient(aplicacion, raise_server_exceptions=False) as cliente:
+        respuesta = cliente.get("/explota")
+    assert respuesta.status_code == 500
+    assert "Traceback" not in respuesta.text and "secreto" not in respuesta.text
+
+
+@pytest.mark.parametrize(
+    "texto",
+    ["sort=desc&page=2", "Reuso de refresh token detectado: se revoca la familia", "usuario=ana"],
+)
+def test_redaccion_no_toca_texto_normal(texto: str):
+    assert redactar(texto) == texto
+
+
+def test_redaccion_no_se_aplica_dos_veces():
+    assert redactar("X-Api-Key: abc") == f"X-Api-Key: {REDACTADO}"
+
+
+def test_python_m_app_pasa_los_proxies_de_confianza(monkeypatch, caplog):
+    import app.__main__ as arranque
+
+    llamadas = {}
+    monkeypatch.setattr(arranque.uvicorn, "run", lambda destino, **kw: llamadas.update(kw, destino=destino))
+    monkeypatch.setattr(arranque, "settings", Settings(
+        _env_file=None, app_env="production", jwt_secret="x" * 40, cookie_secure=True,
+        database_url="postgresql://riego_app:x@localhost/db", frontend_url="https://riego.example.com",
+        trusted_proxies="127.0.0.1",
+    ))
+    monkeypatch.setenv("PORT", "9100")
+    with caplog.at_level("WARNING", logger="app"):
+        arranque.main()
+    assert llamadas["destino"] == "app.main:app"
+    assert llamadas["forwarded_allow_ips"] == "127.0.0.1" and llamadas["proxy_headers"] is True
+    assert llamadas["workers"] == 1 and llamadas["port"] == 9100
+    assert "TRUSTED_PROXIES" in caplog.text

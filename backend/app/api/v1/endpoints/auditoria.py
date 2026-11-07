@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import DbSesion, requiere_rol
+from app.api.deps import DbSesion, IdQuery, Pagina, requiere_rol
 from app.models.enums import RolUsuario
 from app.schemas.auditoria import AuditoriaItem, AuditoriaOpciones, AuditoriaPagina
 from app.services import auditoria_service
@@ -22,13 +22,13 @@ MAX_PAGE_SIZE = 200
 @router.get("", response_model=AuditoriaPagina)
 def listar(
     db: DbSesion,
-    usuario_id: int | None = None,
+    usuario_id: IdQuery = None,
     accion: Annotated[str | None, Query(max_length=60)] = None,
     entidad: Annotated[str | None, Query(max_length=60)] = None,
     entidad_id: Annotated[str | None, Query(max_length=60)] = None,
     desde: Annotated[str | None, Query(max_length=40, description="AAAA-MM-DD o ISO 8601")] = None,
     hasta: Annotated[str | None, Query(max_length=40, description="AAAA-MM-DD (incluye el día)")] = None,
-    page: Annotated[int, Query(ge=1)] = 1,
+    page: Pagina = 1,
     page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 50,
 ) -> AuditoriaPagina:
     filtro = FiltroAuditoria(
