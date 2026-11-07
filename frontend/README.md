@@ -14,14 +14,29 @@ EN01-MOD5. React 19 + TypeScript estricto + Vite 8. Estética **verde y blanco**
 cd frontend
 npm install          # usa las versiones fijadas en package-lock.json
 cp .env.example .env # opcional: VITE_API_URL vacío = mismo origen (proxy de Vite)
-npm run dev          # http://localhost:5173
+npm run dev          # http://localhost:5173 (puerto fijo)
 ```
+
+### Origen permitido (importante)
+
+El backend solo acepta login, refresh y logout desde los orígenes de `CORS_ORIGINS` (o
+`FRONTEND_URL`) de `backend/.env`; por defecto `http://localhost:5173` y `http://127.0.0.1:5173`.
+Desde otro origen responde **403 «Solicitud no permitida»** y el login parece roto.
+
+- `npm run dev` y `npm run preview` usan el puerto **5173 con `strictPort`**: si está ocupado, Vite
+  se detiene con un error en vez de pasar en silencio a 5174. Libera el puerto o, si de verdad
+  necesitas otro, agrégalo a `CORS_ORIGINS` (p. ej. `http://localhost:5174`) y reinicia el backend.
+- Abre la app con el mismo host que figura en `CORS_ORIGINS` (`localhost` y `127.0.0.1` son
+  orígenes distintos; ambos están permitidos por defecto). Desde otro equipo de la red
+  (`--host`), agrega `http://<ip>:5173`.
+- En modo desarrollo, el mensaje de error del login explica qué origen falta, y si el refresh
+  silencioso es rechazado por Origin queda un aviso en la consola del navegador.
 
 | Comando | Qué hace |
 |---|---|
 | `npm run dev` | Servidor de desarrollo. Vite reenvía `/api` a `http://localhost:8000` (`API_PROXY_TARGET=http://host:puerto npm run dev` para otro backend local). |
 | `npm run build` | Revisión de tipos (`tsc --noEmit`) y build de producción en `dist/` (no se versiona). |
-| `npm run preview` | Sirve el build para revisarlo. |
+| `npm run preview` | Sirve el build en `http://localhost:5173` (mismo puerto y proxy que `dev`) para revisarlo. |
 | `npm test` / `npx vitest run` | Pruebas (Vitest + Testing Library + jsdom). |
 | `npm run typecheck` | Solo revisión de tipos. |
 
@@ -71,23 +86,30 @@ src/
 - El access token vive **solo en memoria**. Al cargar la app se intenta `POST /auth/refresh` en
   silencio (cookie HttpOnly `rt`); mientras tanto se ve un esqueleto.
 - Ante un 401, el cliente hace **un único refresh compartido** por todas las peticiones en vuelo
-  (y serializado entre pestañas con `navigator.locks`) y reintenta una sola vez. Si el refresh falla,
-  la sesión se cierra y se vuelve al login con `?next=` (solo rutas relativas que empiezan con `/`
-  y no con `//`). Cerrar sesión en una pestaña cierra las demás (BroadcastChannel).
+  (y serializado entre pestañas con `navigator.locks`) y reintenta una sola vez. El refresh tiene
+  un tiempo límite de 15 s, para que un proxy colgado no deje el candado tomado.
+- Solo si el backend **rechaza** el refresh (401/403) la sesión se cierra y se vuelve al login con
+  `?next=` (solo rutas relativas que empiezan con `/` y no con `//`). Si falla por red, timeout o
+  un 5xx (proxy, pooler), el error se muestra y la sesión sigue: la cookie sirve en el siguiente
+  intento, así no se pierde un formulario a medio llenar. Si eso pasa al abrir la app, se ve
+  «No se pudo conectar · Reintentar» en vez del login.
+- Cerrar sesión en una pestaña cierra las demás (BroadcastChannel).
 - Todas las peticiones llevan `X-Requested-With: fetch`; las de `/auth/*` usan `credentials: "include"`.
 - Con `debe_cambiar_password` el usuario solo puede ver "Crea tu contraseña" (o cerrar sesión).
 - Errores: se muestra el `detail` en español del backend; las listas de validación (422) se
-  convierten en un mensaje legible.
+  convierten en un mensaje legible, con el nombre del campo en español (nunca el técnico).
 - Filtros de fecha de Auditoría: `desde`/`hasta` se envían como instantes ISO 8601 con zona de Lima
   (`AAAA-MM-DDT00:00:00-05:00` y `AAAA-MM-DDT23:59:59.999-05:00`).
-- Usuario nuevo: el frontend valida `username` con `^[A-Za-z0-9._-]{3,50}$` y la política de
-  contraseña (≥ 10 caracteres, letras y números, distinta del usuario); el backend tiene la última palabra.
+- Usuario nuevo: el mismo contrato que el backend: `username` recortado, en minúsculas y con
+  `^[a-z0-9._-]{3,60}$`, y la política de contraseña (10 a 128 caracteres, letras y números,
+  distinta del usuario). Los campos con límite en el backend llevan `maxLength` (búsqueda 100,
+  nombre 120, correo 254). El backend tiene la última palabra.
 
 ## Acceso por pantalla (propuesta §4)
 
 | Pantalla | Admin | Encargado | Subgerente | Programador | Fase |
 |---|---|---|---|---|---|
-| Dashboard | ✔ | ✔ | ✔ | ✔ | F1 (tarjetas vacías hasta F2–F5) |
+| Dashboard | ✔ | ✔ | ✔ | ✔ (sin «Aplicado vs modelo») | F1 (tarjetas vacías hasta F2–F5) |
 | Generar | ✔ | ✔ | — | — | F3 |
 | Cronogramas | ✔ | ✔ | ✔ | ✔ | F3–F4 |
 | Riego aplicado | ✔ | ✔ | ✔ | ✔ | F2 |
@@ -99,10 +121,12 @@ El backend vuelve a validar cada permiso; el menú y el guard solo ordenan la in
 
 ## Pruebas
 
-`npx vitest run` cubre: saneo de `next`, política de contraseña y esquemas de alta, guard de roles
-(función y componente), menú por rol, cliente HTTP (refresh de vuelo único, fallo de refresh,
-`navigator.locks`, cabeceras, errores), fechas en Lima (incluido el reloj a las 23:30), token del
-fragmento y detalle antes/después de la auditoría.
+`npx vitest run` cubre: saneo de `next`, política de contraseña y esquemas de alta (contrato de
+username igual al backend), guard de roles (función y componente), menú y KPIs por rol, cliente
+HTTP (refresh de vuelo único, refresh rechazado, refresh con 502/503/red sin cerrar la sesión,
+tiempo límite, `navigator.locks`, cabeceras, errores 422 en español), AuthProvider (pantalla
+«No se pudo conectar» y Reintentar), acciones de Usuarios sobre la propia cuenta, fechas en Lima
+(incluido el reloj a las 23:30), token del fragmento y detalle antes/después de la auditoría.
 
 ## Librerías y notas de compatibilidad
 

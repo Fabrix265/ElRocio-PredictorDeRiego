@@ -5,8 +5,12 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // El backend solo acepta login/refresh/logout desde los orígenes de CORS_ORIGINS/FRONTEND_URL
+  // (por defecto http://localhost:5173 y http://127.0.0.1:5173). strictPort evita que Vite pase
+  // en silencio a 5174 si el puerto está ocupado: el backend respondería 403 por Origin.
   server: {
     port: 5173,
+    strictPort: true,
     proxy: {
       // Con VITE_API_URL vacío el frontend llama al mismo origen y Vite reenvía /api al backend.
       "/api": {
@@ -15,6 +19,11 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  // `vite preview` hereda el proxy de `server`; mismo puerto para que el Origin sea el permitido.
+  preview: {
+    port: 5173,
+    strictPort: true,
   },
   build: {
     rolldownOptions: {
