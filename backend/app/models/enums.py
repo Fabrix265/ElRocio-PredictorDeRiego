@@ -24,6 +24,7 @@ class TipoIntento(str, enum.Enum):
     login = "login"
     recuperar = "recuperar"
     restablecer = "restablecer"
+    cambiar_password = "cambiar_password"  # migración 0003
 
 
 class EstadoCorreo(str, enum.Enum):

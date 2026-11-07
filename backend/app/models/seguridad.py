@@ -74,6 +74,8 @@ class SesionRefresh(IdMixin, CreadoMixin, Base):
         BigInteger, ForeignKey("sesion_refresh.id", ondelete="SET NULL"), index=True
     )
     reemplazado_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Reuso dentro de la gracia de 30 s ya atendido (solo se permite una vez por token).
+    gracia_usada_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ip: Mapped[str | None] = mapped_column(String(64))
     user_agent: Mapped[str | None] = mapped_column(String(512))
 
@@ -93,7 +95,11 @@ class PasswordReset(IdMixin, CreadoMixin, Base):
 
 
 class IntentoLogin(IdMixin, CreadoMixin, Base):
-    """Intentos de login / recuperar / restablecer para los límites de §7."""
+    """Intentos de login / recuperar / restablecer / cambiar contraseña para los límites de §7.
+
+    ``username_intentado`` guarda un HMAC-SHA256 del valor normalizado, nunca el texto escrito
+    (alguien puede escribir su contraseña en el campo usuario).
+    """
 
     __tablename__ = "intento_login"
     __table_args__ = (

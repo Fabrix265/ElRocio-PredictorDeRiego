@@ -1,7 +1,10 @@
 """Verificación de la seguridad del esquema ``riego`` en la base de datos.
 
-La usan ``python -m app.cli verificar-seguridad-bd`` y los tests. Devuelve la lista de
-problemas encontrados (vacía = todo en orden). Solo lee catálogos de Postgres.
+- :func:`verificar_seguridad`: la usan ``python -m app.cli verificar-seguridad-bd`` y los tests.
+- :func:`problemas_rol_conexion`: la usan el arranque de la API y ``/health`` para comprobar que
+  la aplicación se conecta como ``riego_app`` (no como el dueño, que se salta RLS).
+
+Devuelven la lista de problemas encontrados (vacía = todo en orden). Solo leen catálogos.
 """
 
 from __future__ import annotations
@@ -19,8 +22,48 @@ SOLO_INSERCION = (
     "riego_ciclo", "cronograma_ciclo", "cronograma_turno",
 )
 SIN_TRUNCATE = ("auditoria", "cronograma_evento")
-COLUMNAS_PUBLICACION = {"publicada_at", "publicada_por"}
+# Tablas con UPDATE solo en algunas columnas (y trigger tg_<tabla>_inmutable), sin DELETE.
+COLUMNAS_ACTUALIZABLES = {
+    "cronograma_version": {"publicada_at", "publicada_por"},
+    "riego_registro": {"vigente"},  # migración 0003
+}
+COLUMNAS_PUBLICACION = COLUMNAS_ACTUALIZABLES["cronograma_version"]
+# updated_at mantenido por trigger (tg_<tabla>_updated_at, migración 0003).
+TABLAS_UPDATED_AT = (
+    "usuario", "cronograma", "meteo_lectura", "phytech_suelo_horario", "phytech_planta_diario",
+    "ambiente_diario",
+)
+TABLAS_SIN_INSERT = ("alembic_version",)
 PRIVILEGIOS_TABLA = "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"
+
+
+def problemas_rol_conexion(conexion) -> list[str]:
+    """Problemas del rol con que está conectada la app (``conexion``: Connection o Session).
+
+    Debe ser ``riego_app``: sin SUPERUSER ni BYPASSRLS y sin poder actuar como el dueño del
+    esquema (el dueño no está sujeto a RLS ni a los permisos de solo inserción).
+    """
+    fila = conexion.execute(
+        text(
+            """
+            SELECT current_user AS usuario, r.rolsuper, r.rolbypassrls,
+                   COALESCE((SELECT pg_has_role(current_user, n.nspowner, 'USAGE')
+                             FROM pg_namespace n WHERE n.nspname = :esquema), false) AS dueno
+            FROM pg_roles r WHERE r.rolname = current_user
+            """
+        ),
+        {"esquema": ESQUEMA},
+    ).one()
+    problemas = []
+    if fila.usuario != ROL_APP:
+        problemas.append(f"la conexión usa el rol {fila.usuario}, no {ROL_APP}")
+    if fila.rolsuper:
+        problemas.append(f"el rol {fila.usuario} es superusuario")
+    if fila.rolbypassrls:
+        problemas.append(f"el rol {fila.usuario} tiene BYPASSRLS (se salta RLS)")
+    if fila.dueno:
+        problemas.append(f"el rol {fila.usuario} es (o actúa como) el dueño del esquema {ESQUEMA}")
+    return problemas
 
 
 def _filas(conexion: Connection, sql: str, **params) -> list:
@@ -150,12 +193,14 @@ def verificar_seguridad(conexion: Connection) -> list[str]:
             if _filas(conexion, "SELECT 1 WHERE has_table_privilege(:r, :oid, :p)",
                       r=ROL_APP, oid=tabla.oid, p=privilegio):
                 problemas.append(f"{ROL_APP} tiene {privilegio} sobre {nombre}")
-    version = nombres.get("cronograma_version")
-    if version is not None:
+    for nombre, permitidas in COLUMNAS_ACTUALIZABLES.items():
+        tabla = nombres.get(nombre)
+        if tabla is None:
+            continue
         for privilegio in ("DELETE", "TRUNCATE"):
             if _filas(conexion, "SELECT 1 WHERE has_table_privilege(:r, :oid, :p)",
-                      r=ROL_APP, oid=version.oid, p=privilegio):
-                problemas.append(f"{ROL_APP} tiene {privilegio} sobre cronograma_version")
+                      r=ROL_APP, oid=tabla.oid, p=privilegio):
+                problemas.append(f"{ROL_APP} tiene {privilegio} sobre {nombre}")
         columnas = _filas(
             conexion,
             """
@@ -163,11 +208,34 @@ def verificar_seguridad(conexion: Connection) -> list[str]:
             WHERE attrelid = :oid AND attnum > 0 AND NOT attisdropped
               AND has_column_privilege(:r, :oid, attnum, 'UPDATE')
             """,
-            oid=version.oid, r=ROL_APP,
+            oid=tabla.oid, r=ROL_APP,
         )
-        extra = {c.attname for c in columnas} - COLUMNAS_PUBLICACION
+        extra = {c.attname for c in columnas} - permitidas
         if extra:
-            problemas.append(f"{ROL_APP} puede actualizar columnas de cronograma_version: {sorted(extra)}")
+            problemas.append(f"{ROL_APP} puede actualizar columnas de {nombre}: {sorted(extra)}")
+
+    # 6) riego_app necesita leer todas las tablas e insertar en las de la app (si falta, la app
+    #    falla en ejecución con "permission denied").
+    for tabla in tablas:
+        privilegios = ("SELECT",) if tabla.relname in TABLAS_SIN_INSERT else ("SELECT", "INSERT")
+        for privilegio in privilegios:
+            if not _filas(conexion, "SELECT 1 WHERE has_table_privilege(:r, :oid, :p)",
+                          r=ROL_APP, oid=tabla.oid, p=privilegio):
+                problemas.append(f"{ROL_APP} no tiene {privilegio} sobre {tabla.relname}")
+
+    # 7) Funciones del esquema: anon/authenticated no las pueden ejecutar.
+    for rol in ROLES_PROHIBIDOS:
+        if not _existe_rol(conexion, rol):
+            continue
+        for fila in _filas(
+            conexion,
+            """
+            SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = :esquema AND has_function_privilege(:r, p.oid, 'EXECUTE')
+            """,
+            r=rol, **p,
+        ):
+            problemas.append(f"El rol {rol} puede ejecutar la función {fila.proname}")
 
     triggers = {
         (fila.tabla, fila.tgname)
@@ -182,8 +250,9 @@ def verificar_seguridad(conexion: Connection) -> list[str]:
             **p,
         )
     }
-    esperados = [(t, f"tg_{t}_inmutable") for t in (*SOLO_INSERCION, "cronograma_version")]
+    esperados = [(t, f"tg_{t}_inmutable") for t in (*SOLO_INSERCION, *COLUMNAS_ACTUALIZABLES)]
     esperados += [(t, f"tg_{t}_sin_truncate") for t in SIN_TRUNCATE]
+    esperados += [(t, f"tg_{t}_updated_at") for t in TABLAS_UPDATED_AT]
     for tabla, trigger in esperados:
         if tabla in nombres and (tabla, trigger) not in triggers:
             problemas.append(f"Falta o está deshabilitado el trigger {trigger} en {tabla}")

@@ -117,35 +117,36 @@ def sentencias() -> list[tuple[str, dict]]:
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
+    # op.execute + bindparams: en modo offline (``alembic upgrade head --sql``) Alembic escribe los
+    # valores como literales; con ``bind.execute(text, params)`` los perdía y quedaban NULL.
     for sql, parametros in sentencias():
-        bind.execute(sa.text(sql), parametros)
+        op.execute(sa.text(sql).bindparams(**parametros))
+
+
+def _borrar_codigos(tabla: str, codigos: list[str]) -> None:
+    """``DELETE ... WHERE codigo IN (...)`` con parámetro expandible (literales en offline)."""
+    op.execute(
+        sa.text(f"DELETE FROM riego.{tabla} WHERE codigo IN :codigos").bindparams(
+            sa.bindparam("codigos", codigos, expanding=True)
+        )
+    )
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    modulo = {"modulo": MODULO["codigo"]}
-    bind.execute(
+    modulo = MODULO["codigo"]
+    op.execute(
         sa.text(
             "DELETE FROM riego.lote l USING riego.turno t, riego.modulo m "
             "WHERE l.turno_id = t.id AND t.modulo_id = m.id AND m.codigo = :modulo"
-        ),
-        modulo,
+        ).bindparams(modulo=modulo)
     )
-    bind.execute(
+    op.execute(
         sa.text(
             "DELETE FROM riego.turno t USING riego.modulo m "
             "WHERE t.modulo_id = m.id AND m.codigo = :modulo"
-        ),
-        modulo,
+        ).bindparams(modulo=modulo)
     )
-    bind.execute(sa.text("DELETE FROM riego.modulo WHERE codigo = :modulo"), modulo)
-    bind.execute(sa.text("DELETE FROM riego.fundo WHERE codigo = :c"), {"c": FUNDO["codigo"]})
-    bind.execute(
-        sa.text("DELETE FROM riego.empresa WHERE codigo = ANY(:c)"),
-        {"c": [codigo for codigo, _ in EMPRESAS]},
-    )
-    bind.execute(
-        sa.text("DELETE FROM riego.motivo_correccion WHERE codigo = ANY(:c)"),
-        {"c": [codigo for codigo, _, _ in MOTIVOS]},
-    )
+    _borrar_codigos("modulo", [modulo])
+    _borrar_codigos("fundo", [FUNDO["codigo"]])
+    _borrar_codigos("empresa", [codigo for codigo, _ in EMPRESAS])
+    _borrar_codigos("motivo_correccion", [codigo for codigo, _, _ in MOTIVOS])

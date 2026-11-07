@@ -44,6 +44,43 @@ def _engine_migraciones():
     return crear_engine(settings.url_migraciones, modo_pool="null")
 
 
+ATRIBUTOS_PROHIBIDOS = {
+    "rolsuper": "SUPERUSER",
+    "rolbypassrls": "BYPASSRLS",
+    "rolcreaterole": "CREATEROLE",
+    "rolcreatedb": "CREATEDB",
+}
+
+
+def atributos_de_mas(conexion, rol: str) -> list[str] | None:
+    """Atributos prohibidos que tiene ``rol`` (``None`` si el rol no existe)."""
+    fila = conexion.execute(
+        text("SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb FROM pg_roles WHERE rolname = :r"),
+        {"r": rol},
+    ).first()
+    if fila is None:
+        return None
+    return [nombre for columna, nombre in ATRIBUTOS_PROHIBIDOS.items() if getattr(fila, columna)]
+
+
+def configurar_rol(conexion, rol: str, password: str) -> None:
+    """``ALTER ROLE <rol> WITH LOGIN PASSWORD '<scram>'``.
+
+    Solo LOGIN y contraseña: los demás atributos (NOSUPERUSER, NOBYPASSRLS...) ya los fija el
+    CREATE ROLE de la migración 0001, y en Supabase el rol ``postgres`` no es superusuario, así que
+    no puede escribir la cláusula NOSUPERUSER (ni siquiera para quitarla).
+    """
+    # La contraseña se cifra (SCRAM-SHA-256) en el cliente con libpq: nunca viaja ni queda en
+    # los logs del servidor en texto plano.
+    pgconn = conexion.connection.driver_connection.pgconn
+    verificador = pgconn.encrypt_password(
+        password.encode("utf-8"), rol.encode(), b"scram-sha-256"
+    ).decode("ascii")
+    literal = verificador.replace("'", "''")
+    identificador = '"' + rol.replace('"', '""') + '"'
+    conexion.exec_driver_sql(f"ALTER ROLE {identificador} WITH LOGIN PASSWORD '{literal}'")
+
+
 @comando("configurar-rol-app", "Da LOGIN y contraseña al rol riego_app (lee RIEGO_APP_PASSWORD).")
 def configurar_rol_app(_args: argparse.Namespace) -> int:
     password = os.environ.get("RIEGO_APP_PASSWORD") or (
@@ -60,20 +97,19 @@ def configurar_rol_app(_args: argparse.Namespace) -> int:
     engine = _engine_migraciones()
     try:
         with engine.begin() as conexion:
-            if not conexion.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": ROL_APP}).first():
+            de_mas = atributos_de_mas(conexion, ROL_APP)
+            if de_mas is None:
                 print(f"No existe el rol {ROL_APP}: ejecuta primero `alembic upgrade head`.", file=sys.stderr)
                 return 1
-            # La contraseña se cifra (SCRAM-SHA-256) en el cliente con libpq: nunca viaja ni
-            # queda en los logs del servidor en texto plano.
-            pgconn = conexion.connection.driver_connection.pgconn
-            verificador = pgconn.encrypt_password(
-                password.encode("utf-8"), ROL_APP.encode(), b"scram-sha-256"
-            ).decode("ascii")
-            literal = verificador.replace("'", "''")
-            conexion.exec_driver_sql(
-                f"ALTER ROLE {ROL_APP} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
-                f"NOBYPASSRLS PASSWORD '{literal}'"
-            )
+            if de_mas:
+                # No se le da LOGIN a un rol con privilegios de más (se saltaría RLS o permisos).
+                print(
+                    f"El rol {ROL_APP} tiene atributos prohibidos ({', '.join(de_mas)}): "
+                    "quítalos antes de darle LOGIN.",
+                    file=sys.stderr,
+                )
+                return 1
+            configurar_rol(conexion, ROL_APP, password)
     finally:
         engine.dispose()
     print(f"Rol {ROL_APP} configurado: LOGIN con la contraseña de RIEGO_APP_PASSWORD.")
