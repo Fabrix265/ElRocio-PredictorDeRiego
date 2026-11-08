@@ -29,6 +29,17 @@ os.environ.update(
         "CORS_ORIGINS": "",
         "SMTP_HOST": "",
         "SCHEDULER_ENABLED": "false",
+        # Nunca las claves reales de backend/.env: los clientes HTTP se prueban con APIs falsas
+        # (tests/apis_falsas.py) y, si algo intentara usar la configuración, falla sin red.
+        "WEATHERLINK_API_KEY": "",
+        "WEATHERLINK_API_SECRET": "",
+        "WEATHERLINK_STATION_ID": "28494",
+        "PHYTECH_API_KEY": "",
+        "PHYTECH_API_SECRET": "",
+        "PHYTECH_AREA_ID": "12537",
+        "PHYTECH_PLOT_ID": "70208",
+        "PHYTECH_PROJECT_ID": "907557",
+        "INGESTA_HORA": "05:00",
     }
 )
 
