@@ -4,9 +4,12 @@
 - ``verificar-seguridad-bd``: revisa RLS, políticas, privilegios y triggers del esquema ``riego``.
 - ``crear-admin``: alta de un administrador (interactivo o con flags); audita ``usuario_creado``
   con actor "sistema".
+- ``cargar-historico``: carga idempotente de ``ml/data/raw`` (meteo, Phytech, NDVI, riego) y
+  recálculo de ``ambiente_diario``.
+- ``recalcular-ambiente``: recalcula ``ambiente_diario`` desde las lecturas guardadas.
 
-Los dos primeros usan DATABASE_URL_MIGRACIONES (rol dueño, conexión directa 5432);
-``crear-admin`` usa DATABASE_URL (rol ``riego_app``), igual que la aplicación.
+Los dos primeros usan DATABASE_URL_MIGRACIONES (rol dueño, conexión directa 5432); los demás usan
+DATABASE_URL (rol ``riego_app``), igual que la aplicación.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ import getpass
 import os
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
 from sqlalchemy import text
 
@@ -208,6 +212,89 @@ def crear_admin(args: argparse.Namespace) -> int:
         print(error.detail, file=sys.stderr)
         return 1
     print(f"Administrador creado: {usuario_nombre} (id {usuario_id}).")
+    return 0
+
+
+# --- Datos de campo (F2) ---------------------------------------------------------
+
+def _args_cargar_historico(p: argparse.ArgumentParser) -> None:
+    from app.services.carga_historica import FUENTES
+
+    p.add_argument("--fuentes", default=",".join(FUENTES),
+                   help=f"Fuentes separadas por coma (por defecto todas: {','.join(FUENTES)})")
+    p.add_argument("--meteo", type=Path, help="data_metereologica.xlsx (def. la de ml/config/pipeline.yaml)")
+    p.add_argument("--phytech", type=Path, help="data_phytech.xlsx (hojas Suelo_horario y Planta_diario)")
+    p.add_argument("--ndvi", type=Path, help="Carpeta con NdviImages_*_area<id>.xlsx")
+    p.add_argument("--riego", type=Path, help="Excel de riego con la hoja MOD5")
+    p.add_argument("--reemplazar", action="store_true",
+                   help="Turno-días de riego con contenido distinto: crea una versión nueva")
+
+
+@comando("cargar-historico", "Carga idempotente de meteo, Phytech, NDVI y riego histórico (ml/data/raw).",
+         _args_cargar_historico)
+def cargar_historico(args: argparse.Namespace) -> int:
+    from app.services.carga_historica import FUENTES, RutasHistorico
+    from app.services.carga_historica import cargar_historico as cargar
+
+    fuentes = tuple(f.strip() for f in args.fuentes.split(",") if f.strip())
+    desconocidas = sorted(set(fuentes) - set(FUENTES))
+    if desconocidas:
+        print(f"Fuentes desconocidas: {', '.join(desconocidas)}", file=sys.stderr)
+        return 2
+    rutas = RutasHistorico.por_defecto()
+    for nombre in ("meteo", "phytech", "ndvi", "riego"):
+        if getattr(args, nombre):
+            setattr(rutas, nombre, getattr(args, nombre))
+    with _sesion_app() as db:
+        resultado = cargar(db, rutas, fuentes=fuentes, reemplazar=args.reemplazar)
+    print(f"{'Fuente':<10} {'Estado':<8} {'Filas':>8} {'Nuevas':>8} {'Actualiz.':>9} {'Sin camb.':>9} {'Conflictos':>10}")
+    for f in resultado.fuentes:
+        print(f"{f.fuente:<10} {f.estado:<8} {f.filas:>8} {f.nuevas:>8} {f.actualizadas:>9} "
+              f"{f.omitidas:>9} {f.conflictos:>10}")
+        for mensaje in f.mensajes:
+            print(f"    - {mensaje}")
+    a = resultado.ambiente
+    print(f"ambiente_diario: {a.dias} días recalculados, {a.nuevas} nuevos, {a.actualizadas} "
+          f"actualizados, {a.sin_cambios} sin cambios, {a.borradas} borrados")
+    return 1 if resultado.con_error else 0
+
+
+def _args_recalcular_ambiente(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--desde", type=_fecha, help="AAAA-MM-DD (sin --desde/--hasta: todos los días con datos)")
+    p.add_argument("--hasta", type=_fecha, help="AAAA-MM-DD (incluido)")
+
+
+def _fecha(texto: str):
+    from datetime import date
+
+    try:
+        return date.fromisoformat(texto)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"fecha no válida: {texto} (use AAAA-MM-DD)") from None
+
+
+@comando("recalcular-ambiente", "Recalcula ambiente_diario desde las lecturas guardadas en la BD.",
+         _args_recalcular_ambiente)
+def recalcular_ambiente(args: argparse.Namespace) -> int:
+    from datetime import timedelta
+
+    from app.repositories import datos_campo as repo
+    from app.services import ambiente_service
+    from app.services.carga_historica import CODIGO_MODULO
+
+    with _sesion_app() as db:
+        modulo = repo.modulo_por_codigo(db, CODIGO_MODULO)
+        fundo = repo.fundo_por_id(db, modulo.fundo_id)
+        if args.desde is None and args.hasta is None:
+            resultado = ambiente_service.recalcular_todo(db, fundo)
+        else:
+            if args.desde is None or args.hasta is None or args.desde > args.hasta:
+                print("Indica --desde y --hasta (desde <= hasta).", file=sys.stderr)
+                return 2
+            dias = [args.desde + timedelta(days=i) for i in range((args.hasta - args.desde).days + 1)]
+            resultado = ambiente_service.recalcular(db, fundo, dias)
+    print(f"ambiente_diario: {resultado.dias} días, {resultado.nuevas} nuevos, {resultado.actualizadas} "
+          f"actualizados, {resultado.sin_cambios} sin cambios, {resultado.borradas} borrados")
     return 0
 
 

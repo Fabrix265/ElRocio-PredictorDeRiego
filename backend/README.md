@@ -10,12 +10,17 @@ app/
   api/v1/endpoints/  health, auth, usuarios, auditoria, catalogo
   core/              config, security (argon2id, JWT), tiempo (hoy_lima), logging (redacción),
                      middleware (cabeceras), errores (mensajes en español)
-  services/          auth_service, usuario_service, auditoria_service, correo_service, rate_limit
-  repositories/      consultas SQLAlchemy
+  services/          auth_service, usuario_service, auditoria_service, correo_service, rate_limit,
+                     lecturas_service, ambiente_service, carga_historica, riego_contenido
+  repositories/      consultas SQLAlchemy (usuarios, sesiones, intentos, auditoria, correos,
+                     catalogo, datos_campo, riego)
+  integraciones/     weatherlink/conversion.py (°F/pulgadas/millas → °C/mm/km, tabla de reglas)
+  ml/                columnas.py (mapeo BD ↔ riego_ml), historial_bd.py (BD → Historial, §2.3)
   models/ · db/      tablas del esquema riego, motor y sesiones
   emails/            plantillas Jinja2 (marca verde y blanca) y envío SMTP / archivo
   jobs/              APScheduler: cola de correos y mantenimiento (python -m app.jobs)
-  cli.py             configurar-rol-app, verificar-seguridad-bd, crear-admin
+  cli.py             configurar-rol-app, verificar-seguridad-bd, crear-admin, cargar-historico,
+                     recalcular-ambiente
 ```
 
 ### Convención de transacciones y capas (desde F2)
@@ -212,6 +217,63 @@ el primer ingreso. Queda auditado como `usuario_creado` con actor `sistema`.
 - Cambiar la contraseña, asignar una temporal, cambiar el rol, desactivar o cambiar el correo
   invalidan los enlaces de recuperación pendientes.
 
+## Datos de campo (F2)
+
+Las tablas guardan la salida **saneada** de `riego_ml` (las reglas viven en
+`ml/src/riego_ml/sources`, separadas de la lectura de archivos por la decisión D1):
+
+| Tabla | Contenido | Escribe |
+|---|---|---|
+| `meteo_lectura` | Salida de `sanear_meteo` (30 min, °C, mm, km), origen `excel_historico` o `weatherlink` | `lecturas_service.guardar_meteo` (la API nunca pisa el Excel histórico) |
+| `phytech_suelo_horario` / `phytech_planta_diario` | Formato de las hojas `Suelo_horario` / `Planta_diario` | `guardar_suelo` / `guardar_planta` |
+| `ndvi_imagen` | Una fila por imagen del plot, `clases` = `[{clase, color, ndvi_min, ndvi_max, percent}]` | `guardar_ndvi` |
+| `ambiente_diario` | Derivada: `meteo_diaria` + `resumir_phytech` + `ndvi_diario` + `construir_ambiente_diario` por día cerrado | `ambiente_service.recalcular(db, fundo, fechas)` |
+| `riego_registro` / `riego_ciclo` | Un registro versionado por turno-día con hash de contenido (`riego_contenido.hash_contenido`) | carga histórica (y Excel en F2) |
+
+- **Conversión de WeatherLink**: `app/integraciones/weatherlink/conversion.py` es el único lugar
+  con las reglas de H7 (tabla `REGLAS` documentada: T° Prom = T° Máx = `temp_out_hi`, ETo =
+  `et`×25,4, viento = `wind_run`×1,609344, DPV por Tetens con `temp_out`…). `lecturas_saneadas`
+  devuelve lo que va a `meteo_lectura`. Coincidencia medida contra `data_metereologica.xlsx`
+  (enero 2021, 1487 registros): T_max 99,9 %, Rad 99,4 %, ETo 99,2 %, Lluvia 100 %, Viento 97,5 %,
+  T/T_min/HR/DPV ≈ 96,8 % (el resto son lecturas que en el Excel vienen promediadas de otra fuente).
+- **Mapeo de columnas** BD (minúsculas) ↔ `riego_ml`: solo en `app/ml/columnas.py`.
+- **`ambiente_diario`**: solo días `< hoy_lima()`; un día con solo NDVI se escribe con banderas en
+  0; un día sin datos no tiene fila (la ruta por archivos agrega días vacíos al calendario, pero
+  `features_ambiente` rellena la grilla igual: mismo resultado).
+- **Historial desde la BD** (`app/ml/historial_bd.construir_historial(db, modulo_id, hasta=…)`):
+  riego vigente (un `sin_riego` cuenta como dato), y con `hasta`, para turno-días sin registro, los
+  ciclos del cronograma de referencia de ese día (informados en `turno_dias_cronograma`);
+  `limpiar_ciclos(5, 2)` → `tabla_turno_dia` → ambiente con los nombres de `riego_ml`.
+- **Paridad** (`tests/test_paridad_historico.py`): con todo `ml/data/raw` cargado, el ambiente y el
+  Historial de la BD coinciden con la ruta por archivos y el plan del día siguiente es idéntico. El
+  ambiente admite 0,001 en ≈0,1 % de los valores: `groupby().mean()` de pandas puede diferir en el
+  último bit según el tamaño del DataFrame y, en un empate, cambia el `round(3)` (pasa también
+  dentro de `riego_ml` con archivos de distinto rango).
+
+### Carga histórica
+
+```bash
+DATABASE_URL=postgresql+psycopg://postgres@localhost:5432/riego_dev \
+  .venv/Scripts/python -m app.cli cargar-historico            # todas las fuentes
+.venv/Scripts/python -m app.cli cargar-historico --fuentes meteo,riego --riego otra/ruta.xlsx
+.venv/Scripts/python -m app.cli recalcular-ambiente --desde 2026-10-01 --hasta 2026-10-31
+```
+
+- Rutas por defecto = las de `ml/config/pipeline.yaml` (con las que se entrenó):
+  `data_metereologica.xlsx`, `data_phytech.xlsx` (hojas `Suelo_horario`, `Planta_diario`),
+  `phytech/completo` (`NdviImages_*_area12537.xlsx`, plot 70208) y `data_riego_historico.xlsx`
+  (hoja MOD5). `--meteo/--phytech/--ndvi/--riego` las cambian.
+- Riego: `leer_riego` + `limpiar_ciclos(5 min, 2 m3/ha)` → un `riego_registro` **aplicado** origen
+  `historico` por turno-día (solo fechas < hoy). Mismo hash → se omite; distinto → conflicto
+  informado (la corrida queda `parcial`), o versión nueva con `--reemplazar`.
+- Sensores con `ON CONFLICT … DO UPDATE … WHERE` algo cambió. **Repetirla no inserta ni cambia
+  nada.** Cada fuente queda en `ingesta_corrida` (`historico_<fuente>`, disparo `script`) y corre
+  en un SAVEPOINT (una fuente con error no deshace las demás; el comando termina con código 1).
+- Resultado en `riego_dev` (2026-11-08): meteo 101 195 lecturas, suelo 62 724 horas, planta 1 712
+  días, NDVI 49 imágenes, riego 9 788 turno-días (115 ciclos descartados por `limpiar_ciclos`),
+  `ambiente_diario` 2 128 días (2021-01-01 a 2026-11-01). Segunda corrida: 0 nuevas, 0
+  actualizadas. Tarda ~3 min, casi todo en leer los Excel con openpyxl.
+
 ## Correos y tareas programadas
 
 Los correos pasan por la cola `notificacion_correo`: la acción encola (en su misma transacción) y
@@ -242,6 +304,9 @@ genera al enviar (en la BD su SHA-256) y el enlace es `FRONTEND_URL/restablecer#
 .venv/Scripts/python -m pytest -q
 ```
 
+`test_paridad_historico` carga todo `ml/data/raw` (≈4 min la primera vez; los Excel leídos quedan
+en `backend/var/cache_pruebas` y las siguientes tardan ≈1,5 min).
+
 Usan la base `riego_test` (`TEST_DATABASE_URL`; se crea y migra sola). En un servidor local, el
 fixture crea los roles `anon` y `authenticated` (NOLOGIN) para comprobar que no reciben
 privilegios. Cada test corre en una transacción que se deshace; las sesiones de la app usan
@@ -258,3 +323,6 @@ gracia del refresh, vencimiento de enlaces, `hoy_lima` a las 23:30).
 | `test_auditoria_catalogo` | Filtros y permisos de auditoría, lista blanca, fundos y motivos |
 | `test_endurecimiento` | Cabeceras, producción, redacción de logs, zona horaria, `crear-admin`, tareas |
 | `test_unidad_de_trabajo` | Commit/rollback de la unidad de trabajo (endpoint y CLI), sesión compartida, servicios sin commit |
+| `test_weatherlink_conversion` | Reglas de conversión, 00:00 del día nuevo, payload, coincidencia con `data_metereologica.xlsx` en un mes real |
+| `test_datos_campo` | Lecturas idempotentes (la API no pisa el Excel), `ambiente_diario` = riego_ml, hoy en Lima, riego por turno-día (hash, conflicto, `--reemplazar`), Historial desde la BD y respaldo del cronograma |
+| `test_paridad_historico` | Ida y vuelta con `ml/data/raw`: ambiente, Historial y plan idénticos a la ruta por archivos (se salta sin los archivos) |
