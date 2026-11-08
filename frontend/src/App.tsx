@@ -1,5 +1,4 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ChartLine } from "lucide-react";
 import { lazy, Suspense } from "react";
 import { BrowserRouter, Outlet, Route, Routes } from "react-router";
 
@@ -17,7 +16,6 @@ import { AppLayout } from "./features/layout/AppLayout";
 import { ACCESO } from "./lib/roles";
 import { CargandoSeccion } from "./pages/CargandoSeccion";
 import { NoEncontradoPage } from "./pages/NoEncontradoPage";
-import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { ApiError } from "./services/httpClient";
 
 const UsuariosPage = lazy(() => import("./features/usuarios/UsuariosPage"));
@@ -26,6 +24,7 @@ const RiegoPage = lazy(() => import("./features/riego/RiegoPage"));
 const CargaNuevaPage = lazy(() => import("./features/riego/CargaNuevaPage"));
 const CargaDetallePage = lazy(() => import("./features/riego/CargaDetallePage"));
 const GenerarPage = lazy(() => import("./features/cronogramas/GenerarPage"));
+const DatosCampoPage = lazy(() => import("./features/datos/DatosCampoPage"));
 const CronogramasPage = lazy(() => import("./features/cronogramas/CronogramasPage"));
 const CronogramaDetallePage = lazy(() => import("./features/cronogramas/CronogramaDetallePage"));
 
@@ -131,13 +130,9 @@ export default function App() {
                     path="datos"
                     element={
                       <RutaProtegida roles={ACCESO.datos}>
-                        <PlaceholderPage
-                          titulo="Datos de campo"
-                          descripcion="Clima, suelo y planta de los últimos 14 días."
-                          fase={5}
-                          icono={<ChartLine />}
-                          detalle="Agua aplicada vs propuesta por turno, MDS y crecimiento del tronco, humedad del suelo por profundidad y clima."
-                        />
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <DatosCampoPage />
+                        </Suspense>
                       </RutaProtegida>
                     }
                   />

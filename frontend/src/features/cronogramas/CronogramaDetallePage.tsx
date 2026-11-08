@@ -25,6 +25,7 @@ import {
 } from "../../services/cronogramas";
 import { useUsuario } from "../auth/AuthProvider";
 import { ETIQUETA_ESTADO, ETIQUETA_ORIGEN_VERSION, MarcasVersion, TONO_ESTADO, formato } from "./etiquetas";
+import { BotonesExportar } from "./BotonesExportar";
 import { Gantt } from "./Gantt";
 import { EditorPlan } from "./EditorPlan";
 import { AccionesCronograma } from "./AccionesCronograma";
@@ -236,12 +237,15 @@ function Detalle({ id }: { id: number }) {
               </span>
             }
             acciones={
-              puedeRegenerar && (
-                <Button variante="secundario" onClick={() => regenerar.mutate(false)} disabled={regenerar.isPending || !!edicion}>
-                  <RefreshCw aria-hidden="true" className={regenerar.isPending ? "animate-spin" : undefined} />
-                  {regenerar.isPending ? "Regenerando…" : "Regenerar"}
-                </Button>
-              )
+              <div className="flex flex-wrap gap-2">
+                <BotonesExportar cronogramaId={id} deshabilitado={!!edicion} />
+                {puedeRegenerar && (
+                  <Button variante="secundario" onClick={() => regenerar.mutate(false)} disabled={regenerar.isPending || !!edicion}>
+                    <RefreshCw aria-hidden="true" className={regenerar.isPending ? "animate-spin" : undefined} />
+                    {regenerar.isPending ? "Regenerando…" : "Regenerar"}
+                  </Button>
+                )}
+              </div>
             }
           />
           {regenerar.isError && !confirmar && (

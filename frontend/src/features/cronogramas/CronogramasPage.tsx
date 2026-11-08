@@ -1,5 +1,5 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { CalendarDays, ChevronRight, Sparkles } from "lucide-react";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { CalendarDays, ChevronRight, FileDown, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 
@@ -14,7 +14,9 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { formatearDiaCorto, formatearFechaHora, hoyLima, sumarDias } from "../../lib/fechas";
 import { puede } from "../../lib/roles";
+import { notificar } from "../../components/ui/Toast";
 import { mensajeDeError } from "../../services/httpClient";
+import { reportesApi } from "../../services/reportes";
 import { claveCronogramas, cronogramasApi } from "../../services/cronogramas";
 import { useUsuario } from "../auth/AuthProvider";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
@@ -30,6 +32,12 @@ export default function CronogramasPage() {
   const [rango, setRango] = useState(() => ({ desde: sumarDias(hoy, -30), hasta: sumarDias(hoy, 7) }));
   const errorRango = validarRango(rango.desde, rango.hasta);
   const puedeGenerar = puede(usuario.rol, "generarCronogramas");
+  // CSV de refinamiento (§2.4) con el mismo rango del listado; incluye todos los módulos.
+  const refinamiento = useMutation({
+    mutationFn: () => reportesApi.refinamiento(rango.desde, rango.hasta),
+    onSuccess: (nombre) => notificar.exito(`Se descargó ${nombre}`),
+    onError: (e) => notificar.error(`No se pudo exportar: ${mensajeDeError(e)}`),
+  });
 
   const consulta = useQuery({
     queryKey: claveCronogramas.lista(modulo?.id ?? 0, rango.desde, rango.hasta),
@@ -57,7 +65,17 @@ export default function CronogramasPage() {
             ? "Cronogramas publicados por fecha. Toca uno para ver sus ciclos."
             : "Cronogramas por fecha con su estado, versión y marcas. Toca uno para ver el detalle."
         }
-        acciones={botonGenerar}
+        acciones={
+          <div className="flex flex-wrap gap-2">
+            {puede(usuario.rol, "exportarRefinamiento") && (
+              <Button variante="secundario" disabled={!!errorRango || refinamiento.isPending} onClick={() => refinamiento.mutate()}>
+                <FileDown aria-hidden="true" />
+                {refinamiento.isPending ? "Preparando…" : "CSV de refinamiento"}
+              </Button>
+            )}
+            {botonGenerar}
+          </div>
+        }
       />
       <Card>
         <div className="grid grid-cols-2 gap-3 border-b border-borde p-4 sm:flex sm:flex-wrap sm:items-end">

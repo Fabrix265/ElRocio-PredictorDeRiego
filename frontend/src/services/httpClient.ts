@@ -60,6 +60,8 @@ export interface OpcionesSolicitud {
   autenticado?: boolean;
   /** Envía Authorization si hay token, pero no intenta refresh ante un 401 (logout). */
   sinReintento?: boolean;
+  /** Devuelve la Response sin leer el cuerpo (descarga de archivos). */
+  crudo?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -364,7 +366,30 @@ export async function solicitar<T>(ruta: string, opciones: OpcionesSolicitud = {
   }
 
   if (!resp.ok) throw await leerError(resp, ruta);
+  if (opciones.crudo) return resp as unknown as T;
   return leerCuerpo<T>(resp);
+}
+
+/** Nombre de archivo de Content-Disposition (o el de respaldo). */
+function nombreArchivo(resp: Response, respaldo: string): string {
+  const cabecera = resp.headers.get("Content-Disposition") ?? "";
+  const m = /filename="?([^";]+)"?/i.exec(cabecera);
+  return m ? m[1] : respaldo;
+}
+
+/** Descarga autenticada (con renovación de sesión) y la guarda con el nombre que da el backend. */
+export async function descargar(ruta: string, query?: Record<string, ValorQuery>, respaldo = "archivo"): Promise<string> {
+  const resp = await solicitar<Response>(ruta, { query, crudo: true });
+  const nombre = nombreArchivo(resp, respaldo);
+  const url = URL.createObjectURL(await resp.blob());
+  const enlace = document.createElement("a");
+  enlace.href = url;
+  enlace.download = nombre;
+  document.body.appendChild(enlace);
+  enlace.click();
+  enlace.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return nombre;
 }
 
 export const api = {

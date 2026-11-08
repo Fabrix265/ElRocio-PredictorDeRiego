@@ -36,6 +36,8 @@ export const PERMISOS = {
   verRevisionCronograma: ["admin", "encargado", "subgerente"],
   registrarVista: ["programador", "subgerente"],
   editarRiego: ["admin", "encargado", "subgerente"],
+  /** CSV de refinamiento del modelo (§2.4). */
+  exportarRefinamiento: ["admin"],
   /** Generar y regenerar cronogramas con el modelo. */
   generarCronogramas: ["admin", "encargado"],
   /** Subir, confirmar o descartar el Excel de riego. */
