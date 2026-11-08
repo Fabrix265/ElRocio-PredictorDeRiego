@@ -8,6 +8,9 @@ Para cada día se obtiene:
 * Humedad "al cierre del día" (media de las 21-23 h): es la última foto del
   suelo disponible antes de planificar el riego del día siguiente.
 * Datos de planta (MDS, crecimiento de tronco, índice de estrés).
+
+:func:`leer_phytech` solo lee el Excel; :func:`resumir_phytech` arma el resumen
+diario desde DataFrames con el formato de las hojas (también desde la BD).
 """
 
 from __future__ import annotations
@@ -39,11 +42,35 @@ def columnas_suelo_diario() -> list[str]:
 
 
 def leer_phytech(path: str | Path, project_id: int = PROJECT_ID_DEFAULT) -> tuple[pd.DataFrame, dict]:
-    """Devuelve 1 fila por Fundo y día con suelo y planta del sensor elegido."""
+    """Devuelve 1 fila por Fundo y día con suelo y planta del sensor elegido.
+
+    Solo lee las hojas ``Suelo_horario`` y ``Planta_diario``; el resumen diario es
+    :func:`resumir_phytech`, que también se aplica a las tablas guardadas en la BD.
+    """
     horario = pd.read_excel(path, sheet_name="Suelo_horario")
-    horario = horario[horario["project_id"] == project_id].copy()
-    if horario.empty:
+    if not (horario["project_id"] == project_id).any():
         raise ValueError(f"El sensor {project_id} no está en {path} (hoja Suelo_horario).")
+    planta = pd.read_excel(path, sheet_name="Planta_diario")
+    diario = resumir_phytech(horario, planta, project_id)
+    diag = {
+        "Phytech: sensor usado": project_id,
+        "Phytech: días con suelo": int(diario["suelo_horas"].notna().sum()),
+        "Phytech: días con MDS": int(diario["mds_contraccion_um"].notna().sum()),
+        "Phytech: rango de fechas": f"{diario['Fecha'].min():%Y-%m-%d} a {diario['Fecha'].max():%Y-%m-%d}",
+    }
+    return diario, diag
+
+
+def resumir_phytech(
+    horario: pd.DataFrame, planta: pd.DataFrame, project_id: int = PROJECT_ID_DEFAULT
+) -> pd.DataFrame:
+    """Resumen diario de suelo (horas con dato) y planta del sensor ``project_id``.
+
+    ``horario`` tiene el formato de ``Suelo_horario`` (``fundo``, ``project_id``, ``fecha_hora``,
+    ``hay_dato_phytech`` y las columnas de humedad) y ``planta`` el de ``Planta_diario``
+    (``fundo``, ``project_id``, ``fecha`` y ``PLANTA_VARS``).
+    """
+    horario = horario[horario["project_id"] == project_id].copy()
     horario["Fundo"] = norm_text(horario["fundo"])
     horario["fecha_hora"] = pd.to_datetime(horario["fecha_hora"], errors="coerce")
     horario = horario.dropna(subset=["fecha_hora"])
@@ -66,7 +93,6 @@ def leer_phytech(path: str | Path, project_id: int = PROJECT_ID_DEFAULT) -> tupl
     horas = horario.groupby(claves).size().rename("suelo_horas")
     suelo = pd.concat([media, cierre, rango, horas], axis=1).reset_index()
 
-    planta = pd.read_excel(path, sheet_name="Planta_diario")
     planta = planta[planta["project_id"] == project_id].copy()
     planta["Fundo"] = norm_text(planta["fundo"])
     planta["Fecha"] = pd.to_datetime(planta["fecha"], errors="coerce").dt.normalize()
@@ -77,10 +103,4 @@ def leer_phytech(path: str | Path, project_id: int = PROJECT_ID_DEFAULT) -> tupl
     numericas = diario.select_dtypes("number").columns
     diario[numericas] = diario[numericas].round(3)
     diario = diario.reset_index(drop=True)
-    diag = {
-        "Phytech: sensor usado": project_id,
-        "Phytech: días con suelo": int(diario["suelo_horas"].notna().sum()),
-        "Phytech: días con MDS": int(diario["mds_contraccion_um"].notna().sum()),
-        "Phytech: rango de fechas": f"{diario['Fecha'].min():%Y-%m-%d} a {diario['Fecha'].max():%Y-%m-%d}",
-    }
-    return diario[[*claves, *columnas_suelo_diario(), *PLANTA_VARS]], diag
+    return diario[[*claves, *columnas_suelo_diario(), *PLANTA_VARS]]
