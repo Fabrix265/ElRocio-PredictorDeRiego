@@ -7,7 +7,8 @@ import logging
 
 from app.db.session import nueva_sesion, unidad_de_trabajo
 from app.emails.smtp import Mailer, obtener_mailer
-from app.services import auth_service, correo_service, rate_limit
+from app.core.tiempo import hoy_lima
+from app.services import auth_service, correo_service, ingesta_service, rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -40,3 +41,21 @@ def limpiar_intentos() -> int:
             borrados, sesiones, enlaces,
         )
     return borrados
+
+
+def ingesta_diaria() -> list[int]:
+    """Ingesta diaria de las APIs (§3.6) a ``INGESTA_HORA``. Reclama la corrida programada de hoy
+    de cada fuente (``uq(fuente, fecha_programada)``: si otro proceso ya la tomó, se omite) y
+    ejecuta cada una en su propia transacción. Devuelve los ids ejecutados por este proceso."""
+    with unidad_de_trabajo() as db:
+        colgadas = ingesta_service.cerrar_colgadas(db)
+        ids = ingesta_service.reclamar_programadas(db, hoy_lima())
+    if colgadas:
+        logger.warning("Ingesta: %s corrida(s) sin terminar marcadas como error", colgadas)
+    if not ids:
+        logger.info("Ingesta diaria: otro proceso ya tomó las corridas de hoy")
+        return []
+    corridas = ingesta_service.ejecutar_en_sesiones(ids)
+    resumen = ", ".join(f"{c.fuente} {c.estado.value}" for c in corridas)
+    logger.info("Ingesta diaria terminada: %s", resumen or "sin corridas")
+    return ids

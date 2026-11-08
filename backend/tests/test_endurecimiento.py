@@ -229,7 +229,8 @@ def test_programador_tiene_la_tarea_de_correos():
 
     programador = crear_programador(en_segundo_plano=True)
     trabajos = {t.id: t for t in programador.get_jobs()}
-    assert set(trabajos) == {"enviar_correos", "limpiar_intentos"}
+    # "ingesta_al_arrancar" aparece solo si ya pasó INGESTA_HORA (ver test_ingesta.py).
+    assert set(trabajos) - {"ingesta_al_arrancar"} == {"enviar_correos", "limpiar_intentos", "ingesta_diaria"}
     assert trabajos["enviar_correos"].trigger.interval.total_seconds() == INTERVALO_CORREOS_S
     assert str(programador.timezone) == "America/Lima"
 

@@ -74,9 +74,11 @@ def guardar_meteo(
 # --- Phytech --------------------------------------------------------------------
 
 def guardar_suelo(
-    db: Session, fundo: Fundo, horario: pd.DataFrame, *, corrida_id: int | None
+    db: Session, fundo: Fundo, horario: pd.DataFrame, *, corrida_id: int | None,
+    proteger_con_dato: bool = False,
 ) -> tuple[ConteoUpsert, set[dt.date]]:
-    """``horario`` con el formato de la hoja ``Suelo_horario`` (salida de ``limpiar_suelo``)."""
+    """``horario`` con el formato de la hoja ``Suelo_horario`` (salida de ``limpiar_suelo``).
+    ``proteger_con_dato``: ver ``repositories.datos_campo.upsert_suelo`` (ingesta de la API)."""
     propias = horario[_misma_finca(horario["fundo"], fundo)].copy()
     propias["fecha_hora"] = pd.to_datetime(propias["fecha_hora"], errors="coerce")
     propias = propias.dropna(subset=["fecha_hora"])
@@ -94,7 +96,7 @@ def guardar_suelo(
             fila[columna_bd] = bool(valor) if columna_bd == "hay_dato" else valor
         filas.append(fila)
     fechas = {f["fecha_hora"].date() for f in filas}
-    return repo.upsert_suelo(db, filas), fechas
+    return repo.upsert_suelo(db, filas, proteger_con_dato=proteger_con_dato), fechas
 
 
 def guardar_planta(

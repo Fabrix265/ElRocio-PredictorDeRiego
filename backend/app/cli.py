@@ -298,6 +298,80 @@ def recalcular_ambiente(args: argparse.Namespace) -> int:
     return 0
 
 
+def _args_ingestar(p: argparse.ArgumentParser) -> None:
+    from app.services.ingesta_service import FUENTES
+
+    p.add_argument("--fuentes", default=",".join(FUENTES),
+                   help=f"Fuentes separadas por coma (por defecto todas: {','.join(FUENTES)})")
+    p.add_argument("--desde", type=_fecha,
+                   help="AAAA-MM-DD (sin --desde/--hasta: última fecha guardada − 3 días hasta ayer)")
+    p.add_argument("--hasta", type=_fecha, help="AAAA-MM-DD (incluido; por defecto ayer)")
+
+
+@comando("ingestar", "Descarga WeatherLink y Phytech (suelo, planta, NDVI, pronóstico) y recalcula "
+         "ambiente_diario.", _args_ingestar)
+def ingestar(args: argparse.Namespace) -> int:
+    from app.core.logging import configurar_logging
+    from app.core.tiempo import hoy_lima
+    from app.models.enums import DisparoIngesta, EstadoIngesta
+    from app.services import ingesta_service
+
+    configurar_logging()
+    try:
+        fuentes = ingesta_service.validar_fuentes(f.strip() for f in args.fuentes.split(",") if f.strip())
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 2
+    try:
+        desde, hasta = ingesta_service.validar_rango(args.desde, args.hasta, hoy_lima())
+    except ValueError as error:
+        print(f"{error}.", file=sys.stderr)
+        return 2
+    with _sesion_app() as db:
+        ids = [c.id for c in ingesta_service.crear_corridas(
+            db, fuentes, disparo=DisparoIngesta.script, desde=desde, hasta=hasta)]
+    corridas = ingesta_service.ejecutar_en_sesiones(ids)
+    print(f"{'Fuente':<15} {'Estado':<8} {'Desde':<10} {'Hasta':<10} {'Nuevas':>7} {'Actualiz.':>9} "
+          f"{'Sin camb.':>9} {'Duración':>9}")
+    for c in corridas:
+        print(f"{c.fuente:<15} {c.estado.value:<8} {c.desde!s:<10} {c.hasta!s:<10} {c.filas_nuevas:>7} "
+              f"{c.filas_actualizadas:>9} {c.filas_omitidas:>9} {c.duracion_ms / 1000:>8.1f}s")
+        for error in c.errores:
+            print(f"    - {error.get('tipo')}: {error.get('mensaje')} ({error.get('endpoint') or '-'})")
+    con_error = len(corridas) < len(ids) or any(c.estado != EstadoIngesta.ok for c in corridas)
+    return 1 if con_error else 0
+
+
+def _args_reprocesar(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--desde", type=_fecha, required=True, help="AAAA-MM-DD")
+    p.add_argument("--hasta", type=_fecha, required=True, help="AAAA-MM-DD (incluido)")
+
+
+@comando("reprocesar-weatherlink", "Vuelve a derivar meteo_lectura (origen weatherlink) desde los "
+         "payloads guardados con las reglas actuales de conversión y recalcula ambiente_diario.",
+         _args_reprocesar)
+def reprocesar_weatherlink(args: argparse.Namespace) -> int:
+    from app.services import ingesta_service
+
+    if args.desde > args.hasta:
+        print("Indica --desde <= --hasta.", file=sys.stderr)
+        return 2
+    with _sesion_app() as db:
+        r = ingesta_service.reprocesar_weatherlink(db, args.desde, args.hasta)
+    print(f"Días con payload guardado: {r.dias_con_crudo}; lecturas reprocesadas: {r.lecturas}")
+    print(f"meteo_lectura: {r.conteo.nuevas} nuevas, {r.conteo.actualizadas} actualizadas, "
+          f"{r.conteo.omitidas} sin cambios o protegidas (Excel histórico)")
+    if r.dias_sin_crudo:
+        muestra = ", ".join(d.isoformat() for d in r.dias_sin_crudo[:10])
+        extra = f" y {len(r.dias_sin_crudo) - 10} más" if len(r.dias_sin_crudo) > 10 else ""
+        print(f"Días sin payload de WeatherLink (no se tocan): {muestra}{extra}")
+    if r.ambiente is not None:
+        a = r.ambiente
+        print(f"ambiente_diario: {a.dias} días, {a.nuevas} nuevos, {a.actualizadas} actualizados, "
+              f"{a.sin_cambios} sin cambios, {a.borradas} borrados")
+    return 0
+
+
 def construir_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="Administración del backend de riego.")
     sub = parser.add_subparsers(dest="comando", required=True, metavar="comando")

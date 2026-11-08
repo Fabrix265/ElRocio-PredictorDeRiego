@@ -144,10 +144,19 @@ COLUMNAS_PLANTA = (
 )
 
 
-def upsert_suelo(db: Session, filas: Sequence[dict[str, Any]]) -> ConteoUpsert:
+def upsert_suelo(
+    db: Session, filas: Sequence[dict[str, Any]], *, proteger_con_dato: bool = False
+) -> ConteoUpsert:
+    """``proteger_con_dato`` (ingesta de la API): una hora guardada con dato no se reemplaza por
+    un hueco de la rejilla (``hay_dato = false``) si la API deja de devolverla."""
+    tabla = PhytechSueloHorario.__table__
+    condicion = None
+    if proteger_con_dato:
+        condicion = ~and_(tabla.c.hay_dato.is_(True), insert(tabla).excluded.hay_dato.is_(False))
     return upsert(
         db, PhytechSueloHorario, filas, conflicto=("project_id", "fecha_hora"),
         columnas_valor=("fundo_id", "plot_id", *COLUMNAS_SUELO), columnas_extra=("corrida_id",),
+        condicion=condicion,
     )
 
 
