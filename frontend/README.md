@@ -317,3 +317,20 @@ sonner (notificaciones), lucide-react, date-fns (instalada para los calendarios 
 ninguna alternativa. React Router 8 ya existe, pero se fijó la 7 como pide la propuesta.
 El build separa las librerías en trozos (`react`, `router`, `formularios`, `datos`, `ui`) y carga
 Usuarios, Auditoría, Riego aplicado y la carga de Excel bajo demanda.
+
+## PWA (F6)
+
+- `public/manifest.webmanifest`: nombre, colores de marca (`theme_color` #2A7042) e íconos
+  `icono-192.png`, `icono-512.png` y `icono-512-maskable.png` (gota blanca sobre verde, el mismo
+  diseño que `favicon.svg`; no son logos de la empresa). `apple-touch-icon.png` para iPhone.
+- `public/sw.js`: service worker **solo estructura**. Hace la app instalable y guarda únicamente la
+  página de inicio para el aviso sin conexión; **nunca** guarda la API ni datos (los cronogramas
+  cambian durante el día). Para activar caché sin conexión más adelante: versionar `CACHE` y ampliar
+  `PRECARGA`.
+- Se registra solo en producción (`import.meta.env.PROD`, en `src/main.tsx`); en desarrollo no, para
+  no interferir con Vite. Probar con `npm run build` y `npx vite preview` en Chrome (DevTools ›
+  Application › Manifest / Service workers). El navegador integrado de algunos editores no permite
+  service workers.
+- El servidor que sirva `dist/` debe entregar `sw.js` sin caché larga (`Cache-Control: no-cache`) y
+  bajo la raíz del sitio, para que el alcance sea `/`.
+

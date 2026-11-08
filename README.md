@@ -18,10 +18,9 @@ campo. El subgerente revisa y puede pedir correcciones, y el administrador gesti
 | F3 Predicción | Carga del modelo con sha256, bucle de generación desde la BD (idéntico a `planificar` de `riego_ml`), foto de entradas y alternativas de 1 a 5 ciclos, versiones y marcas (preliminar, datos incompletos, regenerado, desactualizado), regenerar. Frontend: Generar, listado y detalle de cronogramas en lectura, «Hoy y mañana» en el Dashboard | **Lista** |
 | F4 Flujo | Corrección con motivo y recálculo, publicación y borrador de cambios, Visto, solicitud de corrección y mantener versión, riego provisional y edición manual, línea de tiempo y correos. Frontend: flujo por rol, datos y comparación de versiones, filtros y estado de mañana | **Lista** |
 | F5 Gráficos | KPIs del Dashboard (agua aplicada ayer, aplicado vs modelo, MDS, ETo, estado de mañana) y pronóstico Phytech; Datos de campo con gráficos (agua aplicada vs propuesta por turno, MDS y crecimiento, suelo por profundidad con línea de estrés, clima); exportación del cronograma a PDF y Excel; CSV de refinamiento (admin) | **Lista** |
-| F6 PWA y pulido | Instalable (manifest e íconos), responsive fino, accesibilidad, guía de usuario final | Próxima |
+| F6 PWA y pulido | Instalable como aplicación (manifest, íconos verdes y service worker base sin caché de datos), revisión a 360 px de todas las pantallas, accesibilidad (nombres accesibles, un `h1` por pantalla), sin pantallas provisorias, guía de usuario final | **Lista** |
 
-Las pantallas de las fases siguientes ya están en el menú, protegidas por rol, con el aviso
-«Disponible en la fase N». Qué puede hacer hoy cada rol: [`docs/guia_usuario.md`](docs/guia_usuario.md).
+Todas las fases del MVP están listas. Qué puede hacer cada rol: [`docs/guia_usuario.md`](docs/guia_usuario.md).
 
 ## Arquitectura
 

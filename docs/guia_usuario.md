@@ -2,23 +2,19 @@
 
 Grupo El Rocío (AvoPeru y Talsa) · fundo ENSUEÑO 1 · módulo EN01-MOD5
 
-Esta guía explica cómo usar el sistema según tu rol. Cada función lleva una marca:
-
-- **[Disponible]**: ya se puede usar (fases 1 a 4).
-- **[Fase N]**: llega en una próxima fase. En el menú ya aparece, con el aviso «Disponible en la
-  fase N», y esta guía la describe como está prevista en la propuesta.
+Esta guía explica cómo usar el sistema según tu rol. Funciona en la computadora y en el celular,
+y se puede instalar como aplicación (ver [Instalar la aplicación](#instalar-la-aplicación)).
 
 Todas las fechas y horas del sistema están en **hora de Lima**.
 
 ## Contenido
 
 1. [Roles y pantallas](#roles-y-pantallas)
-2. [Para todos los roles](#para-todos-los-roles): ingresar, contraseñas, fundo y módulo
+2. [Para todos los roles](#para-todos-los-roles): ingresar, instalar la aplicación, contraseñas, fundo y módulo
 3. [El flujo diario completo](#el-flujo-diario-completo)
 4. [Qué hace cada rol](#qué-hace-cada-rol): administrador, encargado, programador, subgerente
 5. [Usuarios](#usuarios-solo-administrador) (solo administrador)
 6. [Auditoría](#auditoría-administrador-y-subgerente) (administrador y subgerente)
-7. [Qué trae cada fase](#qué-trae-cada-fase)
 
 ---
 
@@ -33,15 +29,15 @@ Todas las fechas y horas del sistema están en **hora de Lima**.
 
 Pantallas del menú por rol:
 
-| Pantalla | Administrador | Encargado | Programador | Subgerente | Disponible |
+| Pantalla | Administrador | Encargado | Programador | Subgerente | Incluye |
 |---|---|---|---|---|---|
-| Dashboard | ✔ | ✔ | ✔ (solo lo publicado) | ✔ | **[Disponible]** indicadores, frescura, Hoy y mañana y pronóstico |
-| Generar | ✔ | ✔ | — | — | [Disponible] |
-| Cronogramas | ✔ | ✔ edita | ✔ solo publicados, confirma Visto | ✔ lectura, solicita corrección | **[Disponible]** |
-| Riego aplicado | ✔ | ✔ sube Excel y edita | ✔ lectura | ✔ lectura, historial y edición | **[Disponible]** consulta, Excel y edición |
-| Datos de campo | ✔ | ✔ | ✔ | ✔ | [Disponible] |
-| Auditoría | ✔ | — | — | ✔ | **[Disponible]** |
-| Usuarios | ✔ | — | — | — | **[Disponible]** |
+| Dashboard | ✔ | ✔ | ✔ (solo lo publicado) | ✔ | indicadores, frescura, Hoy y mañana y pronóstico |
+| Generar | ✔ | ✔ | — | — | generar y regenerar con el modelo |
+| Cronogramas | ✔ | ✔ edita | ✔ solo publicados, confirma Visto | ✔ lectura, solicita corrección | listado, detalle, corrección, publicación, Visto y exportación |
+| Riego aplicado | ✔ | ✔ sube Excel y edita | ✔ lectura | ✔ lectura, historial y edición | consulta, Excel y edición |
+| Datos de campo | ✔ | ✔ | ✔ | ✔ | agua aplicada vs propuesta, planta, suelo y clima |
+| Auditoría | ✔ | — | — | ✔ | registro de quién hizo qué y cuándo |
+| Usuarios | ✔ | — | — | — | altas, roles, activación y contraseñas temporales |
 
 Si entras a una pantalla que tu rol no puede ver, el sistema muestra «No tienes acceso a esta
 sección». Si crees que es un error, pide al administrador que revise tu rol. El servidor vuelve a
@@ -51,7 +47,7 @@ comprobar el permiso en cada acción; el menú solo oculta lo que no te correspo
 
 ## Para todos los roles
 
-### Ingresar **[Disponible]**
+### Ingresar
 
 1. Abre la dirección del sistema que te dio el administrador.
 2. Escribe tu **usuario** y tu **contraseña** y toca **Ingresar**.
@@ -70,7 +66,21 @@ comprobar el permiso en cada acción; el menú solo oculta lo que no te correspo
 - Si el servidor no responde al abrir el sistema, verás «No se pudo conectar» con el botón
   **Reintentar**. Tu sesión no se pierde: reintenta cuando vuelva la conexión.
 
-### Primer ingreso: crear tu contraseña **[Disponible]**
+### Instalar la aplicación
+
+El sistema se puede instalar como una aplicación, con su ícono verde de la gota, sin pasar por una
+tienda:
+
+- **Celular Android (Chrome)**: abre el sistema, toca el menú **⋮** del navegador y elige
+  **Instalar aplicación** (o **Agregar a la pantalla principal**).
+- **iPhone (Safari)**: toca **Compartir** y elige **Agregar a inicio**.
+- **Computadora (Chrome o Edge)**: haz clic en el ícono de instalar de la barra de direcciones.
+
+La aplicación instalada abre en su propia ventana, sin barra del navegador. Necesita conexión: los
+cronogramas y el riego cambian durante el día y siempre se muestran actualizados; sin internet
+verás el aviso «No se pudo conectar».
+
+### Primer ingreso: crear tu contraseña
 
 El administrador te da de alta con una **contraseña temporal**. La primera vez que ingreses, el
 sistema te lleva a **Crea tu contraseña** y no te deja usar nada más hasta que la cambies:
@@ -82,7 +92,7 @@ sistema te lleva a **Crea tu contraseña** y no te deja usar nada más hasta que
 La contraseña debe tener **entre 10 y 128 caracteres, con letras y números**, y no puede ser igual
 a tu usuario. La lista bajo el campo marca cada requisito a medida que lo cumples.
 
-### Cambiar tu contraseña **[Disponible]**
+### Cambiar tu contraseña
 
 1. Abre el menú con tu nombre y elige **Cambiar contraseña**.
 2. Escribe la contraseña actual y la nueva dos veces.
@@ -91,7 +101,7 @@ a tu usuario. La lista bajo el campo marca cada requisito a medida que lo cumple
 Si te equivocas en la contraseña actual varias veces seguidas, el sistema cierra todas tus sesiones
 por seguridad y tendrás que volver a ingresar.
 
-### Olvidé mi contraseña **[Disponible]**
+### Olvidé mi contraseña
 
 1. En la pantalla de ingreso, toca **¿Olvidaste tu contraseña?**
 2. Escribe tu usuario o tu correo y toca **Enviar enlace**.
@@ -108,13 +118,13 @@ por seguridad y tendrás que volver a ingresar.
 - Si tu usuario está desactivado, el correo no llegará: habla con el administrador.
 - Si no tienes acceso a tu correo, el administrador puede asignarte una contraseña temporal.
 
-### Elegir fundo y módulo **[Disponible]**
+### Elegir fundo y módulo
 
 En la cabecera está el selector **Fundo › Módulo**. El sistema recuerda lo que elijas en tu
 navegador y lo pone en la dirección de la página, así que puedes compartir el enlace. Al lado se
 ve la fecha de hoy en Lima (en celular, dentro de **Menú**). Por ahora hay un solo fundo
-(ENSUEÑO 1) y un solo módulo (EN01-MOD5). **Riego aplicado**, la carga de Excel y la **Frescura de
-datos** del Dashboard muestran los datos del módulo elegido.
+(ENSUEÑO 1) y un solo módulo (EN01-MOD5). Todas las pantallas muestran los datos del módulo
+elegido.
 
 ---
 
@@ -131,7 +141,7 @@ exportaciones.
                                                        └── Solicitud de corrección (subgerente)
 ```
 
-### Estados de un cronograma [Disponible]
+### Estados de un cronograma
 
 Hay un cronograma por módulo y fecha. Cada cambio guarda una versión nueva y las anteriores no se
 borran nunca. El cronograma pasa por estos estados:
@@ -151,7 +161,7 @@ Además, un cronograma puede llevar estas marcas de calidad:
 - **Desactualizado**: llegaron datos nuevos después de generarlo; aparece con el botón
   **Regenerar**.
 
-### Paso 1 · Llegan los datos de campo (automático) **[Disponible]**
+### Paso 1 · Llegan los datos de campo (automático)
 
 - **Quién**: el sistema. Cada día a las 05:00 descarga el clima de WeatherLink, los sensores de
   suelo y planta de Phytech, las imágenes NDVI y el pronóstico, hasta el día anterior. Los datos de
@@ -177,7 +187,7 @@ Además, un cronograma puede llevar estas marcas de calidad:
   actualizadas y, si falló, el motivo. Una descarga que quedó **Sin terminar** (el servidor se
   reinició a mitad) no bloquea nada: se cierra sola al usar **Actualizar ahora**.
 
-### Paso 2 · Cargar el riego aplicado desde Excel **[Disponible]**
+### Paso 2 · Cargar el riego aplicado desde Excel
 
 - **Quién**: encargado o administrador.
 1. En **Riego aplicado** toca **Cargar Excel**.
@@ -213,7 +223,7 @@ Además, un cronograma puede llevar estas marcas de calidad:
   registros comparados. Toca **Subir otra vez** para revisarla con los datos actuales.
 - La subida, la confirmación y el descarte quedan en la **Auditoría**.
 
-### Paso 3 · Generar el cronograma [Disponible]
+### Paso 3 · Generar el cronograma
 
 - **Quién**: encargado o administrador.
 - En **Generar**, elige la **Fecha inicial** (por defecto, hoy; puede ir de 7 días atrás hasta
@@ -230,7 +240,7 @@ Además, un cronograma puede llevar estas marcas de calidad:
 - Si alguien está generando el mismo módulo en ese momento, el sistema avisa y pide intentar de
   nuevo en unos segundos.
 
-### Ver un cronograma [Disponible]
+### Ver un cronograma
 
 - En **Cronogramas** están los cronogramas por fecha (por defecto, del último mes a la próxima
   semana), con su estado, versión y marcas. El programador solo ve los publicados.
@@ -246,7 +256,7 @@ Además, un cronograma puede llevar estas marcas de calidad:
 - En el **Dashboard**, **Hoy y mañana** muestra el Gantt de los dos días con su estado y versión.
   **Estado de mañana** muestra Borrador, Publicado, Visto, Corrección solicitada o «Sin cronograma».
 
-### Paso 4 · Revisar y corregir [Disponible]
+### Paso 4 · Revisar y corregir
 
 - **Quién**: encargado o administrador. El subgerente consulta sin editar el plan.
 - El detalle tiene **Plan**, **Gantt**, **Datos**, **Versiones** y **Línea de tiempo**. El
@@ -271,7 +281,7 @@ Además, un cronograma puede llevar estas marcas de calidad:
   usuario, versión y motivo o comentario. Las aperturas del programador y del subgerente también
   quedan registradas; abrir el detalle no equivale a confirmar Visto.
 
-### Paso 5 · Publicar [Disponible]
+### Paso 5 · Publicar
 
 - **Quién**: encargado o administrador.
 - **Publicar** pide confirmar «Se avisará al programador y al subgerente». Los avisos de correo
@@ -282,7 +292,7 @@ Además, un cronograma puede llevar estas marcas de calidad:
 - El chip **Modificado · pendiente de visto** identifica un cronograma publicado más de una vez.
   Si el servidor devuelve avisos sobre la sincronización del riego, aparecen bajo las acciones.
 
-### Paso 6 · Visto del programador [Disponible]
+### Paso 6 · Visto del programador
 
 - **Quién**: programador o administrador, en cronogramas publicados de hoy o futuros.
 - Revisa la versión publicada, prográmala en el controlador y toca **Confirmar Visto**; confirma
@@ -296,7 +306,7 @@ Además, un cronograma puede llevar estas marcas de calidad:
   en ese caso aparece el chip de modificación y se ofrece confirmar Visto de nuevo.
 - En días pasados no se ofrece Visto.
 
-### Paso 7 · Revisión del subgerente [Disponible]
+### Paso 7 · Revisión del subgerente
 
 - **Quién**: subgerente o administrador. Sobre un cronograma **Publicado** o **Visto**, toca
   **Solicitar corrección**, escribe un **Motivo** de 5 a 1000 caracteres y confirma. El contador
@@ -305,7 +315,7 @@ Además, un cronograma puede llevar estas marcas de calidad:
 - El encargado o administrador puede corregir y **Publicar cambios**, o usar **Mantener versión**
   con un **Comentario** de 5 a 1000 caracteres. El subgerente recibe el aviso de la decisión.
 
-### Paso 8 · Registrar lo que se regó [Disponible]
+### Paso 8 · Registrar lo que se regó
 
 - **Quién**: consultan todos; editan el administrador, el encargado y el subgerente.
 - **Riego aplicado** muestra día y turno, estado (**Aplicado**, **Provisional**, **Sin riego**,
@@ -325,7 +335,7 @@ Además, un cronograma puede llevar estas marcas de calidad:
   la creación de provisionales ocurre al confirmar Visto y la carga de Excel crea los aplicados.
 - Lo aplicado alimenta al modelo para los días siguientes.
 
-### Paso 9 · Seguimiento [Disponible]
+### Paso 9 · Seguimiento
 
 - **Quién**: todos, según su rol.
 - El **Dashboard** muestra:
@@ -355,59 +365,59 @@ Además, un cronograma puede llevar estas marcas de calidad:
 
 ### Administrador
 
-| Qué | Disponible |
-|---|---|
-| Ingresar, recuperar y cambiar su contraseña | **[Disponible]** |
-| Crear, editar, activar y desactivar usuarios; asignar contraseñas temporales ([ver Usuarios](#usuarios-solo-administrador)) | **[Disponible]** |
-| Revisar la auditoría ([ver Auditoría](#auditoría-administrador-y-subgerente)) | **[Disponible]** |
-| Subir el Excel de riego, usar **Actualizar ahora**, ver las últimas corridas y el historial de versiones (pasos 1, 2 y 8) | **[Disponible]** |
-| Todo lo demás del encargado (generar, corregir, publicar) | [Disponible] |
-| Confirmar Visto o solicitar corrección en lugar del programador o del subgerente | [Disponible] |
-| Exportar el CSV de refinamiento del modelo | [Disponible] |
+| Qué puede hacer |
+|---|
+| Ingresar, recuperar y cambiar su contraseña |
+| Crear, editar, activar y desactivar usuarios; asignar contraseñas temporales ([ver Usuarios](#usuarios-solo-administrador)) |
+| Revisar la auditoría ([ver Auditoría](#auditoría-administrador-y-subgerente)) |
+| Subir el Excel de riego, usar **Actualizar ahora**, ver las últimas corridas y el historial de versiones (pasos 1, 2 y 8) |
+| Todo lo demás del encargado (generar, corregir, publicar) |
+| Confirmar Visto o solicitar corrección en lugar del programador o del subgerente |
+| Exportar el CSV de refinamiento del modelo |
 
 El primer administrador lo crea el equipo técnico al instalar el sistema (comando `crear-admin`).
 
 ### Encargado
 
-| Qué | Disponible |
-|---|---|
-| Ingresar, recuperar y cambiar su contraseña | **[Disponible]** |
-| Ver el Dashboard con la **Frescura de datos** y las últimas corridas | **[Disponible]** |
-| Ver el riego aplicado y su historial, subir el Excel y usar **Actualizar ahora** (pasos 1, 2 y 8) | **[Disponible]** |
-| Generar y regenerar cronogramas; ver el detalle (paso 3) | [Disponible] |
-| Corregir con motivo, publicar, publicar cambios, descartar el borrador de cambios y mantener la versión ante una solicitud de corrección (pasos 4, 5 y 7) | [Disponible] |
-| Editar el riego provisional, marcarlo aplicado y registrar «no se regó» (paso 8) | [Disponible] |
-| Dashboard con indicadores, Datos de campo y exportaciones (paso 9) | [Disponible] |
+| Qué puede hacer |
+|---|
+| Ingresar, recuperar y cambiar su contraseña |
+| Ver el Dashboard con la **Frescura de datos** y las últimas corridas |
+| Ver el riego aplicado y su historial, subir el Excel y usar **Actualizar ahora** (pasos 1, 2 y 8) |
+| Generar y regenerar cronogramas; ver el detalle (paso 3) |
+| Corregir con motivo, publicar, publicar cambios, descartar el borrador de cambios y mantener la versión ante una solicitud de corrección (pasos 4, 5 y 7) |
+| Editar el riego provisional, marcarlo aplicado y registrar «no se regó» (paso 8) |
+| Dashboard con indicadores, Datos de campo y exportaciones (paso 9) |
 
 ### Programador
 
-| Qué | Disponible |
-|---|---|
-| Ingresar, recuperar y cambiar su contraseña | **[Disponible]** |
-| Ver el Dashboard con la **Frescura de datos** (sin «Actualizar ahora» ni corridas) | **[Disponible]** |
-| Consultar el riego aplicado por turno y día, con sus ciclos (paso 8) | **[Disponible]** |
-| Ver los cronogramas publicados (nunca borradores ni la propuesta del modelo) | [Disponible] |
-| Recibir el correo de publicación, confirmar **Visto** y ver qué cambió desde su último Visto (paso 6) | [Disponible] |
-| Dashboard, Datos de campo y exportar la versión publicada (paso 9) | [Disponible] |
+| Qué puede hacer |
+|---|
+| Ingresar, recuperar y cambiar su contraseña |
+| Ver el Dashboard con la **Frescura de datos** (sin «Actualizar ahora» ni corridas) |
+| Consultar el riego aplicado por turno y día, con sus ciclos (paso 8) |
+| Ver los cronogramas publicados (nunca borradores ni la propuesta del modelo) |
+| Recibir el correo de publicación, confirmar **Visto** y ver qué cambió desde su último Visto (paso 6) |
+| Dashboard, Datos de campo y exportar la versión publicada (paso 9) |
 
 ### Subgerente
 
-| Qué | Disponible |
-|---|---|
-| Ingresar, recuperar y cambiar su contraseña | **[Disponible]** |
-| Revisar la auditoría ([ver Auditoría](#auditoría-administrador-y-subgerente)) | **[Disponible]** |
-| Ver el Dashboard con la **Frescura de datos** y las últimas corridas (sin «Actualizar ahora») | **[Disponible]** |
-| Consultar el riego aplicado y el historial de versiones de cada turno-día (paso 8) | **[Disponible]** |
-| Ver los cronogramas (incluidos los borradores) en modo lectura | [Disponible] |
-| Recibir los correos de publicación y de Visto; **Solicitar corrección** con motivo (paso 7) | [Disponible] |
-| Editar el riego provisional, marcarlo aplicado y registrar «no se regó» (paso 8) | [Disponible] |
-| Dashboard con indicadores, Datos de campo y exportaciones (paso 9) | [Disponible] |
+| Qué puede hacer |
+|---|
+| Ingresar, recuperar y cambiar su contraseña |
+| Revisar la auditoría ([ver Auditoría](#auditoría-administrador-y-subgerente)) |
+| Ver el Dashboard con la **Frescura de datos** y las últimas corridas (sin «Actualizar ahora») |
+| Consultar el riego aplicado y el historial de versiones de cada turno-día (paso 8) |
+| Ver los cronogramas (incluidos los borradores) en modo lectura |
+| Recibir los correos de publicación y de Visto; **Solicitar corrección** con motivo (paso 7) |
+| Editar el riego provisional, marcarlo aplicado y registrar «no se regó» (paso 8) |
+| Dashboard con indicadores, Datos de campo y exportaciones (paso 9) |
 
 ---
 
 ## Usuarios (solo administrador)
 
-**[Disponible]** Menú **Usuarios**. La tabla muestra nombre, usuario, correo, rol, estado y último
+Menú **Usuarios**. La tabla muestra nombre, usuario, correo, rol, estado y último
 acceso. Puedes buscar por nombre, usuario o correo y filtrar por rol y por estado (activos o
 inactivos).
 
@@ -447,7 +457,7 @@ inactivos).
 
 ## Auditoría (administrador y subgerente)
 
-**[Disponible]** Menú **Auditoría**. Es un registro de solo lectura de quién hizo qué y cuándo:
+Menú **Auditoría**. Es un registro de solo lectura de quién hizo qué y cuándo:
 nadie puede editarlo ni borrarlo.
 
 1. Filtra por **Usuario**, **Acción**, **Entidad** y rango de fechas (**Desde** / **Hasta**, días
@@ -460,7 +470,7 @@ nadie puede editarlo ni borrarlo.
    - los datos de la acción. En las ediciones, una tabla **antes / después** resalta los valores
      que cambiaron.
 
-En la fase 1 se registran:
+Se registran:
 - **Sesión**: inicio y cierre de sesión, e intentos de ingreso fallidos con su motivo.
 - **Contraseñas**: recuperación solicitada, contraseña restablecida o cambiada, e intentos de
   cambio fallidos.
@@ -471,7 +481,7 @@ Nunca se guardan contraseñas ni enlaces de recuperación. Si alguien escribe en
 nombre que no existe, el intento se registra sin ese texto, porque podría ser una contraseña
 escrita por error.
 
-Desde la fase 2 se registran también:
+También se registran:
 - **Cargas de Excel de riego**: «Excel de riego subido», «Excel de riego confirmado» y «Excel de
   riego descartado», con el archivo, los contadores y el rango de fechas.
 - **Datos de campo**: «Lecturas del Excel histórico reemplazadas por WeatherLink» cuando el equipo
@@ -479,18 +489,3 @@ Desde la fase 2 se registran también:
 
 Se registran las acciones sobre cronogramas, la edición del riego y las exportaciones (PDF,
 Excel y CSV de refinamiento).
-
----
-
-## Qué trae cada fase
-
-| Fase | Qué se agrega | Quién lo usa |
-|---|---|---|
-| **1 · Base** (disponible) | Ingresar, primer ingreso, recuperar y cambiar contraseña, selector de fundo y módulo, **Usuarios** y **Auditoría**. | Todos; Usuarios solo el administrador; Auditoría el administrador y el subgerente |
-| **2 · Datos** (disponible) | **Riego aplicado**: consulta por turno y día, historial de versiones y carga del Excel con vista previa. Ingesta diaria de WeatherLink y Phytech y panel de **Frescura de datos** con «Actualizar ahora» y últimas corridas. | El encargado y el administrador suben el Excel y actualizan; todos consultan |
-| **3 · Predicción** (disponible) | **Generar** cronogramas de uno o más días; listado y detalle de **Cronogramas** en lectura; regenerar. | El encargado y el administrador generan; todos según su visibilidad |
-| **4 · Flujo** (disponible) | Corrección con motivo, publicación, borrador de cambios, «Visto» del programador, solicitud de corrección, mantener versión, riego provisional y aplicado, línea de tiempo y correos de aviso. | Todos según su rol |
-| 5 · Gráficos | **Dashboard** con indicadores, **Datos de campo** (clima, suelo y planta) y exportación a PDF y Excel. | Todos (el programador, sin la propuesta del modelo) |
-| 6 · Pulido | Instalar el sistema en el celular como aplicación, ajustes finos en pantallas pequeñas, accesibilidad y la versión final de esta guía. | Todos |
-
-Esta guía se ampliará con cada fase.
