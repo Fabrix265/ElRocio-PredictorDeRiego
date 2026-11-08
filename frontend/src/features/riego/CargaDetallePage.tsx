@@ -176,7 +176,10 @@ export default function CargaDetallePage() {
     onSuccess: (actualizada) => {
       // Si hay otro cambio en vuelo, su respuesta llegará después: no se pisa la vista optimista.
       if (queryClient.isMutating({ mutationKey: ["riego", "marcar", id] }) <= 1) {
-        queryClient.setQueryData(claveRiego.carga(id), actualizada);
+        queryClient.setQueryData<CargaRiego>(claveRiego.carga(id), (previa) => previa ? {
+          ...aplicarCambios(previa, actualizada.grupos),
+          resumen: { ...previa.resumen, contadores: actualizada.contadores },
+        } : previa);
       }
     },
     mutationKey: ["riego", "marcar", id],

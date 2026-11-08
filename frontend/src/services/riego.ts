@@ -7,7 +7,7 @@
  * - POST  /riego/cargas  multipart {archivo, modulo_id}  → 201 CargaRiego (A E)
  *         413 archivo grande · 422 archivo inválido (detail en texto) · 503 sin defusedxml
  * - GET   /riego/cargas/{id}                             → 200 CargaRiego (A E)
- * - PATCH /riego/cargas/{id}  {grupos: [{id, aplicar}]}  → 200 CargaRiego (A E)
+ * - PATCH /riego/cargas/{id}  {grupos: [{id, aplicar}]}  → 200 CargaMarcada (A E)
  * - POST  /riego/cargas/{id}/confirmar                   → 200 CargaRiego confirmada (A E)
  * - POST  /riego/cargas/{id}/descartar                   → 200 CargaRiego descartada (A E)
  *   409 en PATCH/confirmar/descartar: carga vencida (24 h o cambió un registro comparado),
@@ -115,6 +115,13 @@ export interface CambioAplicar {
   aplicar: boolean;
 }
 
+/** Respuesta compacta del PATCH; el resto de la vista previa permanece en caché. */
+export interface CargaMarcada {
+  id: number;
+  contadores: Partial<Record<ResultadoCarga, number>>;
+  grupos: CambioAplicar[];
+}
+
 // ---------------------------------------------------------------------------
 // Normalización: fechas a "AAAA-MM-DD" y ciclos ordenados por inicio
 // ---------------------------------------------------------------------------
@@ -155,8 +162,8 @@ export const riegoApi = {
   async carga(id: number, signal?: AbortSignal): Promise<CargaRiego> {
     return normalizarCarga(await api.get<CargaRiego>(`/riego/cargas/${id}`, undefined, signal));
   },
-  async marcar(id: number, grupos: CambioAplicar[]): Promise<CargaRiego> {
-    return normalizarCarga(await api.patch<CargaRiego>(`/riego/cargas/${id}`, { grupos }));
+  async marcar(id: number, grupos: CambioAplicar[]): Promise<CargaMarcada> {
+    return api.patch<CargaMarcada>(`/riego/cargas/${id}`, { grupos });
   },
   async confirmar(id: number): Promise<CargaRiego> {
     return normalizarCarga(await api.post<CargaRiego>(`/riego/cargas/${id}/confirmar`));

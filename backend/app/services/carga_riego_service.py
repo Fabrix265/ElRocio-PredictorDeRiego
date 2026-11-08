@@ -423,7 +423,7 @@ def _exigir_previsualizada(db: Session, carga: CargaRiego) -> None:
         _vencer(db, carga, "pasaron 24 horas")
 
 
-def marcar(db: Session, carga_id: int, cambios: list[tuple[int, bool]]) -> CargaRiego:
+def marcar(db: Session, carga_id: int, cambios: list[tuple[int, bool]]) -> dict[str, Any]:
     """Marca o desmarca grupos aplicables (``igual`` y ``error`` no se pueden aplicar)."""
     carga = _obtener(db, carga_id, bloquear=True)
     _exigir_previsualizada(db, carga)
@@ -437,7 +437,11 @@ def marcar(db: Session, carga_id: int, cambios: list[tuple[int, bool]]) -> Carga
         ids = [i for i, aplicar in finales.items() if aplicar is valor and grupos[i].aplicar is not valor]
         repo.fijar_aplicar(db, carga.id, ids, valor)
     db.flush()
-    return carga
+    return {
+        "id": carga.id,
+        "contadores": (carga.resumen or {}).get("contadores", {}),
+        "grupos": [{"id": i, "aplicar": aplicar} for i, aplicar in finales.items()],
+    }
 
 
 def confirmar(

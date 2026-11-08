@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../services/httpClient";
-import { riegoApi, type CargaRiego, type GrupoCarga } from "../../services/riego";
+import { riegoApi, type CargaMarcada, type CargaRiego, type GrupoCarga } from "../../services/riego";
 import { ciclo, MODULO, prepararRadix, seleccionCon } from "../../test/fabricas";
 import CargaDetallePage from "./CargaDetallePage";
 import CargaNuevaPage from "./CargaNuevaPage";
@@ -123,16 +123,20 @@ describe("Carga de Excel: vista previa", () => {
 
   it("desmarcar «sin riego» envía solo esos grupos y actualiza el total al instante", async () => {
     vi.spyOn(riegoApi, "carga").mockResolvedValue(carga());
-    let resolver: (c: CargaRiego) => void = () => {};
+    let resolver: (c: CargaMarcada) => void = () => {};
     const marcar = vi.spyOn(riegoApi, "marcar").mockImplementation(() => new Promise((r) => (resolver = r)));
     montar("/riego/cargas/5");
     await userEvent.click(await screen.findByLabelText("Aplicar todos: Sin riego"));
     expect(marcar).toHaveBeenCalledWith(5, [{ id: 6, aplicar: false }]);
     expect(screen.getByText(/Se aplicarán/)).toHaveTextContent("Se aplicarán 3 turno-días");
-    const actualizada = carga();
-    actualizada.grupos = actualizada.grupos.map((g) => (g.id === 6 ? { ...g, aplicar: false } : g));
-    resolver(actualizada);
-    await waitFor(() => expect(screen.getByLabelText("Aplicar todos: Sin riego")).not.toBeChecked());
+    resolver({ id: 5, contadores: { nuevo: 2, igual: 1 }, grupos: [{ id: 6, aplicar: false }] });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirmar" })).toBeEnabled());
+    expect(screen.getByLabelText("Aplicar todos: Sin riego")).not.toBeChecked();
+    expect(screen.getByText(/Se aplicarán/)).toHaveTextContent("Se aplicarán 3 turno-días");
+    expect(screen.getByText("data_riego.xlsx")).toBeInTheDocument();
+    expect(screen.getByText("La fecha es de hoy o futura.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Nuevo: 2/ })).toBeInTheDocument();
+    expect(riegoApi.carga).toHaveBeenCalledTimes(1);
   });
 
   it("confirmar aplica la carga y muestra el resultado", async () => {

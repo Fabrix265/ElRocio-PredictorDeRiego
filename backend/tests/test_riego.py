@@ -200,8 +200,15 @@ def test_flujo_subir_marcar_confirmar_y_resubir(client: TestClient, auth, db: Se
                              json={"grupos": [{"id": d7["id"], "aplicar": False},
                                               {"id": fallida["id"], "aplicar": True}]})
     assert respuesta.status_code == 200, respuesta.text
-    assert grupo(respuesta.json(), D1, "TE03")["aplicar"] is False
-    assert grupo(respuesta.json(), D2, "TE05")["aplicar"] is True
+    assert respuesta.json() == {
+        "id": carga["id"], "contadores": carga["resumen"]["contadores"],
+        "grupos": [{"id": d7["id"], "aplicar": False}, {"id": fallida["id"], "aplicar": True}],
+    }
+    assert len(respuesta.content) < 500
+    guardada = client.get(f"{API}/riego/cargas/{carga['id']}", headers=cabeceras).json()
+    assert grupo(guardada, D1, "TE03")["aplicar"] is False
+    assert grupo(guardada, D2, "TE05")["aplicar"] is True
+    assert grupo(guardada, D1, "TE01") == te01
 
     respuesta = client.post(f"{API}/riego/cargas/{carga['id']}/confirmar", headers=cabeceras)
     assert respuesta.status_code == 200, respuesta.text

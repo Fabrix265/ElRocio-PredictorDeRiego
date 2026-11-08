@@ -109,3 +109,11 @@ class CargaMarcar(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     grupos: list[CambioAplicar] = Field(min_length=1, max_length=MAX_GRUPOS_PATCH)
+
+
+class CargaMarcadaSalida(BaseModel):
+    """Selección guardada: solo los grupos solicitados, sin repetir sus ciclos."""
+
+    id: int
+    contadores: dict[str, int]
+    grupos: list[CambioAplicar]

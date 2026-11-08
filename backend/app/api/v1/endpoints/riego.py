@@ -22,7 +22,7 @@ from app.core.config import settings
 from app.core.errores import DatosInvalidos
 from app.models import Usuario
 from app.models.enums import RolUsuario
-from app.schemas.riego import CargaMarcar, CargaRiegoSalida, RiegoListado, VersionRiegoSalida
+from app.schemas.riego import CargaMarcadaSalida, CargaMarcar, CargaRiegoSalida, RiegoListado, VersionRiegoSalida
 from app.services import archivo_excel, carga_riego_service, riego_service
 
 router = APIRouter(prefix="/riego")
@@ -131,12 +131,11 @@ def obtener_carga(carga_id: IdPath, _usuario: AdminEncargado, db: DbSesion) -> d
     return carga_riego_service.detalle(db, carga_riego_service.obtener(db, carga_id))
 
 
-@router.patch("/cargas/{carga_id}", response_model=CargaRiegoSalida)
+@router.patch("/cargas/{carga_id}", response_model=CargaMarcadaSalida)
 def marcar_grupos(
     carga_id: IdPath, datos: CargaMarcar, _usuario: AdminEncargado, db: DbSesion
 ) -> dict[str, Any]:
-    carga = carga_riego_service.marcar(db, carga_id, [(g.id, g.aplicar) for g in datos.grupos])
-    return carga_riego_service.detalle(db, carga)
+    return carga_riego_service.marcar(db, carga_id, [(g.id, g.aplicar) for g in datos.grupos])
 
 
 @router.post("/cargas/{carga_id}/confirmar", response_model=CargaRiegoSalida)
