@@ -142,6 +142,8 @@ class CronogramaDetalle(CronogramaCabecera):
     correccion_solicitada_at: dt.datetime | None = None
     correccion_solicitada_por: str | None = None
     correccion_solicitada_motivo: str | None = None
+    # Solo para el programador: su último Visto (número de versión), aunque se haya republicado.
+    mi_ultimo_visto_numero: int | None = None
 
 
 class CicloEdicionEntrada(BaseModel):

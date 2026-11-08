@@ -199,3 +199,13 @@ def datos_campo(db: Session, fundo_id: int, desde: dt.date, hasta: dt.date) -> l
         AmbienteDiario.fundo_id == fundo_id, AmbienteDiario.fecha >= desde, AmbienteDiario.fecha < hasta,
     ).order_by(AmbienteDiario.fecha))
     return [dict(f) for f in filas.mappings()]
+
+
+def numero_ultimo_visto(db: Session, cronograma_id: int, usuario_id: int) -> int | None:
+    return db.scalar(
+        select(CronogramaVersion.numero)
+        .join(CronogramaEvento, CronogramaEvento.version_id == CronogramaVersion.id)
+        .where(CronogramaEvento.cronograma_id == cronograma_id, CronogramaEvento.usuario_id == usuario_id,
+               CronogramaEvento.tipo == TipoEventoCronograma.visto_programador)
+        .order_by(CronogramaEvento.ocurrido_at.desc(), CronogramaEvento.id.desc()).limit(1)
+    )

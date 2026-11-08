@@ -427,8 +427,17 @@ def _detalle(db: Session, crono: Cronograma, usuario: Usuario) -> dict[str, Any]
         correccion_solicitada_at=crono.correccion_solicitada_at,
         correccion_solicitada_por=nombres.get(crono.correccion_solicitada_por),
         correccion_solicitada_motivo=crono.correccion_solicitada_motivo,
+        mi_ultimo_visto_numero=_mi_ultimo_visto(db, crono, usuario),
     )
     return salida
+
+
+def _mi_ultimo_visto(db: Session, crono: Cronograma, usuario: Usuario) -> int | None:
+    """Número de la última versión a la que este programador dio Visto (se conserva en la línea de
+    tiempo aunque publicar cambios limpie ``visto_version_id``), para «Cambió desde tu Visto»."""
+    if not _es_programador(usuario):
+        return None
+    return repo.numero_ultimo_visto(db, crono.id, usuario.id)
 
 
 def por_fecha(db: Session, modulo_id: int, fecha: dt.date, usuario: Usuario) -> dict[str, Any] | None:
