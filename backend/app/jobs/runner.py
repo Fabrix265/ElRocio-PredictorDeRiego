@@ -6,6 +6,8 @@
 - ``ingesta_diaria`` todos los días a ``INGESTA_HORA`` (05:00 Lima). Al arrancar, si ya pasó esa
   hora, se lanza una vez: las corridas de hoy que ya existen (ok, parcial o en curso) se omiten y
   las que terminaron en error se repiten (§8).
+- ``vigilar_ingestas`` cada 5 min: cierra las corridas en curso sin latido (proceso muerto) y, ya
+  pasada ``INGESTA_HORA``, repite las programadas de hoy que quedaron interrumpidas.
 
 ``coalesce`` y ``max_instances=1``: si una corrida se atrasa no se acumulan ejecuciones. Entre
 procesos, la cola de correos se reparte con ``FOR UPDATE SKIP LOCKED`` y la ingesta con la fila única
@@ -29,6 +31,7 @@ from app.jobs import tareas
 logger = logging.getLogger(__name__)
 
 INTERVALO_CORREOS_S = 30
+INTERVALO_VIGILANCIA_S = 300
 
 JOB_DEFAULTS = {"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600}
 ESPERA_ARRANQUE_S = 30
@@ -48,6 +51,11 @@ def ingesta_al_arrancar(ahora: dt.datetime) -> dt.datetime | None:
     return ahora + dt.timedelta(seconds=ESPERA_ARRANQUE_S)
 
 
+def _vigilar() -> list[int]:
+    ahora = dt.datetime.now(zona_lima())
+    return tareas.vigilar_ingestas(ya_es_hora=(ahora.hour, ahora.minute) >= hora_ingesta())
+
+
 def configurar(programador: BaseScheduler, *, ahora: dt.datetime | None = None) -> BaseScheduler:
     programador.add_job(
         tareas.enviar_correos, "interval", seconds=INTERVALO_CORREOS_S,
@@ -61,6 +69,10 @@ def configurar(programador: BaseScheduler, *, ahora: dt.datetime | None = None) 
     programador.add_job(
         tareas.ingesta_diaria, "cron", hour=hora, minute=minuto,
         id="ingesta_diaria", name="Ingesta diaria de WeatherLink y Phytech", replace_existing=True,
+    )
+    programador.add_job(
+        _vigilar, "interval", seconds=INTERVALO_VIGILANCIA_S,
+        id="vigilar_ingestas", name="Cerrar y repetir ingestas interrumpidas", replace_existing=True,
     )
     arranque = ingesta_al_arrancar(ahora or dt.datetime.now(zona_lima()))
     if arranque is not None:

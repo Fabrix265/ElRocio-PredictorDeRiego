@@ -51,11 +51,33 @@ def ingesta_diaria() -> list[int]:
         colgadas = ingesta_service.cerrar_colgadas(db)
         ids = ingesta_service.reclamar_programadas(db, hoy_lima())
     if colgadas:
-        logger.warning("Ingesta: %s corrida(s) sin terminar marcadas como error", colgadas)
+        logger.warning("Ingesta: %s corrida(s) sin terminar marcadas como interrumpidas", len(colgadas))
     if not ids:
         logger.info("Ingesta diaria: otro proceso ya tomó las corridas de hoy")
         return []
     corridas = ingesta_service.ejecutar_en_sesiones(ids)
     resumen = ", ".join(f"{c.fuente} {c.estado.value}" for c in corridas)
     logger.info("Ingesta diaria terminada: %s", resumen or "sin corridas")
+    return ids
+
+
+def vigilar_ingestas(*, ya_es_hora: bool = True) -> list[int]:
+    """Cada pocos minutos: cierra las corridas en curso sin latido (su proceso murió o no pudo
+    guardarlas) y, si ya pasó ``INGESTA_HORA``, ejecuta las programadas de hoy que quedaron
+    interrumpidas o que faltan (p. ej. se omitieron porque había un "Actualizar ahora" en curso).
+    Así, un reinicio a mitad de la ingesta (p. ej. un deploy) no deja el día sin datos ni
+    "Actualizar ahora" bloqueado. Un error de la API no se repite aquí (se repite al arrancar o al
+    día siguiente). Devuelve los ids ejecutados."""
+    with unidad_de_trabajo() as db:
+        colgadas = ingesta_service.cerrar_colgadas(db)
+        ids: list[int] = []
+        if ya_es_hora:
+            ids = ingesta_service.reclamar_programadas(db, hoy_lima(), solo_interrumpidas=True)
+    if colgadas:
+        logger.warning("Ingesta: %s corrida(s) sin latido marcadas como interrumpidas (%s)",
+                       len(colgadas), ", ".join(fuente for _id, fuente, _fecha in colgadas))
+    if not ids:
+        return []
+    logger.info("Ingesta: se ejecutan %s corrida(s) programada(s) de hoy interrumpidas o faltantes", len(ids))
+    ingesta_service.ejecutar_en_sesiones(ids)
     return ids

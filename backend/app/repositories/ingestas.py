@@ -7,8 +7,9 @@ import datetime as dt
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import Date, cast, func, select, update
+from sqlalchemy import Date, cast, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -27,25 +28,42 @@ from app.repositories.datos_campo import ConteoUpsert, upsert
 # --- Corridas -------------------------------------------------------------------
 
 
-def reclamar_programada(db: Session, fuente: str, fecha: dt.date, inicio_at: dt.datetime) -> int | None:
+TIPO_INTERRUMPIDA = "interrumpida"
+
+
+def reclamar_programada(
+    db: Session, fuente: str, fecha: dt.date, inicio_at: dt.datetime, *, solo_interrumpida: bool = False
+) -> int | None:
     """Crea la corrida programada de ``(fuente, fecha)`` si nadie la creó antes
     (``INSERT … ON CONFLICT``: exclusión entre procesos sin candados de sesión). Si la de ese día
     terminó en ``error`` se vuelve a reclamar (se reinicia la fila): así, al arrancar, se repite la
-    ingesta del día que falló. Devuelve el id, o ``None`` si ya existe (en curso, ok o parcial)."""
+    ingesta del día que falló; con ``solo_interrumpida``, solo si el error fue que quedó sin
+    terminar (el vigilante no repite cada pocos minutos un error de la API). Devuelve el id, o
+    ``None`` si ya existe (en curso, ok o parcial) o si la fuente tiene otra corrida en curso (p. ej.
+    un "Actualizar ahora": índice único parcial ``uq_ingesta_corrida_en_curso``)."""
+    if en_curso(db, [fuente]):
+        return None
     tabla = IngestaCorrida.__table__
     sentencia = insert(tabla).values(
         fuente=fuente, disparo=DisparoIngesta.programado, fecha_programada=fecha,
-        inicio_at=inicio_at, estado=EstadoIngesta.en_curso,
+        inicio_at=inicio_at, latido_at=inicio_at, estado=EstadoIngesta.en_curso,
     )
+    repetir = tabla.c.estado == EstadoIngesta.error
+    if solo_interrumpida:
+        repetir = repetir & tabla.c.errores.contains([{"tipo": TIPO_INTERRUMPIDA}])
     sentencia = sentencia.on_conflict_do_update(
         index_elements=["fuente", "fecha_programada"],
-        set_={"estado": EstadoIngesta.en_curso, "inicio_at": inicio_at, "fin_at": None,
-              "duracion_ms": None, "desde": None, "hasta": None, "filas_nuevas": 0,
+        set_={"estado": EstadoIngesta.en_curso, "inicio_at": inicio_at, "latido_at": inicio_at,
+              "fin_at": None, "duracion_ms": None, "desde": None, "hasta": None, "filas_nuevas": 0,
               "filas_actualizadas": 0, "filas_omitidas": 0, "conflictos": 0,
               "errores": []},
-        where=tabla.c.estado == EstadoIngesta.error,
+        where=repetir,
     ).returning(tabla.c.id)
-    return db.execute(sentencia).scalar_one_or_none()
+    try:
+        with db.begin_nested():
+            return db.execute(sentencia).scalar_one_or_none()
+    except IntegrityError:
+        return None  # otra corrida de la fuente empezó entre la consulta y el INSERT
 
 
 def en_curso(db: Session, fuentes: Sequence[str]) -> list[IngestaCorrida]:
@@ -55,17 +73,34 @@ def en_curso(db: Session, fuentes: Sequence[str]) -> list[IngestaCorrida]:
     ))
 
 
-def cerrar_colgadas(db: Session, antes_de: dt.datetime, ahora: dt.datetime) -> int:
-    """Corridas ``en_curso`` que empezaron antes de ``antes_de`` (el proceso murió): ``error``."""
+def cerrar_colgadas(db: Session, antes_de: dt.datetime, ahora: dt.datetime) -> list[tuple[int, str, dt.date | None]]:
+    """Corridas ``en_curso`` cuyo último latido (o inicio, si nunca latió) es anterior a
+    ``antes_de``: nadie las está ejecutando (el proceso murió o no pudo guardarlas). Quedan en
+    ``error`` con tipo ``interrumpida``. Devuelve ``(id, fuente, fecha_programada)`` de cada una."""
     resultado = db.execute(
         update(IngestaCorrida)
-        .where(IngestaCorrida.estado == EstadoIngesta.en_curso, IngestaCorrida.inicio_at < antes_de)
+        .where(IngestaCorrida.estado == EstadoIngesta.en_curso,
+               func.coalesce(IngestaCorrida.latido_at, IngestaCorrida.inicio_at) < antes_de)
         .values(estado=EstadoIngesta.error, fin_at=ahora,
-                errores=[{"tipo": "interrumpida", "status_code": None, "endpoint": None,
+                errores=[{"tipo": TIPO_INTERRUMPIDA, "status_code": None, "endpoint": None,
                           "mensaje": "La corrida quedó sin terminar (proceso detenido)"}])
+        .returning(IngestaCorrida.id, IngestaCorrida.fuente, IngestaCorrida.fecha_programada)
         .execution_options(synchronize_session=False)
     )
-    return resultado.rowcount or 0
+    return [tuple(fila) for fila in resultado]
+
+
+def marcar_latido(db: Session, corrida_id: int, ahora: dt.datetime) -> bool:
+    """Latido de una corrida en curso (transacción corta y aparte de la de la ingesta). Espera como
+    mucho unos segundos un candado de la fila: si no lo obtiene, lo intentará en el próximo."""
+    db.execute(text("SET LOCAL lock_timeout = '5s'"))
+    resultado = db.execute(
+        update(IngestaCorrida)
+        .where(IngestaCorrida.id == corrida_id, IngestaCorrida.estado == EstadoIngesta.en_curso)
+        .values(latido_at=ahora)
+        .execution_options(synchronize_session=False)
+    )
+    return bool(resultado.rowcount)
 
 
 def listar(db: Session, *, limite: int, fuente: str | None = None) -> list[tuple[IngestaCorrida, str | None]]:

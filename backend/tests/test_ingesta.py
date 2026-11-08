@@ -299,13 +299,102 @@ def test_lanzar_manual_valida_y_evita_dos_corridas_en_curso(db, crear_usuario, r
         ingesta_service.lanzar_manual(db, ["phytech_suelo"], usuario_id=usuario.id, desde=D1, hasta=HOY)
 
 
-def test_corridas_colgadas_se_cierran_como_error(db, reloj):
-    corrida = ingesta_service.crear_corridas(db, ["weatherlink"], disparo=DisparoIngesta.manual)[0]
-    corrida.inicio_at = dt.datetime(2026, 11, 8, 6, tzinfo=dt.UTC)  # 01:00 Lima, hace 9 h
+def test_corridas_sin_latido_se_cierran_como_interrumpidas(db, reloj):
+    viva, muerta = ingesta_service.crear_corridas(db, ["weatherlink", "ndvi"], disparo=DisparoIngesta.manual)
+    hace_9_h = dt.datetime(2026, 11, 8, 6, tzinfo=dt.UTC)  # 01:00 Lima
+    viva.inicio_at = muerta.inicio_at = hace_9_h
+    viva.latido_at = dt.datetime(2026, 11, 8, 14, 58, tzinfo=dt.UTC)   # hace 2 min: sigue corriendo
+    muerta.latido_at = dt.datetime(2026, 11, 8, 14, 49, tzinfo=dt.UTC)  # hace 11 min: sin dueño
     db.flush()
-    assert ingesta_service.cerrar_colgadas(db) == 1
+    assert ingesta_service.cerrar_colgadas(db) == [(muerta.id, "ndvi", None)]
+    db.refresh(muerta)
+    db.refresh(viva)
+    assert muerta.estado == EstadoIngesta.error and muerta.errores[0]["tipo"] == "interrumpida"
+    assert viva.estado == EstadoIngesta.en_curso
+    # Sin latido nunca registrado se cuenta desde el inicio.
+    viva.latido_at = None
+    db.flush()
+    assert [c[0] for c in ingesta_service.cerrar_colgadas(db)] == [viva.id]
+
+
+def test_dos_actualizar_ahora_a_la_vez_dan_409_por_el_indice_unico(db, crear_usuario, reloj, monkeypatch):
+    """La consulta previa no ve la corrida que otra sesión aún no confirmó: lo frena el índice único
+    parcial ``uq_ingesta_corrida_en_curso`` y se responde Conflicto (la sesión sigue usable)."""
+    usuario = crear_usuario("ana", rol="encargado")
+    primera = ingesta_service.lanzar_manual(db, ["weatherlink"], usuario_id=usuario.id)
+    monkeypatch.setattr(repo_ingestas, "en_curso", lambda _db, _fuentes: [])  # carrera simulada
+    with pytest.raises(Conflicto):
+        ingesta_service.lanzar_manual(db, ["weatherlink", "ndvi"], usuario_id=usuario.id)
+    # La programada se omite si la fuente está ocupada (también en carrera).
+    assert repo_ingestas.reclamar_programada(db, "weatherlink", HOY, primera[0].inicio_at) is None
+    monkeypatch.undo()
+    en_curso = db.scalars(select(IngestaCorrida).where(IngestaCorrida.estado == EstadoIngesta.en_curso)).all()
+    assert [c.id for c in en_curso] == [primera[0].id]  # tampoco quedó la de ndvi
+    assert repo_ingestas.reclamar_programada(db, "weatherlink", HOY, primera[0].inicio_at) is None
+    assert repo_ingestas.reclamar_programada(db, "ndvi", HOY, primera[0].inicio_at) is not None
+
+
+def test_latido_actualiza_la_corrida_mientras_corre(db):
+    import time
+
+    corrida = ingesta_service.crear_corridas(db, ["weatherlink"], disparo=DisparoIngesta.script)[0]
+    corrida.latido_at = None
+    db.commit()
+    with ingesta_service.Latido(corrida.id, cada=0.05, sesion=_sesion(db)) as latido:
+        time.sleep(0.4)
+    latido._hilo.join(2)
     db.refresh(corrida)
-    assert corrida.estado == EstadoIngesta.error and corrida.errores[0]["tipo"] == "interrumpida"
+    assert latido.latidos >= 1 and corrida.latido_at is not None
+
+
+def test_vigilante_repite_la_programada_interrumpida_de_hoy(db, reloj, monkeypatch):
+    """El proceso murió a mitad de la ingesta programada y volvió enseguida: en cuanto vence el
+    latido, el vigilante cierra la corrida y la vuelve a ejecutar; un error de la API no se repite."""
+    from app.jobs import tareas
+
+    ejecutadas: list[list[int]] = []
+    monkeypatch.setattr(tareas, "unidad_de_trabajo", _sesion(db))
+    monkeypatch.setattr(ingesta_service, "ejecutar_en_sesiones", lambda ids: ejecutadas.append(list(ids)) or [])
+    ids = tareas.ingesta_diaria()
+    corridas = {c.fuente: c for c in db.scalars(select(IngestaCorrida).where(IngestaCorrida.id.in_(ids)))}
+    for corrida in corridas.values():
+        corrida.estado = EstadoIngesta.ok
+    corridas["phytech_suelo"].estado = EstadoIngesta.error
+    corridas["phytech_suelo"].errores = [{"tipo": "red"}]
+    corridas["weatherlink"].estado = EstadoIngesta.en_curso
+    corridas["weatherlink"].latido_at = dt.datetime(2026, 11, 8, 14, 45, tzinfo=dt.UTC)  # hace 15 min
+    db.flush()
+
+    assert tareas.vigilar_ingestas(ya_es_hora=False) == []  # antes de la hora solo cierra
+    db.refresh(corridas["weatherlink"])
+    assert corridas["weatherlink"].errores[0]["tipo"] == "interrumpida"
+    assert tareas.vigilar_ingestas() == [corridas["weatherlink"].id]
+    assert ejecutadas[-1] == [corridas["weatherlink"].id]
+    db.refresh(corridas["weatherlink"])
+    assert corridas["weatherlink"].estado == EstadoIngesta.en_curso
+    assert tareas.vigilar_ingestas() == []  # en curso con latido fresco; suelo (error de red) no
+
+
+def test_si_no_se_puede_guardar_la_corrida_queda_en_error_y_no_en_curso(db, reloj):
+    corrida = ingesta_service.crear_corridas(db, ["pronostico"], disparo=DisparoIngesta.script)[0]
+    db.commit()
+    usos = {"n": 0}
+
+    @contextmanager
+    def sesion_que_falla_al_confirmar():
+        usos["n"] += 1
+        with unidad_de_trabajo(db) as sesion:
+            yield sesion
+            if usos["n"] == 2:  # la transacción de la ingesta
+                raise RuntimeError("se cayó la conexión")
+
+    apis = ApisFalsas()
+    clientes = Clientes(weatherlink=apis.weatherlink, phytech=apis.phytech)
+    assert ingesta_service.ejecutar_en_sesiones([corrida.id], clientes, sesion=sesion_que_falla_al_confirmar) == []
+    clientes.cerrar()
+    db.refresh(corrida)
+    assert corrida.estado == EstadoIngesta.error and corrida.errores[0]["tipo"] == "interno"
+    assert "No se pudo guardar" in corrida.errores[0]["mensaje"]
 
 
 def test_corrida_programada_una_sola_vez_por_fuente_y_dia(db, reloj):
@@ -334,6 +423,16 @@ def test_tarea_diaria_reclama_y_ejecuta_sin_duplicar(db, reloj, monkeypatch):
     programadas = db.scalars(select(IngestaCorrida).where(IngestaCorrida.fecha_programada == HOY)).all()
     assert {c.disparo for c in programadas} == {DisparoIngesta.programado}
     assert tareas.ingesta_diaria() == [] and len(ejecutadas) == 1  # segundo proceso (o reinicio)
+
+
+def test_programador_vigila_las_ingestas_cada_5_minutos():
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    from app.core.tiempo import zona_lima
+    from app.jobs.runner import configurar
+
+    trabajos = {t.id: t for t in configurar(BackgroundScheduler(timezone=zona_lima())).get_jobs()}
+    assert trabajos["vigilar_ingestas"].trigger.interval == dt.timedelta(minutes=5)
 
 
 def test_programador_lanza_la_ingesta_a_la_hora_y_al_arrancar_tarde():

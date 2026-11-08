@@ -27,12 +27,15 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import threading
 import time
 from collections.abc import Callable, Iterable, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -69,7 +72,8 @@ VENTANA_HUECOS_DIAS = 14
 MIN_LECTURAS_DIA = 36  # como meteo_diaria: con menos, el día queda sin clima
 MAX_DIAS_AUTOMATICO = 62
 MAX_DIAS_MANUAL = 62  # "Actualizar ahora" con rango (la CLI no tiene tope)
-HORAS_CORRIDA_COLGADA = 3
+LATIDO_SEGUNDOS = 60  # cada cuánto el proceso que ejecuta una corrida actualiza latido_at
+MINUTOS_SIN_LATIDO = 10  # sin latido en ese tiempo, la corrida en curso no tiene dueño
 CODIGO_MODULO_DATOS = "EN01-MOD5"  # los sensores (IDs del .env) se asocian a su fundo (§2.2)
 
 
@@ -401,17 +405,29 @@ def crear_corridas(
     desde: dt.date | None = None, hasta: dt.date | None = None,
 ) -> list[IngestaCorrida]:
     """Corridas ``en_curso`` (manuales o de script). Sin ``desde``/``hasta`` cada fuente usa su
-    rango automático, que se fija al ejecutar."""
+    rango automático, que se fija al ejecutar. ``Conflicto`` si alguna fuente ya tiene una corrida
+    en curso, también si la creó otra sesión a la vez (índice único parcial
+    ``uq_ingesta_corrida_en_curso``; la sesión sigue usable)."""
+    pedidas = validar_fuentes(fuentes)
+    ocupadas = sorted({c.fuente for c in repo.en_curso(db, pedidas)})
+    if ocupadas:
+        raise Conflicto(f"Ya hay una ingesta en curso de: {', '.join(ocupadas)}")
     corridas = []
-    for fuente in validar_fuentes(fuentes):
-        corrida = repo_datos.nueva_corrida(
-            db, fuente=fuente, disparo=disparo, usuario_id=usuario_id, inicio_at=ahora_utc(),
-            estado=EstadoIngesta.en_curso,
-            # El pronóstico no tiene rango: siempre es la captura de hoy.
-            desde=None if fuente == PRONOSTICO else desde,
-            hasta=None if fuente == PRONOSTICO else hasta,
-        )
-        corridas.append(corrida)
+    try:
+        with db.begin_nested():
+            for fuente in pedidas:
+                ahora = ahora_utc()
+                corrida = repo_datos.nueva_corrida(
+                    db, fuente=fuente, disparo=disparo, usuario_id=usuario_id, inicio_at=ahora,
+                    latido_at=ahora, estado=EstadoIngesta.en_curso,
+                    # El pronóstico no tiene rango: siempre es la captura de hoy.
+                    desde=None if fuente == PRONOSTICO else desde,
+                    hasta=None if fuente == PRONOSTICO else hasta,
+                )
+                corridas.append(corrida)
+    except IntegrityError:
+        en_carrera = sorted({c.fuente for c in repo.en_curso(db, pedidas)}) or list(pedidas)
+        raise Conflicto(f"Ya hay una ingesta en curso de: {', '.join(en_carrera)}") from None
     return corridas
 
 
@@ -444,19 +460,19 @@ def lanzar_manual(
     except ValueError as error:
         raise DatosInvalidos(str(error)) from None
     cerrar_colgadas(db)
-    ocupadas = sorted({c.fuente for c in repo.en_curso(db, pedidas)})
-    if ocupadas:
-        raise Conflicto(f"Ya hay una ingesta en curso de: {', '.join(ocupadas)}")
     return crear_corridas(db, pedidas, disparo=DisparoIngesta.manual, usuario_id=usuario_id,
                           desde=desde, hasta=hasta)
 
 
-def reclamar_programadas(db: Session, fecha: dt.date, fuentes: Sequence[str] = FUENTES) -> list[int]:
+def reclamar_programadas(
+    db: Session, fecha: dt.date, fuentes: Sequence[str] = FUENTES, *, solo_interrumpidas: bool = False
+) -> list[int]:
     """Ids de las corridas programadas de ``fecha`` que este proceso reclamó (las que otro proceso
-    ya creó se omiten)."""
+    ya creó y las fuentes con otra corrida en curso se omiten)."""
     ids = []
     for fuente in fuentes:
-        corrida_id = repo.reclamar_programada(db, fuente, fecha, ahora_utc())
+        corrida_id = repo.reclamar_programada(db, fuente, fecha, ahora_utc(),
+                                              solo_interrumpida=solo_interrumpidas)
         if corrida_id is not None:
             ids.append(corrida_id)
     return ids
@@ -497,12 +513,78 @@ def ejecutar_corrida(db: Session, corrida: IngestaCorrida, clientes: Clientes) -
     return corrida
 
 
+class Latido:
+    """Hilo que actualiza ``latido_at`` de una corrida cada ``cada`` segundos, en transacciones
+    cortas propias (la de la ingesta no se confirma hasta el final y no toca la fila de la corrida
+    hasta cerrarla). Si el proceso muere, el latido se detiene y :func:`cerrar_colgadas` la cierra
+    en :data:`MINUTOS_SIN_LATIDO` minutos."""
+
+    def __init__(self, corrida_id: int, *, cada: float = LATIDO_SEGUNDOS,
+                 sesion: Callable[[], Any] = unidad_de_trabajo) -> None:
+        self.corrida_id = corrida_id
+        self.cada = cada
+        self._sesion = sesion
+        self._parar = threading.Event()
+        self._hilo = threading.Thread(target=self._latir, name=f"latido-ingesta-{corrida_id}", daemon=True)
+        self.latidos = 0
+
+    def _latir(self) -> None:
+        while not self._parar.wait(self.cada):
+            try:
+                with self._sesion() as db:
+                    if repo.marcar_latido(db, self.corrida_id, ahora_utc()):
+                        self.latidos += 1
+            except Exception:  # noqa: BLE001 - un latido perdido no detiene la ingesta
+                logger.warning("Ingesta: no se pudo registrar el latido de la corrida %s", self.corrida_id)
+
+    def __enter__(self) -> Latido:
+        self._hilo.start()
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        self._parar.set()  # sin join: un latido en espera de candado no demora la ingesta
+
+
+@contextmanager
+def _sin_latido(_corrida_id: int):
+    yield None
+
+
+def preparar_corrida(db: Session, corrida: IngestaCorrida) -> None:
+    """Fija el rango automático y el latido antes de ejecutar, en una transacción corta: así la
+    transacción de la ingesta no modifica la fila de la corrida hasta cerrarla y el latido (otra
+    conexión) no espera su candado. Si falla, :func:`ejecutar_corrida` lo repite y registra el error."""
+    corrida.latido_at = ahora_utc()
+    if corrida.desde is None or corrida.hasta is None:
+        try:
+            corrida.desde, corrida.hasta = rango_automatico(db, corrida.fuente, fundo_de_datos(db), hoy_lima())
+        except Exception:  # noqa: BLE001
+            logger.exception("Ingesta %s: no se pudo calcular el rango", corrida.fuente)
+    db.flush()
+
+
+def _marcar_no_guardada(corrida_id: int, sesion: Callable[[], Any], error: Exception) -> None:
+    """La ingesta no se pudo confirmar (p. ej. la BD cayó): se intenta cerrar la corrida como error
+    en otra transacción, para no dejarla en curso hasta que venza su latido."""
+    try:
+        with sesion() as db:
+            corrida = db.get(IngestaCorrida, corrida_id)
+            if corrida is not None and corrida.estado == EstadoIngesta.en_curso:
+                corrida.estado = EstadoIngesta.error
+                corrida.fin_at = ahora_utc()
+                corrida.errores = [{"tipo": TipoError.INTERNO, "status_code": None, "endpoint": None,
+                                    "mensaje": redactar(f"No se pudo guardar: {type(error).__name__}")[:300]}]
+    except Exception:  # noqa: BLE001 - quedará en curso hasta que venza el latido
+        logger.exception("Ingesta: tampoco se pudo cerrar la corrida %s", corrida_id)
+
+
 def ejecutar_en_sesiones(
     corrida_ids: Sequence[int], clientes: Clientes | None = None,
-    sesion: Callable[[], Any] = unidad_de_trabajo,
+    sesion: Callable[[], Any] = unidad_de_trabajo, *, latido: float | None = LATIDO_SEGUNDOS,
 ) -> list[IngestaCorrida]:
-    """Ejecuta cada corrida en su propia transacción (commit por fuente): lo que usan la tarea
-    programada, "Actualizar ahora" (en segundo plano) y la CLI."""
+    """Ejecuta cada corrida en su propia transacción (commit por fuente), con un :class:`Latido`
+    mientras corre (``latido=None`` lo desactiva): lo que usan la tarea programada, "Actualizar
+    ahora" (en segundo plano) y la CLI."""
     propios = clientes is None
     clientes = clientes or Clientes()
     corridas = []
@@ -513,9 +595,18 @@ def ejecutar_en_sesiones(
                     corrida = db.get(IngestaCorrida, corrida_id)
                     if corrida is None or corrida.estado != EstadoIngesta.en_curso:
                         continue
-                    corridas.append(ejecutar_corrida(db, corrida, clientes))
-            except Exception:  # noqa: BLE001 - p. ej. la BD cayó al confirmar: siguiente fuente
+                    preparar_corrida(db, corrida)
+                vigilancia = (Latido(corrida_id, cada=latido, sesion=sesion) if latido
+                              else _sin_latido(corrida_id))
+                with vigilancia, sesion() as db:
+                    corrida = db.get(IngestaCorrida, corrida_id)
+                    if corrida is None or corrida.estado != EstadoIngesta.en_curso:
+                        continue  # otro proceso la cerró por falta de latido
+                    terminada = ejecutar_corrida(db, corrida, clientes)
+                corridas.append(terminada)  # solo si se confirmó
+            except Exception as error:  # noqa: BLE001 - p. ej. la BD cayó al confirmar: siguiente fuente
                 logger.exception("Ingesta: no se pudo guardar la corrida %s", corrida_id)
+                _marcar_no_guardada(corrida_id, sesion, error)
     finally:
         if propios:
             clientes.cerrar()
@@ -527,9 +618,11 @@ def ejecutar_en_segundo_plano(corrida_ids: Sequence[int]) -> None:
     ejecutar_en_sesiones(list(corrida_ids))
 
 
-def cerrar_colgadas(db: Session) -> int:
+def cerrar_colgadas(db: Session) -> list[tuple[int, str, dt.date | None]]:
+    """Cierra como interrumpidas las corridas en curso sin latido en :data:`MINUTOS_SIN_LATIDO`
+    minutos. Devuelve ``(id, fuente, fecha_programada)`` de cada una."""
     ahora = ahora_utc()
-    return repo.cerrar_colgadas(db, ahora - dt.timedelta(hours=HORAS_CORRIDA_COLGADA), ahora)
+    return repo.cerrar_colgadas(db, ahora - dt.timedelta(minutes=MINUTOS_SIN_LATIDO), ahora)
 
 
 # --- Reproceso de WeatherLink ---------------------------------------------------

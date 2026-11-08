@@ -63,6 +63,9 @@ class IngestaCorrida(IdMixin, CreadoMixin, Base):
         # Exclusión entre procesos de las corridas programadas (las manuales tienen fecha NULL).
         UniqueConstraint("fuente", "fecha_programada"),
         Index("ix_ingesta_corrida_fuente_inicio_at", "fuente", "inicio_at"),
+        # Una sola corrida en curso por fuente (manual, programada o de script): migración 0004.
+        Index("uq_ingesta_corrida_en_curso", "fuente", unique=True,
+              postgresql_where=text("estado = 'en_curso'")),
     )
 
     fuente: Mapped[str] = mapped_column(String(40))
@@ -74,6 +77,8 @@ class IngestaCorrida(IdMixin, CreadoMixin, Base):
     inicio_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     fin_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     duracion_ms: Mapped[int | None] = mapped_column(Integer)
+    # Lo actualiza cada minuto el proceso que la ejecuta (sin latido reciente = sin dueño).
+    latido_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     estado: Mapped[EstadoIngesta] = mapped_column(
         ESTADO_INGESTA, server_default=EstadoIngesta.en_curso.value, default=EstadoIngesta.en_curso
     )
