@@ -4,7 +4,7 @@ Grupo El Rocío (AvoPeru y Talsa) · fundo ENSUEÑO 1 · módulo EN01-MOD5
 
 Esta guía explica cómo usar el sistema según tu rol. Cada función lleva una marca:
 
-- **[Disponible]**: ya se puede usar (fase 1).
+- **[Disponible]**: ya se puede usar (fases 1 y 2).
 - **[Fase N]**: llega en una próxima fase. En el menú ya aparece, con el aviso «Disponible en la
   fase N», y esta guía la describe como está prevista en la propuesta.
 
@@ -35,10 +35,10 @@ Pantallas del menú por rol:
 
 | Pantalla | Administrador | Encargado | Programador | Subgerente | Disponible |
 |---|---|---|---|---|---|
-| Dashboard | ✔ | ✔ | ✔ (solo lo publicado) | ✔ | **[Disponible]** con tarjetas vacías; contenido en las fases 2 a 5 |
+| Dashboard | ✔ | ✔ | ✔ (solo lo publicado) | ✔ | **[Disponible]** con la frescura de datos; indicadores, cronogramas y pronóstico en las fases 3 a 5 |
 | Generar | ✔ | ✔ | — | — | [Fase 3] |
 | Cronogramas | ✔ | ✔ edita | ✔ solo publicados, confirma Visto | ✔ lectura, solicita corrección | [Fase 3] lectura · [Fase 4] flujo |
-| Riego aplicado | ✔ | ✔ edita y sube Excel | ✔ lectura | ✔ edita | [Fase 2] |
+| Riego aplicado | ✔ | ✔ sube Excel (edita en la fase 4) | ✔ lectura | ✔ lectura e historial (edita en la fase 4) | **[Disponible]** consulta y carga de Excel · [Fase 4] edición |
 | Datos de campo | ✔ | ✔ | ✔ | ✔ | [Fase 5] |
 | Auditoría | ✔ | — | — | ✔ | **[Disponible]** |
 | Usuarios | ✔ | — | — | — | **[Disponible]** |
@@ -113,16 +113,17 @@ por seguridad y tendrás que volver a ingresar.
 En la cabecera está el selector **Fundo › Módulo**. El sistema recuerda lo que elijas en tu
 navegador y lo pone en la dirección de la página, así que puedes compartir el enlace. Al lado se
 ve la fecha de hoy en Lima (en celular, dentro de **Menú**). Por ahora hay un solo fundo
-(ENSUEÑO 1) y un solo módulo (EN01-MOD5). Desde la fase 2, cada pantalla muestra los datos del
-módulo elegido.
+(ENSUEÑO 1) y un solo módulo (EN01-MOD5). **Riego aplicado**, la carga de Excel y la **Frescura de
+datos** del Dashboard muestran los datos del módulo elegido.
 
 ---
 
 ## El flujo diario completo
 
 Así funcionará el día a día cuando estén todas las fases. Cada paso indica quién lo hace y en qué
-fase llega. **En la fase 1 todavía no hay cronogramas ni datos de riego**: solo están disponibles
-el acceso, las contraseñas, los usuarios y la auditoría.
+fase llega. **Hoy (fase 2) ya funcionan** la llegada de los datos de campo con su panel de
+frescura (paso 1), la carga del riego aplicado desde Excel (paso 2) y la consulta del riego por
+turno y día (paso 8, en lectura). Los cronogramas llegan en las fases 3 y 4.
 
 ```text
 05:00 ingesta ─► Generar ─► Revisar y corregir ─► Publicar ─► Visto del programador ─► Riego aplicado
@@ -151,29 +152,63 @@ Además, un cronograma puede llevar estas marcas de calidad:
 - **Desactualizado**: llegaron datos nuevos después de generarlo; aparece con el botón
   **Regenerar**.
 
-### Paso 1 · Llegan los datos de campo (automático) [Fase 2]
+### Paso 1 · Llegan los datos de campo (automático) **[Disponible]**
 
-- **Quién**: el sistema.
-- Cada día a las 05:00 descarga el clima de WeatherLink y los sensores de suelo y planta de Phytech
-  hasta el día anterior.
-- El panel de **frescura** muestra, por fuente, hasta qué fecha hay datos completos: verde si
-  llegan hasta ayer, naranja si falta algo.
-- El administrador y el encargado pueden tocar **Actualizar ahora** para repetir la descarga.
+- **Quién**: el sistema. Cada día a las 05:00 descarga el clima de WeatherLink, los sensores de
+  suelo y planta de Phytech, las imágenes NDVI y el pronóstico, hasta el día anterior. Los datos de
+  WeatherLink se guardan en las mismas unidades con las que se entrenó el modelo (°C, mm y km).
+- En el **Dashboard**, la tarjeta **Frescura de datos** muestra, por fuente (Riego aplicado, Riego
+  provisional, WeatherLink (clima), Phytech suelo, Phytech planta, NDVI y Pronóstico Phytech):
+  - «Hasta <día>»: la última fecha con datos completos;
+  - **Al día** (verde) si llega hasta ayer, o **Atrasado** (naranja) con «faltan N días»;
+  - «Huecos: …» si en los últimos 7 días falta algún día intermedio;
+  - en el riego, una línea solo para los turnos que están distintos al resto, por ejemplo
+    «TE05: falta mar 03/11» o «TE03: hasta mié 04/11»;
+  - NDVI y Pronóstico Phytech son **Informativo**: no ponen el panel en naranja (las imágenes
+    satelitales llegan cada pocos días).
+  Arriba se resume todo: «Todo al día» o, por ejemplo, «2 fuentes atrasadas · 1 con huecos».
+- **Actualizar ahora** (administrador y encargado): repite la descarga en segundo plano. El botón
+  pasa a «Actualizando…» y una barra muestra «Actualizando: N de M fuentes terminadas». Al terminar
+  verás «Datos actualizados», «Actualización parcial» o «La actualización falló», y la frescura se
+  vuelve a calcular. Si ya hay una descarga en curso (la de las 05:00 u otra persona), el botón
+  espera a que termine.
+- **Últimas corridas** (administrador, encargado y subgerente): cada descarga por fuente, con su
+  estado (**En curso**, **Correcta**, **Parcial** o **Error**), la hora, quién la lanzó
+  (Programada, Manual · usuario o Script), cuánto duró, el rango de días, las filas nuevas y
+  actualizadas y, si falló, el motivo. Una descarga que quedó **Sin terminar** (el servidor se
+  reinició a mitad) no bloquea nada: se cierra sola al usar **Actualizar ahora**.
 
-### Paso 2 · Cargar el riego aplicado desde Excel [Fase 2]
+### Paso 2 · Cargar el riego aplicado desde Excel **[Disponible]**
 
 - **Quién**: encargado o administrador.
-- **Riego aplicado → Subir Excel**: se sube el archivo del módulo (hoja `MOD5`) y el sistema
-  muestra una **vista previa** por turno y día:
-  - nuevo;
-  - igual (no cambia nada);
-  - reemplaza un provisional o un aplicado;
-  - sin riego;
-  - con error.
-- Puedes desmarcar lo que no quieras aplicar y luego **Confirmar**. Subir otra vez el archivo
-  acumulado completo no duplica nada.
-- Si en una fecha del archivo falta un turno, la vista previa lo muestra como «no se regó», y
-  puedes desmarcarlo.
+1. En **Riego aplicado** toca **Cargar Excel**.
+2. «Arrastra el archivo aquí o toca para elegirlo»: el Excel del controlador (`.xlsx` de hasta
+   15 MB, con la hoja `MOD5`). Puede ser el archivo acumulado completo. Toca **Subir y revisar**.
+   Si el archivo no sirve (no es `.xlsx`, falta la hoja o una columna, trae fechas de hoy o
+   futuras…) verás «No se pudo procesar el archivo» con el motivo.
+3. **Vista previa de la carga**: nada se guarda todavía. Arriba, una tarjeta por resultado con
+   cuántos turno-días hay:
+   - **Nuevo**: turno-día sin registro; se crea como aplicado.
+   - **Igual**: igual a lo que ya está; no crea versión.
+   - **Reemplaza provisional**: cambia el riego provisional por el aplicado del Excel.
+   - **Reemplaza aplicado**: cambia un riego ya aplicado (si el actual se cargó a mano, viene
+     desmarcado).
+   - **Sin riego**: el archivo trae la fecha pero ninguna fila de ese turno; se registra «no se
+     regó». Viene marcado y puedes desmarcarlo.
+   - **Error**: no se puede cargar (fecha de hoy o futura, turno o válvula desconocidos, inicio
+     repetido).
+   Cada tarjeta tiene la casilla **Aplicar todos** y tocar la tarjeta filtra el detalle. Abajo,
+   **Detalle por turno-día** («Con cambios» o «Todos») con fecha, turno, resultado, ciclos, el
+   registro que se reemplaza y su casilla.
+4. La barra de abajo dice «Se aplicarán N turno-días». Toca **Confirmar** y, en «¿Confirmar la
+   carga?», **Confirmar carga**. Verás «Carga confirmada: N turno-días aplicados» y **Ver riego
+   aplicado**. Lo reemplazado no se borra: queda como versión anterior.
+5. Si no quieres guardar nada, **Descartar** → «¿Descartar la carga?» → **Descartar**.
+
+- Subir otra vez el archivo acumulado completo no duplica nada: lo ya cargado sale como «Igual».
+- **La carga venció**: la vista previa dura 24 horas y vence también si alguien cambia uno de los
+  registros comparados. Toca **Subir otra vez** para revisarla con los datos actuales.
+- La subida, la confirmación y el descarte quedan en la **Auditoría**.
 
 ### Paso 3 · Generar el cronograma [Fase 3]
 
@@ -229,17 +264,23 @@ Además, un cronograma puede llevar estas marcas de calidad:
   - corrige y **Publicar cambios**, y el programador tendrá que volver a confirmar el Visto;
   - **Mantener versión publicada**, con un comentario obligatorio; el subgerente recibe el aviso.
 
-### Paso 8 · Registrar lo que se regó [Fase 2 lectura · Fase 4 edición]
+### Paso 8 · Registrar lo que se regó **[Disponible]** consulta · [Fase 4] edición
 
-- **Quién**: encargado o subgerente (o administrador).
-- En **Riego aplicado** se ve, por día y turno, el riego provisional (el que salió del Visto) y
-  el aplicado (el real).
-- Puedes editar el provisional y marcarlo como **aplicado**; solo se hace con días ya
-  terminados.
-- Si un turno no regó, registra **No se regó** con su motivo.
-- Cada cambio guarda una versión nueva, y el historial conserva el original. El Excel del paso 2
-  también deja el riego como aplicado.
-- Lo aplicado alimenta al modelo para los días siguientes.
+- **Quién**: consultan todos; editan el encargado y el subgerente (o el administrador) desde la
+  fase 4.
+- **[Disponible]** En **Riego aplicado** se ve una tabla por día (el más reciente arriba) y turno
+  del módulo elegido. Cada turno-día muestra su estado con ícono y texto: **Aplicado**,
+  **Provisional**, **Sin riego** o **Sin registro**, los m³/ha y el horario de cada ciclo (la luna
+  indica que termina al día siguiente). Filtra con **Desde** y **Hasta** o con **7 días**,
+  **14 días** y **30 días** (máximo 92 días). En el celular cada día se ve como una tarjeta.
+- **[Disponible]** Toca un turno-día para abrir el detalle con la tabla de ciclos (horario,
+  duración, m³/ha y m³). El administrador, el encargado y el subgerente ven además el **historial
+  de versiones**: la 1 es la **Original** y la actual está marcada **Vigente**, con su origen
+  (Histórico, Cronograma, Excel, Manual o Controlador), fecha, usuario y motivo.
+- [Fase 4] Editar el provisional y marcarlo como **aplicado** (solo días ya terminados), y
+  registrar **No se regó** con su motivo. Cada cambio guardará una versión nueva.
+- Lo aplicado (también lo que llega por el Excel del paso 2) alimenta al modelo para los días
+  siguientes.
 
 ### Paso 9 · Seguimiento [Fase 5]
 
@@ -266,7 +307,8 @@ Además, un cronograma puede llevar estas marcas de calidad:
 | Ingresar, recuperar y cambiar su contraseña | **[Disponible]** |
 | Crear, editar, activar y desactivar usuarios; asignar contraseñas temporales ([ver Usuarios](#usuarios-solo-administrador)) | **[Disponible]** |
 | Revisar la auditoría ([ver Auditoría](#auditoría-administrador-y-subgerente)) | **[Disponible]** |
-| Todo lo del encargado (generar, corregir, publicar, subir Excel, Actualizar ahora) | [Fases 2–4] |
+| Subir el Excel de riego, usar **Actualizar ahora**, ver las últimas corridas y el historial de versiones (pasos 1, 2 y 8) | **[Disponible]** |
+| Todo lo demás del encargado (generar, corregir, publicar) | [Fases 3–4] |
 | Confirmar Visto o solicitar corrección en lugar del programador o del subgerente | [Fase 4] |
 | Exportar el CSV de refinamiento del modelo | [Fase 5] |
 
@@ -277,8 +319,8 @@ El primer administrador lo crea el equipo técnico al instalar el sistema (coman
 | Qué | Disponible |
 |---|---|
 | Ingresar, recuperar y cambiar su contraseña | **[Disponible]** |
-| Ver el Dashboard (por ahora, con tarjetas vacías) | **[Disponible]** |
-| Ver el riego aplicado, subir el Excel, revisar la frescura y usar **Actualizar ahora** (pasos 1 y 2) | [Fase 2] |
+| Ver el Dashboard con la **Frescura de datos** y las últimas corridas | **[Disponible]** |
+| Ver el riego aplicado y su historial, subir el Excel y usar **Actualizar ahora** (pasos 1, 2 y 8) | **[Disponible]** |
 | Generar y regenerar cronogramas; ver el detalle (paso 3) | [Fase 3] |
 | Corregir con motivo, publicar, publicar cambios, descartar el borrador de cambios y mantener la versión ante una solicitud de corrección (pasos 4, 5 y 7) | [Fase 4] |
 | Editar el riego provisional, marcarlo aplicado y registrar «no se regó» (paso 8) | [Fase 4] |
@@ -289,8 +331,8 @@ El primer administrador lo crea el equipo técnico al instalar el sistema (coman
 | Qué | Disponible |
 |---|---|
 | Ingresar, recuperar y cambiar su contraseña | **[Disponible]** |
-| Ver el Dashboard (por ahora, con tarjetas vacías) | **[Disponible]** |
-| Consultar el riego aplicado | [Fase 2] |
+| Ver el Dashboard con la **Frescura de datos** (sin «Actualizar ahora» ni corridas) | **[Disponible]** |
+| Consultar el riego aplicado por turno y día, con sus ciclos (paso 8) | **[Disponible]** |
 | Ver los cronogramas publicados (nunca borradores ni la propuesta del modelo) | [Fase 3–4] |
 | Recibir el correo de publicación, confirmar **Visto** y ver qué cambió desde su último Visto (paso 6) | [Fase 4] |
 | Dashboard, Datos de campo y exportar la versión publicada (paso 9) | [Fase 5] |
@@ -301,8 +343,8 @@ El primer administrador lo crea el equipo técnico al instalar el sistema (coman
 |---|---|
 | Ingresar, recuperar y cambiar su contraseña | **[Disponible]** |
 | Revisar la auditoría ([ver Auditoría](#auditoría-administrador-y-subgerente)) | **[Disponible]** |
-| Ver el Dashboard (por ahora, con tarjetas vacías) | **[Disponible]** |
-| Consultar el riego aplicado y la frescura | [Fase 2] |
+| Ver el Dashboard con la **Frescura de datos** y las últimas corridas (sin «Actualizar ahora») | **[Disponible]** |
+| Consultar el riego aplicado y el historial de versiones de cada turno-día (paso 8) | **[Disponible]** |
 | Ver los cronogramas (incluidos los borradores) en modo lectura | [Fase 3] |
 | Recibir los correos de publicación y de Visto; **Solicitar corrección** con motivo (paso 7) | [Fase 4] |
 | Editar el riego provisional, marcarlo aplicado y registrar «no se regó» (paso 8) | [Fase 4] |
@@ -376,8 +418,14 @@ Nunca se guardan contraseñas ni enlaces de recuperación. Si alguien escribe en
 nombre que no existe, el intento se registra sin ese texto, porque podría ser una contraseña
 escrita por error.
 
-Desde las fases 2 a 5 también se registrarán las acciones sobre cronogramas, riego, cargas de Excel,
-ingestas manuales y exportaciones.
+Desde la fase 2 se registran también:
+- **Cargas de Excel de riego**: «Excel de riego subido», «Excel de riego confirmado» y «Excel de
+  riego descartado», con el archivo, los contadores y el rango de fechas.
+- **Datos de campo**: «Lecturas del Excel histórico reemplazadas por WeatherLink» cuando el equipo
+  técnico fuerza ese reemplazo.
+
+En las fases 3 a 5 se sumarán las acciones sobre cronogramas, la edición del riego y las
+exportaciones.
 
 ---
 
@@ -386,7 +434,7 @@ ingestas manuales y exportaciones.
 | Fase | Qué se agrega | Quién lo usa |
 |---|---|---|
 | **1 · Base** (disponible) | Ingresar, primer ingreso, recuperar y cambiar contraseña, selector de fundo y módulo, **Usuarios** y **Auditoría**. | Todos; Usuarios solo el administrador; Auditoría el administrador y el subgerente |
-| 2 · Datos | **Riego aplicado**: consulta por turno y día y carga del Excel con vista previa. Ingesta diaria de WeatherLink y Phytech y panel de frescura con «Actualizar ahora». | El encargado sube el Excel; todos consultan |
+| **2 · Datos** (disponible) | **Riego aplicado**: consulta por turno y día, historial de versiones y carga del Excel con vista previa. Ingesta diaria de WeatherLink y Phytech y panel de **Frescura de datos** con «Actualizar ahora» y últimas corridas. | El encargado y el administrador suben el Excel y actualizan; todos consultan |
 | 3 · Predicción | **Generar** cronogramas de uno o más días; listado y detalle de **Cronogramas** en lectura; regenerar. | El encargado y el administrador generan; todos según su visibilidad |
 | 4 · Flujo | Corrección con motivo, publicación, borrador de cambios, «Visto» del programador, solicitud de corrección, mantener versión, riego provisional y aplicado, línea de tiempo y correos de aviso. | Todos según su rol |
 | 5 · Gráficos | **Dashboard** con indicadores, **Datos de campo** (clima, suelo y planta) y exportación a PDF y Excel. | Todos (el programador, sin la propuesta del modelo) |

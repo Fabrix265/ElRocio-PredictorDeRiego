@@ -14,14 +14,14 @@ campo. El subgerente revisa y puede pedir correcciones, y el administrador gesti
 | Fase | Contenido | Estado |
 |---|---|---|
 | F1 Base | Esquema completo de la BD (RLS, rol `riego_app`, semillas), autenticación, recuperación y cambio de contraseña, usuarios, auditoría, cola de correos, CLI de administración. Frontend: tema, login, layout, usuarios y auditoría | **Lista** |
-| F2 Datos | Carga histórica, ingesta diaria WeatherLink/Phytech, `ambiente_diario`, riego aplicado (Excel con vista previa), frescura de datos | Próxima |
+| F2 Datos | Carga histórica idempotente, ingesta diaria WeatherLink/Phytech (05:00 Lima y «Actualizar ahora»), conversión de unidades de WeatherLink, `ambiente_diario` e Historial desde la BD (paridad con `riego_ml`), riego aplicado (consulta, versiones y carga de Excel con vista previa), frescura de datos en el Dashboard, series de datos de campo (API) | **Lista** |
 | F3 Predicción | Carga del modelo con sha256, historial desde la BD, Generar, listado y detalle de cronogramas (lectura), regenerar | Próxima |
 | F4 Flujo | Corrección con motivo, publicación, Visto del programador, solicitud de corrección, riego provisional, línea de tiempo, correos | Próxima |
 | F5 Gráficos | Dashboard con KPIs, Datos de campo, exportación PDF/Excel y CSV de refinamiento | Próxima |
 | F6 PWA y pulido | Instalable (manifest e íconos), responsive fino, accesibilidad, guía de usuario final | Próxima |
 
-En F1 las pantallas de las fases siguientes ya están en el menú, protegidas por rol, con el aviso
-«Disponible en la fase N».
+Las pantallas de las fases siguientes ya están en el menú, protegidas por rol, con el aviso
+«Disponible en la fase N». Qué puede hacer hoy cada rol: [`docs/guia_usuario.md`](docs/guia_usuario.md).
 
 ## Arquitectura
 
@@ -29,7 +29,8 @@ En F1 las pantallas de las fases siguientes ya están en el menú, protegidas po
 Navegador ──► Frontend React (Vite)   ──/api/v1──► API FastAPI (1 worker) ──► PostgreSQL / Supabase
               frontend/ :5173 (dev)                 backend/app :8000          esquema `riego`
               proxy de Vite: /api → :8000            │                          (RLS, rol riego_app)
-                                                     └── riego_ml (ml/src): predicciones (F3)
+                                                     └── riego_ml (ml/src): saneo de datos y
+                                                         ambiente_diario (F2), predicciones (F3)
               Proceso de tareas (python -m app.jobs): cola de correos, mantenimiento diario
               y, desde la fase 2, la ingesta de las 05:00 (Lima)
 ```
@@ -91,8 +92,11 @@ completa como mínimo:
 
 Si la contraseña de `riego_app` tiene caracteres como `@`, `:`, `/` o `#`, escríbelos en
 `DATABASE_URL` con su código URL (`%40`, `%3A`, `%2F`, `%23`). Lo más simple es generar una solo
-con letras y números. El resto de las variables (SMTP, Phytech, WeatherLink, modelo) puede quedar
-con su valor de ejemplo en F1.
+con letras y números. El resto de las variables (SMTP, modelo) puede quedar con su valor de
+ejemplo. Para la ingesta de F2 completa `WEATHERLINK_API_KEY/SECRET` y `PHYTECH_API_KEY/SECRET`
+(los IDs de estación, área, plot y project ya traen los del MOD5); sin ellas la ingesta termina en
+error «configuración» y el resto de la app funciona igual. `INGESTA_HORA` (05:00) fija la tarea
+diaria.
 
 ### 3. Bases de datos
 
@@ -157,6 +161,49 @@ cd backend && .venv/Scripts/python -m pytest -q     # base riego_test (se crea y
 cd frontend && npx vitest run && npm run build
 ```
 
+La suite del backend nunca llama a las APIs reales (deja las claves vacías y usa transportes
+simulados) e incluye la paridad de `ambiente_diario` e Historial contra la ruta por archivos de
+`riego_ml` cuando están los datos de `ml/data/raw`.
+
+### 8. Datos de campo (F2): histórico, ingesta y prueba
+
+> **Cuidado**: si tu `backend/.env` apunta a Supabase (producción), exporta antes la base local en
+> la misma terminal; las variables de entorno tienen prioridad sobre `.env`:
+>
+> ```bash
+> export DATABASE_URL=postgresql+psycopg://postgres@localhost:5432/riego_dev
+> export DATABASE_URL_MIGRACIONES=$DATABASE_URL
+> ```
+
+```bash
+cd backend
+# 1. Carga histórica (idempotente: repetirla no inserta ni cambia nada). Lee de ml/data/raw las
+#    rutas de ml/config/pipeline.yaml: clima, Phytech suelo/planta, NDVI y riego histórico (MOD5).
+.venv/Scripts/python -m app.cli cargar-historico                   # ~3 min, todas las fuentes
+# 2. Ingesta de las APIs (rango automático: última fecha guardada − 3 días hasta ayer, hora de Lima)
+.venv/Scripts/python -m app.cli ingestar
+.venv/Scripts/python -m app.cli ingestar --fuentes weatherlink --desde 2026-11-05 --hasta 2026-11-07
+# 3. Si cambia una regla de conversión de WeatherLink (°F/pulgadas/millas → °C/mm/km, en
+#    app/integraciones/weatherlink/conversion.py), re-deriva sin volver a descargar:
+.venv/Scripts/python -m app.cli reprocesar-weatherlink --desde 2026-11-01 --hasta 2026-11-07
+```
+
+- **Tarea diaria**: `python -m app.jobs` lanza la ingesta a las `INGESTA_HORA` (05:00 Lima); en
+  desarrollo puede correr dentro de la API con `SCHEDULER_ENABLED=true`. Cada corrida queda en
+  `ingesta_corrida` y cada llamada en `ingesta_crudo` (sin claves ni token).
+- **Desde la web**: el Dashboard muestra la **Frescura de datos** por fuente (verde hasta ayer,
+  naranja si falta algo, huecos) y, para administrador y encargado, **Actualizar ahora**, que lanza
+  la misma ingesta en segundo plano y muestra el avance; administrador, encargado y subgerente ven
+  las **Últimas corridas**.
+- **Riego aplicado → Cargar Excel**: sube el Excel del controlador (hoja `MOD5`, p. ej.
+  `ml/data/raw/data_riego.xlsx`), revisa la vista previa (nuevo, igual, reemplaza provisional,
+  reemplaza aplicado, sin riego, error), desmarca lo que no quieras y **Confirmar**. Nada se
+  guarda hasta confirmar; la vista previa vence a las 24 h. Subir otra vez el archivo acumulado
+  solo da «igual».
+- **Probar con claves reales**: exporta la base local como arriba, deja las claves en
+  `backend/.env` y pide rangos chicos (las APIs solo se leen). Detalle, conteos de la prueba real y
+  conversión medida: [backend/README.md](backend/README.md#datos-de-campo-f2).
+
 ## Apuntar a Supabase
 
 El orden es el mismo que en local; solo cambian las URLs de `backend/.env`:
@@ -200,8 +247,9 @@ docs/       Propuesta del MVP, guía de usuario, documentación de APIs y papers
 
 Predice el plan de riego diario de cada turno del módulo 5 de ENSUEÑO 1: el número de ciclos y,
 por ciclo, los m³/ha, la duración y el horario, con rangos de confianza. El pipeline es:
-Phytech crudo → unir (riego + meteo + Phytech) → preparar → entrenar → predecir. En F1 la web
-todavía no lo usa; la integración llega en F3.
+Phytech crudo → unir (riego + meteo + Phytech) → preparar → entrenar → predecir. Desde F2 la web
+usa sus reglas de saneo (`riego_ml.sources`, separadas de la lectura de archivos por la decisión
+D1) y `construir_ambiente_diario` para guardar los datos de campo; la predicción llega en F3.
 
 ```powershell
 python -m venv ml/.venv            # o usa backend/.venv, que ya trae ml/requirements.txt
