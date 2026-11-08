@@ -236,6 +236,20 @@ describe("httpClient: peticiones y errores", () => {
     expect(init.credentials).toBe("same-origin");
   });
 
+  it("envía FormData tal cual, sin Content-Type JSON (el navegador pone el boundary)", async () => {
+    const fetchMock = vi.fn(async () => json(201, { id: 7 }));
+    vi.stubGlobal("fetch", fetchMock);
+    fijarAccessToken("tok");
+    const formulario = new FormData();
+    formulario.append("modulo_id", "3");
+    await expect(api.postFormulario("/riego/cargas", formulario)).resolves.toEqual({ id: 7 });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(formulario);
+    expect(cabeceras(init)["Content-Type"]).toBeUndefined();
+    expect(cabeceras(init).Authorization).toBe("Bearer tok");
+  });
+
   it("devuelve undefined en 204", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
     await expect(api.post("/auth/restablecer", { token: "t", password: "p" })).resolves.toBeUndefined();

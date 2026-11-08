@@ -143,13 +143,20 @@ async function ejecutar(ruta: string, opciones: OpcionesSolicitud, token: string
     Accept: "application/json",
     "X-Requested-With": "fetch",
   };
-  if (opciones.body !== undefined) headers["Content-Type"] = "application/json";
+  // FormData (subida de archivos): el navegador fija Content-Type con el boundary.
+  const esFormulario = typeof FormData !== "undefined" && opciones.body instanceof FormData;
+  if (opciones.body !== undefined && !esFormulario) headers["Content-Type"] = "application/json";
   if (token) headers.Authorization = `Bearer ${token}`;
   try {
     return await fetch(construirUrl(ruta, opciones.query), {
       method: opciones.method ?? "GET",
       headers,
-      body: opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
+      body:
+        opciones.body === undefined
+          ? undefined
+          : esFormulario
+            ? (opciones.body as FormData)
+            : JSON.stringify(opciones.body),
       credentials: ruta.startsWith("/auth/") ? "include" : "same-origin",
       signal: opciones.signal,
     });
@@ -191,6 +198,14 @@ const ETIQUETA_CAMPO: Record<string, string> = {
   hasta: "Hasta",
   page: "Página",
   page_size: "Tamaño de página",
+  modulo_id: "Módulo",
+  turno_id: "Turno",
+  fecha: "Fecha",
+  dias: "Días",
+  archivo: "Archivo",
+  fuentes: "Fuentes",
+  grupos: "Grupos",
+  aplicar: "Aplicar",
 };
 
 function textoValidacion(errores: ErrorValidacion[]): string {
@@ -357,6 +372,9 @@ export const api = {
   post: <T>(ruta: string, body?: unknown, opciones: Omit<OpcionesSolicitud, "method" | "body"> = {}) =>
     solicitar<T>(ruta, { ...opciones, method: "POST", body }),
   patch: <T>(ruta: string, body?: unknown) => solicitar<T>(ruta, { method: "PATCH", body }),
+  /** POST multipart (subida de archivos). */
+  postFormulario: <T>(ruta: string, formulario: FormData, signal?: AbortSignal) =>
+    solicitar<T>(ruta, { method: "POST", body: formulario, signal }),
   delete: <T>(ruta: string) => solicitar<T>(ruta, { method: "DELETE" }),
 };
 

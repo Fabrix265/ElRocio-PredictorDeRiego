@@ -2,7 +2,20 @@ import { describe, expect, it } from "vitest";
 
 import { extraerTokenFragmento } from "../features/auth/fragmento";
 import { analizarDetalle, formatearValor } from "../features/auditoria/etiquetas";
-import { formatearFecha, formatearFechaCorta, formatearFechaHora, hoyLima, limiteDiaLima, saludoLima } from "./fechas";
+import {
+  diasEntre,
+  esDiaValido,
+  formatearDia,
+  formatearDiaCorto,
+  formatearFecha,
+  formatearFechaCorta,
+  formatearFechaHora,
+  hoyLima,
+  limiteDiaLima,
+  listaDias,
+  saludoLima,
+  sumarDias,
+} from "./fechas";
 
 describe("fechas en hora de Lima", () => {
   it("fecha corta de la cabecera en hora de Lima", () => {
@@ -72,5 +85,23 @@ describe("detalle de auditoría", () => {
     expect(formatearValor("usuario_inactivo", "motivo")).toBe("Usuario inactivo");
     expect(formatearValor("motivo_futuro_x", "motivo")).toBe("Motivo futuro x");
     expect(formatearValor("password_incorrecta", "comentario")).toBe("password_incorrecta");
+  });
+});
+
+describe("días de calendario", () => {
+  it("suma, resta y cuenta días sin depender de la zona del navegador", () => {
+    expect(sumarDias("2026-11-01", -1)).toBe("2026-10-31");
+    expect(sumarDias("2026-12-31", 1)).toBe("2027-01-01");
+    expect(diasEntre("2026-11-01", "2026-11-08")).toBe(7);
+    expect(listaDias("2026-11-06", "2026-11-08")).toEqual(["2026-11-06", "2026-11-07", "2026-11-08"]);
+    expect(listaDias("2026-11-08", "2026-11-06")).toEqual([]);
+  });
+
+  it("formatea un día sin correrlo (2026-11-05 no se vuelve 04/11 en Lima)", () => {
+    expect(formatearDia("2026-11-05")).toBe("05/11/2026");
+    expect(formatearDiaCorto("2026-11-05")).toBe("jue 05/11");
+    expect(formatearDia(null)).toBe("—");
+    expect(esDiaValido("2026-02-30")).toBe(false);
+    expect(esDiaValido("2026-02-28")).toBe(true);
   });
 });

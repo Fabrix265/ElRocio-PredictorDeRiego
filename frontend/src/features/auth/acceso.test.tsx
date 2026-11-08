@@ -73,6 +73,11 @@ describe("decidirAcceso", () => {
     ["generar", "programador", false],
     ["cronogramas", "programador", true],
     ["riego", "subgerente", true],
+    ["riego", "programador", true],
+    ["cargaRiego", "admin", true],
+    ["cargaRiego", "encargado", true],
+    ["cargaRiego", "subgerente", false],
+    ["cargaRiego", "programador", false],
     ["datos", "programador", true],
   ];
 

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { CalendarDays, ChartLine, Droplet, Sparkles } from "lucide-react";
+import { CalendarDays, ChartLine, Sparkles } from "lucide-react";
 import { lazy, Suspense } from "react";
 import { BrowserRouter, Outlet, Route, Routes } from "react-router";
 
@@ -22,6 +22,9 @@ import { ApiError } from "./services/httpClient";
 
 const UsuariosPage = lazy(() => import("./features/usuarios/UsuariosPage"));
 const AuditoriaPage = lazy(() => import("./features/auditoria/AuditoriaPage"));
+const RiegoPage = lazy(() => import("./features/riego/RiegoPage"));
+const CargaNuevaPage = lazy(() => import("./features/riego/CargaNuevaPage"));
+const CargaDetallePage = lazy(() => import("./features/riego/CargaDetallePage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -93,13 +96,29 @@ export default function App() {
                     path="riego"
                     element={
                       <RutaProtegida roles={ACCESO.riego}>
-                        <PlaceholderPage
-                          titulo="Riego aplicado"
-                          descripcion="Riego por turno y día, con su historial de versiones."
-                          fase={2}
-                          icono={<Droplet />}
-                          detalle="Consulta del riego aplicado y carga del Excel con vista previa antes de confirmar."
-                        />
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <RiegoPage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route
+                    path="riego/cargas/nueva"
+                    element={
+                      <RutaProtegida roles={ACCESO.cargaRiego}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <CargaNuevaPage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route
+                    path="riego/cargas/:id"
+                    element={
+                      <RutaProtegida roles={ACCESO.cargaRiego}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <CargaDetallePage />
+                        </Suspense>
                       </RutaProtegida>
                     }
                   />

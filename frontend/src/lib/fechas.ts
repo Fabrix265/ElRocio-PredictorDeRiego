@@ -112,3 +112,70 @@ export function saludoLima(ahora: Date = new Date()): string {
 export function limiteDiaLima(fecha: string, limite: "inicio" | "fin"): string {
   return limite === "inicio" ? `${fecha}T00:00:00-05:00` : `${fecha}T23:59:59.999-05:00`;
 }
+
+// ---------------------------------------------------------------------------
+// Días de calendario ("AAAA-MM-DD"): fechas de riego, lecturas y frescura.
+// No son instantes: se operan en UTC para que la zona del navegador nunca corra el día.
+// ---------------------------------------------------------------------------
+
+const RE_DIA = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DIAS_SEMANA = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+
+function diaAUtc(fecha: string): Date | null {
+  const m = RE_DIA.exec(fecha.slice(0, 10));
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function utcADia(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/** true si es un día válido "AAAA-MM-DD". */
+export function esDiaValido(fecha: string | null | undefined): fecha is string {
+  if (!fecha) return false;
+  const d = diaAUtc(fecha);
+  return !!d && utcADia(d) === fecha.slice(0, 10);
+}
+
+/** Suma (o resta) días a un día de calendario. */
+export function sumarDias(fecha: string, dias: number): string {
+  const d = diaAUtc(fecha);
+  if (!d) return fecha;
+  d.setUTCDate(d.getUTCDate() + dias);
+  return utcADia(d);
+}
+
+/** Días de `desde` a `hasta` (positivo si `hasta` es posterior). */
+export function diasEntre(desde: string, hasta: string): number {
+  const a = diaAUtc(desde);
+  const b = diaAUtc(hasta);
+  if (!a || !b) return 0;
+  return Math.round((b.getTime() - a.getTime()) / 86_400_000);
+}
+
+/** Lista de días de `desde` a `hasta`, ambos incluidos (vacía si el rango está invertido). */
+export function listaDias(desde: string, hasta: string): string[] {
+  const n = diasEntre(desde, hasta);
+  if (n < 0 || !esDiaValido(desde)) return [];
+  return Array.from({ length: n + 1 }, (_, i) => sumarDias(desde, i));
+}
+
+/** "05/11/2026" a partir de "2026-11-05" (sin conversión de zona). */
+export function formatearDia(fecha: string | null | undefined): string {
+  if (!fecha) return "—";
+  const d = diaAUtc(fecha);
+  if (!d) return "—";
+  const [a, m, dd] = utcADia(d).split("-");
+  return `${dd}/${m}/${a}`;
+}
+
+/** "jue 05/11" a partir de "2026-11-05" (sin conversión de zona). */
+export function formatearDiaCorto(fecha: string | null | undefined): string {
+  if (!fecha) return "—";
+  const d = diaAUtc(fecha);
+  if (!d) return "—";
+  const [, m, dd] = utcADia(d).split("-");
+  return `${DIAS_SEMANA[d.getUTCDay()]} ${dd}/${m}`;
+}
