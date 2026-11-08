@@ -7,6 +7,7 @@
 | ``GET /datos/suelo?desde&hasta&resolucion=diaria|horaria`` | todos |
 | ``GET /datos/planta?desde&hasta`` | todos |
 | ``GET /datos/pronostico?desde&hasta&capturado`` | todos |
+| ``GET /datos/agua?modulo_id&desde&hasta`` | todos (P: sin la propuesta del modelo) |
 
 Solo lectura. Las series van por defecto de los últimos 14 días cerrados (hasta ayer, hora de
 Lima), en las unidades del modelo (°C, mm, km, kPa, W/m², % vol., µm).
@@ -21,7 +22,8 @@ from fastapi import APIRouter, Query
 
 from app.api.deps import MAX_ID_BD, DbSesion, IdQuery, UsuarioHabilitado
 from app.schemas.datos import FrescuraSalida, SerieSalida
-from app.services import datos_service
+from app.schemas.reportes import AguaSalida
+from app.services import datos_service, reportes_service
 
 router = APIRouter(prefix="/datos")
 
@@ -80,3 +82,15 @@ def pronostico(
     capturado: Annotated[dt.date | None, Query(description="Fecha de captura (por defecto la última)")] = None,
 ) -> SerieSalida:
     return datos_service.serie_pronostico(db, desde=desde, hasta=hasta, capturado=capturado)
+
+
+@router.get("/agua", response_model=AguaSalida)
+def agua(
+    usuario: UsuarioHabilitado,
+    db: DbSesion,
+    modulo_id: Annotated[int, Query(ge=1, le=MAX_ID_BD)],
+    desde: Desde = None,
+    hasta: Hasta = None,
+) -> dict:
+    """KPI 1: agua aplicada (riego vigente) vs propuesta (versión publicada) por día y turno."""
+    return reportes_service.agua(db, modulo_id, desde, hasta, usuario)

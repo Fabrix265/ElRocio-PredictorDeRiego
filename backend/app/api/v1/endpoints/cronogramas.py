@@ -43,7 +43,8 @@ from app.schemas.cronograma import (
     VersionResumen,
     VistoEntrada,
 )
-from app.services import cronograma_service, flujo_cronograma_service as flujo
+from app.services import cronograma_service, reportes_service
+from app.services import flujo_cronograma_service as flujo
 
 router = APIRouter(prefix="/cronogramas")
 
@@ -174,3 +175,15 @@ def eventos(cronograma_id: IdPath, usuario: AdminEncargadoSubgerente, db: DbSesi
 def datos_campo(cronograma_id: IdPath, usuario: AdminEncargadoSubgerente, db: DbSesion,
                  dias: Annotated[int, Query(ge=1, le=14)] = 7) -> list[dict]:
     return flujo.datos_campo(db, cronograma_id, dias, usuario)
+
+
+@router.get("/{cronograma_id}/exportar")
+def exportar(
+    cronograma_id: IdPath, usuario: UsuarioHabilitado, db: DbSesion, contexto: Contexto,
+    formato: Annotated[str, Query(pattern="^(pdf|xlsx)$")] = "pdf",
+) -> Response:
+    """PDF o Excel de la versión visible (el programador, siempre la publicada); audita y deja el
+    evento ``exportado``."""
+    contenido, media, nombre = reportes_service.exportar(db, cronograma_id, formato, usuario, contexto)
+    return Response(contenido, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
