@@ -190,6 +190,9 @@ Además, un cronograma puede llevar estas marcas de calidad:
 ### Paso 2 · Cargar el riego aplicado desde Excel
 
 - **Quién**: encargado o administrador.
+- **Cómo debe venir el Excel**: mira [`guia_excel_riego.xlsx`](guia_excel_riego.xlsx) (hoja «Instrucciones» y
+  plantilla «MOD5» con los encabezados exactos y un ejemplo).
+
 1. En **Riego aplicado** toca **Cargar Excel**.
 2. «Arrastra el archivo aquí o toca para elegirlo»: el Excel del controlador (`.xlsx` de hasta
    15 MB, con la hoja `MOD5`). Puede ser el archivo acumulado completo. Toca **Subir y revisar**.
