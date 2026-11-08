@@ -27,6 +27,11 @@ function registro(extra: Partial<RegistroRiego>): RegistroRiego {
     estado: "aplicado",
     origen: "excel",
     sin_riego: false,
+    motivo: null,
+    comentario: null,
+    carga_id: null,
+    creado_at: "2026-11-07T10:00:00-05:00",
+    creado_por: null,
     ciclos: [ciclo("06:00", "07:30", 15.2), ciclo("10:00", "11:00", 10)],
     ...extra,
   };
@@ -39,8 +44,8 @@ const REGISTROS: RegistroRiego[] = [
 ];
 
 const VERSIONES: VersionRiego[] = [
-  { ...registro({ id: 1, version: 2, creado_por: "encargado1" }), vigente: true },
-  { ...registro({ id: 9, version: 1, estado: "provisional", origen: "cronograma", ciclos: [ciclo("06:00", "07:00", 12)] }), vigente: false },
+  { ...registro({ id: 1, version: 2, creado_por: "encargado1" }), vigente: true, basado_en_id: 9 },
+  { ...registro({ id: 9, version: 1, estado: "provisional", origen: "cronograma", ciclos: [ciclo("06:00", "07:00", 12)] }), vigente: false, basado_en_id: null },
 ];
 
 beforeEach(() => {

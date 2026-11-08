@@ -29,15 +29,20 @@ interface BadgeProps {
   /** Ícono propio; `false` para omitirlo (solo si el texto basta). Por defecto, el del tono. */
   icono?: ReactNode | false;
   className?: string;
+  /** Permite que el texto haga salto de línea en contenedores angostos (celular). */
+  ajustar?: boolean;
 }
 
 /** Chip de estado: siempre ícono + texto (el color no es la única señal). */
-export function Badge({ tono = "neutro", children, icono, className }: BadgeProps) {
+export function Badge({ tono = "neutro", children, icono, className, ajustar = false }: BadgeProps) {
   const simbolo = icono === false ? null : (icono ?? ICONOS[tono]);
   return (
     <span
       className={cn(
-        "inline-flex h-[22px] items-center gap-1.5 rounded-full px-2.5 text-xs font-medium whitespace-nowrap [&_svg]:size-3.5 [&_svg]:shrink-0",
+        "inline-flex items-center gap-1.5 px-2.5 text-xs font-medium [&_svg]:size-3.5 [&_svg]:shrink-0",
+        ajustar
+          ? "min-h-[22px] max-w-full rounded-[11px] py-0.5 leading-4 whitespace-normal"
+          : "h-[22px] rounded-full whitespace-nowrap",
         TONOS[tono],
         className,
       )}

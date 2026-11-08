@@ -172,6 +172,7 @@ const MENSAJE_POR_ESTADO: Record<number, string> = {
   403: "No tienes permiso para realizar esta acción.",
   404: "No se encontró lo que buscabas.",
   409: "El registro cambió mientras lo editabas. Recarga e inténtalo de nuevo.",
+  413: "El archivo supera el tamaño máximo permitido.",
   422: "Revisa los datos ingresados.",
   429: "Demasiados intentos. Espera unos minutos.",
 };

@@ -31,11 +31,15 @@ function carga(extra: Partial<CargaRiego> = {}): CargaRiego {
     id: 5,
     modulo_id: MODULO.id,
     archivo_nombre: "data_riego.xlsx",
+    sha256: "a".repeat(64),
     tamano_bytes: 2_400_000,
     subido_at: new Date().toISOString(),
     subido_por: "encargado1",
     estado: "previsualizada",
     vence_at: new Date(Date.now() + 23 * 3600_000).toISOString(),
+    confirmado_at: null,
+    confirmado_por: null,
+    resumen: null,
     grupos: [
       grupo(1, "nuevo", true),
       grupo(2, "nuevo", true),
@@ -81,12 +85,16 @@ describe("Carga de Excel: subir", () => {
 
   it("sube el archivo con el módulo de la cabecera y abre la vista previa", async () => {
     const subir = vi.spyOn(riegoApi, "subirCarga").mockResolvedValue(carga());
+    const pedirCarga = vi.spyOn(riegoApi, "carga").mockResolvedValue(carga());
     montar("/riego/cargas/nueva");
     const archivo = new File(["contenido"], "data_riego.xlsx");
     await userEvent.upload(screen.getByLabelText("Archivo Excel de riego"), archivo);
     await userEvent.click(screen.getByRole("button", { name: /Subir y revisar/ }));
     expect(subir).toHaveBeenCalledWith(MODULO.id, archivo);
     expect(await screen.findByRole("heading", { name: "Vista previa de la carga" })).toBeInTheDocument();
+    expect(await screen.findByText(/Se aplicarán/)).toBeInTheDocument();
+    // La respuesta del POST ya trae la carga completa (con el Excel real, varios MB): no se vuelve a pedir.
+    expect(pedirCarga).not.toHaveBeenCalled();
   });
 
   it("muestra el error del backend si el archivo no pasa la validación", async () => {
@@ -153,6 +161,17 @@ describe("Carga de Excel: vista previa", () => {
     expect(screen.getByText(/cambió un registro comparado/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Subir otra vez/ })).toHaveAttribute("href", "/riego/cargas/nueva");
     expect(screen.getByRole("button", { name: "Confirmar" })).toBeDisabled();
+  });
+
+  it("si la carga ya fue confirmada en otra pestaña (409), no la da por vencida y muestra su estado real", async () => {
+    const pedirCarga = vi.spyOn(riegoApi, "carga").mockResolvedValue(carga());
+    vi.spyOn(riegoApi, "confirmar").mockRejectedValue(new ApiError(409, "La carga ya fue confirmada."));
+    montar("/riego/cargas/5");
+    await userEvent.click(await screen.findByRole("button", { name: "Confirmar" }));
+    pedirCarga.mockResolvedValue(carga({ estado: "confirmada", confirmado_por: "encargado2" }));
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Confirmar carga" }));
+    expect(await screen.findByRole("heading", { name: "Carga confirmada" })).toBeInTheDocument();
+    expect(screen.queryByText("La carga venció")).not.toBeInTheDocument();
   });
 
   it("una carga vencida (estado o 24 h cumplidas) no se puede confirmar ni marcar", async () => {

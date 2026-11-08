@@ -39,7 +39,7 @@ export function etiquetaOrigen(origen: string | null | undefined): string {
 }
 
 /** Un registro `sin_riego` es aplicado o provisional, pero se muestra como «Sin riego». */
-export function estadoCelda(registro: RegistroRiego | undefined): EstadoCelda {
+export function estadoCelda(registro: Pick<RegistroRiego, "estado" | "sin_riego"> | undefined): EstadoCelda {
   if (!registro) return "sin_registro";
   if (registro.sin_riego) return "sin_riego";
   return registro.estado;

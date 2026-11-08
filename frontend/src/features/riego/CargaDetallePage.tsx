@@ -31,10 +31,19 @@ import {
 import { PasosCarga } from "./PasosCarga";
 import { VistaPreviaCarga } from "./VistaPreviaCarga";
 
-/** 409/410 al confirmar o marcar = la carga venció (24 h o cambió un registro comparado). */
+/**
+ * 409 al marcar o confirmar = la carga venció (24 h o cambió un registro comparado), salvo los otros
+ * dos conflictos del backend: «La carga ya fue confirmada» y «La carga fue descartada» (ahí basta
+ * con recargar la carga para mostrar su estado real).
+ */
 export function esErrorVencida(error: unknown): boolean {
-  return error instanceof ApiError && (error.status === 409 || error.status === 410);
+  if (!(error instanceof ApiError)) return false;
+  if (error.status === 410) return true;
+  return error.status === 409 && !/confirmada|descartada/i.test(error.detail);
 }
+
+/** Cuánto se reutiliza la carga en caché antes de volver a pedirla al montar la página. */
+export const STALE_CARGA_MS = 60_000;
 
 const MENSAJE_VENCIDA =
   "La vista previa venció: pasaron 24 horas o alguien cambió uno de los registros comparados. Sube el archivo otra vez para revisarlo con los datos actuales.";
@@ -132,8 +141,16 @@ export default function CargaDetallePage() {
     queryKey: claveRiego.carga(id),
     queryFn: ({ signal }) => riegoApi.carga(id, signal),
     enabled: idValido,
+    // La subida (POST) ya deja la carga completa en caché: no se vuelve a pedir al abrir la vista
+    // previa (con el Excel real son varios MB). Confirmar, descartar o un 409 la invalidan.
+    staleTime: STALE_CARGA_MS,
   });
   const carga = consulta.data;
+
+  /** Otro conflicto (ya confirmada o descartada en otra pestaña): se muestra el estado real. */
+  const recargarSiConflicto = (error: unknown) => {
+    if (error instanceof ApiError && error.status === 409) void queryClient.invalidateQueries({ queryKey: claveRiego.carga(id) });
+  };
 
   const alVencer = (error: unknown) => {
     setMensajeVencida(error instanceof ApiError && error.detail ? error.detail : MENSAJE_VENCIDA);
@@ -151,7 +168,10 @@ export default function CargaDetallePage() {
     onError: (error, _cambios, contexto) => {
       if (contexto?.previa) queryClient.setQueryData(claveRiego.carga(id), contexto.previa);
       if (esErrorVencida(error)) alVencer(error);
-      else notificar.error("No se pudo guardar la selección", mensajeDeError(error));
+      else {
+        recargarSiConflicto(error);
+        notificar.error("No se pudo guardar la selección", mensajeDeError(error));
+      }
     },
     onSuccess: (actualizada) => {
       // Si hay otro cambio en vuelo, su respuesta llegará después: no se pisa la vista optimista.
@@ -174,7 +194,10 @@ export default function CargaDetallePage() {
     onError: (error) => {
       setConfirmando(false);
       if (esErrorVencida(error)) alVencer(error);
-      else notificar.error("No se pudo confirmar la carga", mensajeDeError(error));
+      else {
+        recargarSiConflicto(error);
+        notificar.error("No se pudo confirmar la carga", mensajeDeError(error));
+      }
     },
   });
 
@@ -188,6 +211,7 @@ export default function CargaDetallePage() {
     },
     onError: (error) => {
       setDescartando(false);
+      recargarSiConflicto(error);
       notificar.error("No se pudo descartar la carga", mensajeDeError(error));
     },
   });

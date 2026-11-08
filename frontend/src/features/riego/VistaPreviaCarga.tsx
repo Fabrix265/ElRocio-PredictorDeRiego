@@ -76,7 +76,10 @@ function TarjetaResultado({
         title={DESCRIPCION_RESULTADO[resultado]}
         className="flex flex-col items-start gap-1 rounded text-left focus-visible:outline-2 focus-visible:outline-foco"
       >
-        <Badge tono={TONO_RESULTADO[resultado]}>{ETIQUETA_RESULTADO[resultado]}</Badge>
+        {/* En celular la tarjeta mide ~158 px: la etiqueta («Reemplaza provisional») hace salto de línea. */}
+        <Badge tono={TONO_RESULTADO[resultado]} ajustar>
+          {ETIQUETA_RESULTADO[resultado]}
+        </Badge>
         <span className="cifras text-2xl leading-8 font-bold text-texto">{total.toLocaleString("es-PE")}</span>
       </button>
       {aplicable && total > 0 ? (

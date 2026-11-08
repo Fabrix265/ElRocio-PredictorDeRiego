@@ -19,10 +19,14 @@ import { useSeleccion } from "../catalogo/SeleccionProvider";
 import {
   ETIQUETA_ESTADO_INGESTA,
   TONO_ESTADO_INGESTA,
+  corridaColgada,
+  corridasVisibles,
+  detalleTurnos,
   diasAtraso,
   esInformativa,
   etiquetaDisparo,
   formatearDuracionMs,
+  HORAS_CORRIDA_COLGADA,
   hayIngestaEnCurso,
   nombreFuente,
   ordenarFuentes,
@@ -46,7 +50,7 @@ function FilaFuente({ f, referencia }: { f: FuenteFrescura; referencia: string }
   const verde = f.estado === "verde";
   const atraso = diasAtraso(f, referencia);
   const huecos = f.huecos ?? [];
-  const turnosAtrasados = (f.por_turno ?? []).filter((t) => t.ultima_fecha !== f.ultima_fecha || (t.huecos?.length ?? 0) > 0);
+  const lineasTurno = detalleTurnos(f);
   const Icono = informativa ? Info : verde ? CheckCircle2 : AlertTriangle;
 
   return (
@@ -82,12 +86,8 @@ function FilaFuente({ f, referencia }: { f: FuenteFrescura; referencia: string }
             Hueco{huecos.length === 1 ? "" : "s"}: {listarHuecos(huecos)}
           </span>
         )}
-        {turnosAtrasados.length > 0 && (
-          <span className="cifras text-xs text-texto-2">
-            {turnosAtrasados
-              .map((t) => `${t.turno_codigo} ${t.ultima_fecha ? `hasta ${formatearDiaCorto(t.ultima_fecha)}` : "sin datos"}`)
-              .join(" · ")}
-          </span>
+        {lineasTurno.length > 0 && (
+          <span className="cifras text-xs text-texto-2">{lineasTurno.join("; ")}</span>
         )}
         {f.detalle && <span className="text-xs text-texto-3">{f.detalle}</span>}
       </div>
@@ -95,18 +95,23 @@ function FilaFuente({ f, referencia }: { f: FuenteFrescura; referencia: string }
   );
 }
 
-function FilaCorrida({ c }: { c: IngestaCorrida }) {
+function FilaCorrida({ c, ahora }: { c: IngestaCorrida; ahora: Date }) {
   const error = c.errores[0];
+  const colgada = corridaColgada(c, ahora);
   return (
     <li className="flex flex-col gap-0.5 border-b border-borde py-2 last:border-b-0">
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <span className="text-[13px] font-medium">{nombreFuente(c.fuente)}</span>
-        <Badge
-          tono={TONO_ESTADO_INGESTA[c.estado]}
-          icono={c.estado === "en_curso" ? <Loader2 className="animate-spin" aria-hidden="true" /> : undefined}
-        >
-          {ETIQUETA_ESTADO_INGESTA[c.estado]}
-        </Badge>
+        {colgada ? (
+          <Badge tono="aviso">Sin terminar</Badge>
+        ) : (
+          <Badge
+            tono={TONO_ESTADO_INGESTA[c.estado]}
+            icono={c.estado === "en_curso" ? <Loader2 className="animate-spin" aria-hidden="true" /> : undefined}
+          >
+            {ETIQUETA_ESTADO_INGESTA[c.estado]}
+          </Badge>
+        )}
       </div>
       <span className="cifras text-xs text-texto-2">
         {formatearFechaHora(c.inicio_at)} · {etiquetaDisparo(c)}
@@ -121,6 +126,11 @@ function FilaCorrida({ c }: { c: IngestaCorrida }) {
           )}
           {c.filas_nuevas.toLocaleString("es-PE")} nuevas · {c.filas_actualizadas.toLocaleString("es-PE")} actualizadas
           {c.conflictos > 0 && <> · {c.conflictos.toLocaleString("es-PE")} conflictos</>}
+        </span>
+      )}
+      {colgada && (
+        <span className="text-xs text-warn-tx">
+          Se interrumpió hace más de {HORAS_CORRIDA_COLGADA} horas. Se cerrará al usar «Actualizar ahora».
         </span>
       )}
       {error && (
@@ -139,7 +149,8 @@ export function PanelFrescura() {
   const usuario = useUsuario();
   const { modulo } = useSeleccion();
   const queryClient = useQueryClient();
-  const hoy = hoyLima(useAhora());
+  const ahora = useAhora();
+  const hoy = hoyLima(ahora);
   const puedeEjecutar = puede(usuario.rol, "ejecutarIngesta");
   const verCorridas = puede(usuario.rol, "verIngestas");
   const [lanzadas, setLanzadas] = useState<number[]>([]);
@@ -155,6 +166,8 @@ export function PanelFrescura() {
     queryKey: claveDatos.ingestas,
     queryFn: ({ signal }) => ingestasApi.listar(20, signal),
     enabled: verCorridas,
+    // Sondea solo mientras haya corridas activas: una «en_curso» de hace más de 3 h (proceso muerto)
+    // no cuenta, así el panel no queda consultando sin fin ni con el botón bloqueado.
     refetchInterval: (q) => (lanzadas.length > 0 || hayIngestaEnCurso(q.state.data) ? INTERVALO_SONDEO_MS : false),
   });
 
@@ -173,7 +186,7 @@ export function PanelFrescura() {
     onError: (error) => notificar.error("No se pudo iniciar la actualización", mensajeDeError(error)),
   });
 
-  const progreso = useMemo(() => progresoIngesta(lanzadas, corridas.data ?? []), [lanzadas, corridas.data]);
+  const progreso = useMemo(() => progresoIngesta(lanzadas, corridas.data ?? [], ahora), [lanzadas, corridas.data, ahora]);
 
   useEffect(() => {
     if (!progreso.completo) return;
@@ -184,7 +197,7 @@ export function PanelFrescura() {
     else notificar.info("Actualización parcial", "Alguna fuente terminó con errores. Revisa «Últimas corridas».");
   }, [progreso.completo, progreso.resultado, queryClient]);
 
-  const enCurso = lanzadas.length > 0 || hayIngestaEnCurso(corridas.data);
+  const enCurso = lanzadas.length > 0 || hayIngestaEnCurso(corridas.data, ahora);
   const fuentes = useMemo(() => ordenarFuentes(frescura.data?.fuentes ?? []), [frescura.data]);
   const referencia = frescura.data ? referenciaFrescura(frescura.data) : null;
   const resumen = resumirFrescura(fuentes);
@@ -283,8 +296,8 @@ export function PanelFrescura() {
               <p className="text-xs text-texto-2">Todavía no hay corridas de ingesta.</p>
             ) : (
               <ul aria-label="Últimas corridas de ingesta">
-                {corridas.data.slice(0, CORRIDAS_VISIBLES).map((c) => (
-                  <FilaCorrida key={c.id} c={c} />
+                {corridasVisibles(corridas.data, CORRIDAS_VISIBLES).map((c) => (
+                  <FilaCorrida key={c.id} c={c} ahora={ahora} />
                 ))}
               </ul>
             )}

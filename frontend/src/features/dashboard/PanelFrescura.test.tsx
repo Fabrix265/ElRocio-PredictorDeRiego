@@ -5,9 +5,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hoyLima, sumarDias } from "../../lib/fechas";
 import type { Rol } from "../../lib/roles";
-import { datosApi, ingestasApi, type Frescura, type IngestaCorrida } from "../../services/datos";
+import { datosApi, ingestasApi, type Frescura, type FuenteFrescura, type IngestaCorrida } from "../../services/datos";
 import { MODULO, seleccionCon, usuarioConRol } from "../../test/fabricas";
-import { diasAtraso, progresoIngesta, resumirFrescura } from "./frescura";
+import {
+  corridaColgada,
+  corridasVisibles,
+  detalleTurnos,
+  diasAtraso,
+  hayIngestaEnCurso,
+  nombreFuente,
+  progresoIngesta,
+  resumirFrescura,
+} from "./frescura";
 import { DIAS_VENTANA_FRESCURA, PanelFrescura } from "./PanelFrescura";
 
 let rol: Rol = "admin";
@@ -17,14 +26,31 @@ vi.mock("../catalogo/SeleccionProvider", () => ({ useSeleccion: () => seleccionC
 const HOY = hoyLima();
 const AYER = sumarDias(HOY, -1);
 
+/** Fuente con la forma exacta de `FuenteFrescura` del backend. */
+function fuente(nombre: string, extra: Partial<FuenteFrescura>): FuenteFrescura {
+  return {
+    fuente: nombre,
+    nombre: nombre,
+    ultima_fecha: null,
+    estado: "naranja",
+    informativa: false,
+    huecos: [],
+    detalle: null,
+    por_turno: null,
+    ...extra,
+  };
+}
+
 const FRESCURA: Frescura = {
+  modulo_id: MODULO.id,
   fecha: HOY,
   referencia: AYER,
+  dias: DIAS_VENTANA_FRESCURA,
   fuentes: [
-    { fuente: "weatherlink", ultima_fecha: sumarDias(AYER, -7), estado: "naranja", huecos: [] },
-    { fuente: "riego_aplicado", ultima_fecha: AYER, estado: "verde", huecos: [sumarDias(AYER, -3)] },
-    { fuente: "ndvi", ultima_fecha: sumarDias(AYER, -5), estado: "informativo", informativa: true },
-    { fuente: "phytech_suelo", ultima_fecha: null, estado: "naranja" },
+    fuente("weatherlink", { ultima_fecha: sumarDias(AYER, -7), estado: "naranja" }),
+    fuente("riego_aplicado", { ultima_fecha: AYER, estado: "verde", huecos: [sumarDias(AYER, -3)] }),
+    fuente("ndvi", { ultima_fecha: sumarDias(AYER, -5), estado: "informativo", informativa: true }),
+    fuente("phytech_suelo", { ultima_fecha: null, estado: "naranja" }),
   ],
 };
 
@@ -34,7 +60,12 @@ function corrida(id: number, estado: IngestaCorrida["estado"], extra: Partial<In
     fuente: "weatherlink",
     disparo: "manual",
     usuario: "admin",
+    fecha_programada: null,
+    desde: null,
+    hasta: null,
     inicio_at: new Date().toISOString(),
+    fin_at: null,
+    duracion_ms: null,
     estado,
     filas_nuevas: 0,
     filas_actualizadas: 0,
@@ -49,7 +80,7 @@ beforeEach(() => {
   rol = "admin";
   vi.spyOn(datosApi, "frescura").mockResolvedValue(FRESCURA);
   vi.spyOn(ingestasApi, "listar").mockResolvedValue([
-    corrida(1, "error", { fuente: "phytech_suelo", disparo: "programado", errores: [{ mensaje: "Credenciales rechazadas", status_code: 401 }] }),
+    corrida(1, "error", { fuente: "phytech_suelo", disparo: "programado", errores: [{ tipo: "credenciales", mensaje: "Credenciales rechazadas", status_code: 401, endpoint: "/v1/soil" }] }),
   ]);
 });
 
@@ -130,18 +161,66 @@ describe("PanelFrescura", () => {
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(vi.mocked(datosApi.frescura).mock.calls.length).toBeGreaterThan(llamadasFrescura);
   }, 10_000);
+
+  it("una corrida «en_curso» de hace más de 3 h (proceso muerto) no bloquea «Actualizar ahora» ni deja el sondeo activo", async () => {
+    const hace5h = new Date(Date.now() - 5 * 3600_000).toISOString();
+    // La colgada es la más vieja: antes ni siquiera estaba entre las 6 visibles.
+    const recientes = Array.from({ length: 7 }, (_, i) =>
+      corrida(100 + i, "ok", { fuente: "phytech_planta", inicio_at: new Date(Date.now() - (i + 1) * 60_000).toISOString() }),
+    );
+    vi.mocked(ingestasApi.listar).mockResolvedValue([...recientes, corrida(50, "en_curso", { inicio_at: hace5h })]);
+    montar();
+    const lista = await screen.findByRole("list", { name: "Últimas corridas de ingesta" });
+    expect(within(lista).getByText("Sin terminar")).toBeInTheDocument();
+    expect(within(lista).getByText(/Se cerrará al usar «Actualizar ahora»/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Actualizar ahora/ })).toBeEnabled();
+    const llamadas = vi.mocked(ingestasApi.listar).mock.calls.length;
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 2700));
+    });
+    expect(vi.mocked(ingestasApi.listar).mock.calls.length).toBe(llamadas);
+  }, 10_000);
+
+  it("en riego, la línea por turno dice solo lo que difiere: el hueco propio de TE05", async () => {
+    const turno = (codigo: string, huecos: string[]) => ({
+      turno_id: Number(codigo.slice(2)),
+      turno_codigo: codigo,
+      ultima_fecha: "2026-11-04",
+      huecos,
+    });
+    vi.mocked(datosApi.frescura).mockResolvedValue({
+      ...FRESCURA,
+      fuentes: [
+        fuente("riego_aplicado", {
+          ultima_fecha: "2026-11-04",
+          huecos: ["2026-11-01", "2026-11-03"],
+          por_turno: [
+            turno("TE01", ["2026-11-01"]),
+            turno("TE02", ["2026-11-01"]),
+            turno("TE03", ["2026-11-01"]),
+            turno("TE04", ["2026-11-01"]),
+            turno("TE05", ["2026-11-01", "2026-11-03"]),
+          ],
+        }),
+      ],
+    });
+    montar();
+    const lista = await screen.findByRole("list", { name: "Frescura por fuente" });
+    expect(within(lista).getByText("TE05: falta mar 03/11")).toBeInTheDocument();
+    expect(lista).not.toHaveTextContent("TE01");
+  });
 });
 
 describe("cálculos de frescura e ingestas", () => {
   it("resume atrasadas (sin contar informativas) y huecos", () => {
     expect(resumirFrescura(FRESCURA.fuentes)).toEqual({ atrasadas: 2, conHuecos: 1, alDia: false });
-    expect(resumirFrescura([{ fuente: "weatherlink", ultima_fecha: AYER, estado: "verde" }]).alDia).toBe(true);
+    expect(resumirFrescura([fuente("weatherlink", { ultima_fecha: AYER, estado: "verde" })]).alDia).toBe(true);
   });
 
   it("calcula los días de atraso respecto de ayer", () => {
-    expect(diasAtraso({ fuente: "x", ultima_fecha: "2026-11-04", estado: "naranja" }, "2026-11-07")).toBe(3);
-    expect(diasAtraso({ fuente: "x", ultima_fecha: "2026-11-07", estado: "verde" }, "2026-11-07")).toBe(0);
-    expect(diasAtraso({ fuente: "x", ultima_fecha: null, estado: "naranja" }, "2026-11-07")).toBeNull();
+    expect(diasAtraso(fuente("x", { ultima_fecha: "2026-11-04", estado: "naranja" }), "2026-11-07")).toBe(3);
+    expect(diasAtraso(fuente("x", { ultima_fecha: "2026-11-07", estado: "verde" }), "2026-11-07")).toBe(0);
+    expect(diasAtraso(fuente("x", { ultima_fecha: null, estado: "naranja" }), "2026-11-07")).toBeNull();
   });
 
   it("sigue el avance de las corridas lanzadas y da el resultado global", () => {
@@ -153,5 +232,51 @@ describe("cálculos de frescura e ingestas", () => {
     expect(progresoIngesta([1, 99], [corrida(1, "ok")])).toMatchObject({ completo: true });
     expect(progresoIngesta([1, 99], [corrida(1, "ok"), corrida(5, "en_curso")])).toMatchObject({ completo: false });
     expect(progresoIngesta([], [])).toMatchObject({ completo: false });
+    // Una corrida lanzada que quedó colgada (> 3 h) termina el seguimiento como error.
+    const colgada = corrida(3, "en_curso", { inicio_at: new Date(Date.now() - 4 * 3600_000).toISOString() });
+    expect(progresoIngesta([3], [colgada])).toMatchObject({ completo: true, resultado: "error" });
+  });
+
+  it("una corrida «en_curso» de más de 3 h se da por colgada y no cuenta como en curso", () => {
+    const ahora = new Date("2026-11-08T12:00:00-05:00");
+    const hace = (h: number) => new Date(ahora.getTime() - h * 3600_000).toISOString();
+    expect(corridaColgada(corrida(1, "en_curso", { inicio_at: hace(2.9) }), ahora)).toBe(false);
+    expect(corridaColgada(corrida(1, "en_curso", { inicio_at: hace(3.1) }), ahora)).toBe(true);
+    expect(corridaColgada(corrida(1, "error", { inicio_at: hace(10) }), ahora)).toBe(false);
+    expect(hayIngestaEnCurso([corrida(1, "en_curso", { inicio_at: hace(5) })], ahora)).toBe(false);
+    expect(
+      hayIngestaEnCurso([corrida(1, "en_curso", { inicio_at: hace(5) }), corrida(2, "en_curso", { inicio_at: hace(0.1) })], ahora),
+    ).toBe(true);
+  });
+
+  it("muestra primero las corridas en curso aunque sean viejas", () => {
+    const lista = [corrida(3, "ok"), corrida(2, "ok"), corrida(1, "en_curso")];
+    expect(corridasVisibles(lista, 2).map((c) => c.id)).toEqual([1, 3]);
+  });
+
+  it("nombra en español las corridas de la carga histórica y del reproceso", () => {
+    expect(nombreFuente("historico_meteo")).toBe("Carga histórica: clima");
+    expect(nombreFuente("historico_phytech")).toBe("Carga histórica: Phytech");
+    expect(nombreFuente("historico_ndvi")).toBe("Carga histórica: NDVI");
+    expect(nombreFuente("historico_riego")).toBe("Carga histórica: riego");
+    expect(nombreFuente("reprocesar_weatherlink")).toBe("Reproceso WeatherLink");
+  });
+
+  it("detalle por turno: otra última fecha o huecos que no comparten todos", () => {
+    const t = (codigo: string, ultima: string | null, huecos: string[] = []) => ({
+      turno_id: 1,
+      turno_codigo: codigo,
+      ultima_fecha: ultima,
+      huecos,
+    });
+    expect(detalleTurnos({ por_turno: null })).toEqual([]);
+    expect(
+      detalleTurnos({ por_turno: [t("TE01", "2026-11-04", ["2026-11-01"]), t("TE02", "2026-11-04", ["2026-11-01"])] }),
+    ).toEqual([]);
+    expect(
+      detalleTurnos({
+        por_turno: [t("TE01", "2026-11-07"), t("TE02", "2026-11-07"), t("TE03", "2026-11-04", ["2026-11-02"]), t("TE04", null)],
+      }),
+    ).toEqual(["TE03: hasta mié 04/11 · falta lun 02/11", "TE04: sin datos"]);
   });
 });

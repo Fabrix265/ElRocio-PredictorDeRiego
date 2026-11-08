@@ -40,11 +40,10 @@ describe("resumen de ciclos", () => {
 
 describe("estado de una celda turno-día", () => {
   it("distingue aplicado, provisional, sin riego y sin registro", () => {
-    const base = { id: 1, turno_id: 1, fecha: "2026-11-05", version: 1, origen: "excel" as const, ciclos: [] };
     expect(estadoCelda(undefined)).toBe("sin_registro");
-    expect(estadoCelda({ ...base, estado: "aplicado", sin_riego: false })).toBe("aplicado");
-    expect(estadoCelda({ ...base, estado: "provisional", sin_riego: false })).toBe("provisional");
-    expect(estadoCelda({ ...base, estado: "aplicado", sin_riego: true })).toBe("sin_riego");
+    expect(estadoCelda({ estado: "aplicado", sin_riego: false })).toBe("aplicado");
+    expect(estadoCelda({ estado: "provisional", sin_riego: false })).toBe("provisional");
+    expect(estadoCelda({ estado: "aplicado", sin_riego: true })).toBe("sin_riego");
   });
 });
 
@@ -106,19 +105,27 @@ describe("carga de Excel", () => {
     expect(validarArchivoExcel(archivo("Riego MOD5.XLSX", 100))).toBeNull();
   });
 
-  it("normaliza la carga aunque el detalle llegue como turnos_dia y sin listas", () => {
+  it("normaliza la carga del backend: fechas AAAA-MM-DD y ciclos ordenados por inicio", () => {
     const carga = normalizarCarga({
       id: 1,
       modulo_id: 1,
       archivo_nombre: "a.xlsx",
+      sha256: "a".repeat(64),
       tamano_bytes: 1,
       subido_at: "2026-11-07T10:00:00-05:00",
+      subido_por: "encargado1",
       estado: "previsualizada",
-      turnos_dia: [{ ...grupo(1, "nuevo", true), fecha: "2026-11-05T00:00:00", ciclos: null, mensajes: null }],
-    } as never);
+      vence_at: "2026-11-08T10:00:00-05:00",
+      confirmado_at: null,
+      confirmado_por: null,
+      resumen: null,
+      grupos: [
+        { ...grupo(1, "nuevo", true), fecha: "2026-11-05T00:00:00", ciclos: [ciclo("10:00", "11:00", 5), ciclo("06:00", "07:00", 8)] },
+      ],
+    });
     expect(carga.grupos).toHaveLength(1);
     expect(carga.grupos[0].fecha).toBe("2026-11-05");
-    expect(carga.grupos[0].ciclos).toEqual([]);
+    expect(carga.grupos[0].ciclos.map((c) => c.hora_inicio)).toEqual(["06:00", "10:00"]);
     expect(carga.grupos[0].mensajes).toEqual([]);
   });
 });
