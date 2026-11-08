@@ -49,10 +49,20 @@ def vigentes(
 
 
 def resumen_vigentes(db: Session, modulo_id: int) -> dict[tuple[int, dt.date], Any]:
-    """``(turno_id, fecha) -> fila(id, version, contenido_sha256, estado, origen)`` de los vigentes."""
+    """``(turno_id, fecha) -> fila(id, version, contenido_sha256, estado, origen, n_ciclos,
+    m3_total)`` de los vigentes."""
+    ciclos = (
+        select(RiegoCiclo.registro_id, func.count().label("n_ciclos"),
+               func.coalesce(func.sum(RiegoCiclo.riego_m3), 0.0).label("m3_total"))
+        .group_by(RiegoCiclo.registro_id)
+        .subquery()
+    )
     filas = db.execute(
         select(RiegoRegistro.id, RiegoRegistro.turno_id, RiegoRegistro.fecha, RiegoRegistro.version,
-               RiegoRegistro.contenido_sha256, RiegoRegistro.estado, RiegoRegistro.origen)
+               RiegoRegistro.contenido_sha256, RiegoRegistro.estado, RiegoRegistro.origen,
+               func.coalesce(ciclos.c.n_ciclos, 0).label("n_ciclos"),
+               func.coalesce(ciclos.c.m3_total, 0.0).label("m3_total"))
+        .outerjoin(ciclos, ciclos.c.registro_id == RiegoRegistro.id)
         .where(RiegoRegistro.modulo_id == modulo_id, RiegoRegistro.vigente.is_(True))
     )
     return {(f.turno_id, f.fecha): f for f in filas}

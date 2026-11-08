@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import re
 import zipfile
 from datetime import timedelta
 
@@ -187,14 +188,20 @@ def test_flujo_subir_marcar_confirmar_y_resubir(client: TestClient, auth, db: Se
     assert "D7" in d7["mensajes"][0]
     fallida = grupo(carga, D2, "TE05")
     assert fallida["resultado"] == "sin_riego" and "aperturas fallidas" in fallida["mensajes"][0]
+    # D2 es la última fecha del archivo (puede venir cortada): el "sin riego" queda desmarcado.
+    assert fallida["aplicar"] is False and "última fecha del archivo" in fallida["mensajes"][1]
+    assert carga["resumen"]["ultima_fecha_archivo"] == D2.isoformat()
+    assert carga["resumen"]["desmarcados_por_aviso"] == 1
     assert acciones(db, carga["id"]) == ["excel_subido"]
 
-    # GET devuelve lo mismo; PATCH desmarca un "sin riego" (D7).
+    # GET devuelve lo mismo; PATCH desmarca un "sin riego" (D7) y marca el revisado.
     assert client.get(f"{API}/riego/cargas/{carga['id']}", headers=cabeceras).json() == carga
     respuesta = client.patch(f"{API}/riego/cargas/{carga['id']}", headers=cabeceras,
-                             json={"grupos": [{"id": d7["id"], "aplicar": False}]})
+                             json={"grupos": [{"id": d7["id"], "aplicar": False},
+                                              {"id": fallida["id"], "aplicar": True}]})
     assert respuesta.status_code == 200, respuesta.text
     assert grupo(respuesta.json(), D1, "TE03")["aplicar"] is False
+    assert grupo(respuesta.json(), D2, "TE05")["aplicar"] is True
 
     respuesta = client.post(f"{API}/riego/cargas/{carga['id']}/confirmar", headers=cabeceras)
     assert respuesta.status_code == 200, respuesta.text
@@ -246,18 +253,21 @@ def test_reemplazos_y_versiones(client: TestClient, auth, db: Session, modulo_id
     assert (g_prov["resultado"], g_prov["aplicar"], g_prov["vigente_id_comparado"]) == (
         "reemplaza_provisional", True, prov)
     assert (g_prov["vigente_estado"], g_prov["vigente_origen"]) == ("provisional", "cronograma")
-    # El vigente manual queda desmarcado por defecto; el histórico, marcado.
+    # El vigente manual queda desmarcado por defecto; el histórico de la última fecha del archivo
+    # (puede venir cortada), también, con el aviso.
     assert (grupo(carga, D1, "TE02")["resultado"], grupo(carga, D1, "TE02")["aplicar"]) == (
         "reemplaza_aplicado", False)
-    assert (grupo(carga, D2, "TE01")["resultado"], grupo(carga, D2, "TE01")["aplicar"]) == (
-        "reemplaza_aplicado", True)
+    g_hist = grupo(carga, D2, "TE01")
+    assert (g_hist["resultado"], g_hist["aplicar"]) == ("reemplaza_aplicado", False)
+    assert "última fecha del archivo" in g_hist["mensajes"][-1]
     # D7 sobre un aplicado: se muestra, pero desmarcado.
     g_d7 = grupo(carga, D1, "TE03")
     assert (g_d7["resultado"], g_d7["aplicar"], g_d7["vigente_id_comparado"]) == ("sin_riego", False, aplicado_d7)
 
-    # Se marca el manual y se confirma.
+    # Se marcan el manual y los de la última fecha (revisados) y se confirma.
     client.patch(f"{API}/riego/cargas/{carga['id']}", headers=cabeceras,
-                 json={"grupos": [{"id": grupo(carga, D1, "TE02")["id"], "aplicar": True}]})
+                 json={"grupos": [{"id": grupo(carga, fecha, turno)["id"], "aplicar": True}
+                                  for fecha, turno in ((D1, "TE02"), (D2, "TE01"), (D2, "TE05"))]})
     respuesta = client.post(f"{API}/riego/cargas/{carga['id']}/confirmar", headers=cabeceras)
     assert respuesta.status_code == 200, respuesta.text
     assert respuesta.json()["resumen"]["registros_creados"] == 9
@@ -450,10 +460,78 @@ def test_hoja_y_columnas(client: TestClient, auth, modulo_id):
     assert respuesta.status_code == 422 and "no trae filas" in respuesta.json()["detail"]
 
 
-def test_maximo_de_filas(client: TestClient, auth, modulo_id, monkeypatch):
-    monkeypatch.setattr(carga_riego_service, "MAX_FILAS", 5)
+def test_maximo_de_filas_se_cuenta_antes_de_leer_con_pandas(client: TestClient, auth, modulo_id, monkeypatch):
+    from app.services import archivo_excel
+
+    def no_debe_leer(*_a, **_k):
+        raise AssertionError("pandas no debe leer una hoja con demasiadas filas")
+
+    monkeypatch.setattr(archivo_excel, "MAX_FILAS", 5)
+    monkeypatch.setattr(carga_riego_service, "leer_riego", no_debe_leer)
     respuesta = subir(client, auth("admin"), modulo_id, excel(filas_base()))
     assert respuesta.status_code == 422 and "máximo de 5 filas" in respuesta.json()["detail"]
+    monkeypatch.setattr(archivo_excel, "MAX_FILAS", 8)  # 8 filas de datos + encabezado: pasa
+    escaneo = archivo_excel.escanear_hoja(
+        zipfile.ZipFile(io.BytesIO(excel(filas_base()))), "xl/worksheets/sheet1.xml")
+    assert (escaneo.filas, escaneo.cortado, escaneo.formulas_sin_valor) == (9, False, 0)
+
+
+def _excel_con_formula(con_valor_guardado: bool) -> bytes:
+    """Columna m3/ha como fórmula, como la deja un script con openpyxl (sin valor guardado) o,
+    con ``con_valor_guardado``, como la guarda Excel (``<f>`` y ``<v>``)."""
+    libro = Workbook()
+    ws = libro.active
+    ws.title = "MOD5"
+    ws.append(CABECERA)
+    for n, f in enumerate(filas_base(), start=2):
+        ws.append([*f[:9], f"=I{n}/13"])
+    salida = io.BytesIO()
+    libro.save(salida)
+    if not con_valor_guardado:
+        return salida.getvalue()
+    entrada = zipfile.ZipFile(io.BytesIO(salida.getvalue()))
+    nuevo = io.BytesIO()
+    with zipfile.ZipFile(nuevo, "w", zipfile.ZIP_DEFLATED) as destino:
+        for info in entrada.infolist():
+            datos = entrada.read(info)
+            if info.filename == "xl/worksheets/sheet1.xml":
+                datos = re.sub(rb"(<f>I(\d+)/13</f>)(<v\s*/>|<v></v>)?", rb"\1<v>15</v>", datos)
+            destino.writestr(info, datos)
+    return nuevo.getvalue()
+
+
+def test_formulas_sin_valor_guardado_se_rechazan(client: TestClient, auth, modulo_id):
+    """pandas leería esas celdas vacías: cada turno regado parecería «solo aperturas fallidas»."""
+    cabeceras = auth("admin")
+    respuesta = subir(client, cabeceras, modulo_id, _excel_con_formula(False))
+    assert respuesta.status_code == 422
+    detalle = respuesta.json()["detail"]
+    assert "8 celda(s) con fórmula sin valor calculado" in detalle and "J2" in detalle
+    # Guardado por Excel (fórmula con su valor): se acepta y no hay "sin riego" inventados.
+    respuesta = subir(client, cabeceras, modulo_id, _excel_con_formula(True))
+    assert respuesta.status_code == 201, respuesta.text
+    assert grupo(respuesta.json(), D1, "TE01")["resultado"] == "nuevo"
+
+
+def test_reemplaza_aplicado_con_menos_riego_queda_desmarcado(client: TestClient, auth, db: Session,
+                                                             modulo_id, turnos):
+    """Fuera de la última fecha: si el archivo trae menos ciclos o menos m3 que el aplicado, se
+    avisa y queda desmarcado; con más riego, marcado."""
+    dos_ciclos = [
+        {"inicio_min": m, "fin_min": m + 60.0, "duracion_min": 60.0, "riego_m3": 200.0, "riego_m3ha": 15.36,
+         "area_ha": 13.019, "valvula": "6061000", "hora_inicio": h, "hora_fin": hf, "fin_dia_siguiente": False}
+        for m, h, hf in ((360.0, "06:00", "07:00"), (480.0, "08:00", "09:00"))
+    ]
+    crear_registro(db, modulo_id, turnos["TE01"], D1, estado=EstadoRiego.aplicado,
+                   origen=OrigenRiego.historico, ciclos=dos_ciclos)
+    crear_registro(db, modulo_id, turnos["TE02"], D1, estado=EstadoRiego.aplicado,
+                   origen=OrigenRiego.historico)  # 1 ciclo de 100 m3
+    carga = subir(client, auth("admin"), modulo_id, excel(filas_base())).json()
+    menos = grupo(carga, D1, "TE01")  # 2 ciclos pero 350 m3 contra 400
+    assert (menos["resultado"], menos["aplicar"]) == ("reemplaza_aplicado", False)
+    assert "menos riego que lo ya aplicado (2 ciclo(s) y 350 m3 contra 2 y 400)" in menos["mensajes"][-1]
+    mas = grupo(carga, D1, "TE02")  # 1 ciclo de 190 m3 contra 100
+    assert (mas["resultado"], mas["aplicar"], mas["mensajes"]) == ("reemplaza_aplicado", True, [])
 
 
 def test_archivo_demasiado_grande_413(client: TestClient, auth, modulo_id, monkeypatch):

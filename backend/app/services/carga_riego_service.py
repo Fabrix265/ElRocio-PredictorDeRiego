@@ -16,13 +16,20 @@ Resultado                  Cuándo                                              
 ``reemplaza_provisional``  el vigente es provisional                                      sí
 ``reemplaza_aplicado``     el vigente ya es aplicado                                      sí, salvo
                                                                                           vigente
-                                                                                          manual
+                                                                                          manual o
+                                                                                          aviso
 ``sin_riego``              D7: el archivo trae la fecha pero ninguna fila del turno, o    sí, salvo
                            solo aperturas fallidas → "no se regó"                         vigente
                                                                                           aplicado
+                                                                                          o aviso
 ``error``                  fecha de hoy o futura, turno o válvula desconocidos, inicio    no aplica
                            repetido con valores distintos, fila de otro fundo/módulo
 =========================  =============================================================  ==========
+
+**Avisos (desmarcado por defecto, con el motivo en ``mensajes``).** La última fecha del archivo
+puede venir cortada (exportado a mitad del día): en esa fecha ningún ``reemplaza_aplicado`` ni
+``sin_riego`` queda marcado. En cualquier fecha, un ``reemplaza_aplicado`` con menos ciclos o menos
+m3 que el vigente tampoco. El usuario puede marcarlos igual si los revisó.
 
 **Confirmar.** Bloquea la carga y los registros vigentes del rango (``FOR UPDATE``). Si pasaron
 24 h o cambió algún registro comparado (otro usuario o carga creó una versión), la carga **vence**
@@ -58,7 +65,7 @@ from app.models import CargaRiego, Fundo, Modulo, Turno, Usuario
 from app.models.enums import EstadoCarga, EstadoRiego, OrigenRiego, ResultadoCarga
 from app.repositories import riego as repo
 from app.services import ambiente_service, auditoria_service
-from app.services.archivo_excel import MAX_FILAS, ArchivoInvalido, ArchivoValidado
+from app.services.archivo_excel import MAX_FILAS, ArchivoInvalido, ArchivoValidado, mensaje_max_filas
 from app.services.contexto import ContextoPeticion
 from app.services.riego_contenido import ciclos_para_bd, hash_contenido, texto_valvula
 
@@ -81,6 +88,15 @@ MENSAJE_D7 = "El archivo trae esta fecha pero ninguna fila de este turno: se reg
 MENSAJE_SOLO_FALLIDAS = (
     "Solo aperturas fallidas (< {dur:g} min o < {m3:g} m3/ha): se registra «no se regó»."
 )
+AVISO_ULTIMA_FECHA = (
+    "Aviso: es la última fecha del archivo y puede venir incompleta (exportado a mitad del día). "
+    "Quedó desmarcado: márcalo solo si revisaste que el día está completo."
+)
+AVISO_MENOS_RIEGO = (
+    "Aviso: el archivo trae menos riego que lo ya aplicado ({ciclos} ciclo(s) y {m3:g} m3 contra "
+    "{ciclos_vigente} y {m3_vigente:g}). Quedó desmarcado."
+)
+TOLERANCIA_M3 = 0.01
 
 
 class CargaVencida(Conflicto):
@@ -106,7 +122,7 @@ def leer_hoja(archivo: ArchivoValidado) -> tuple[pd.DataFrame, dict]:
         raise ArchivoInvalido(f"No se pudo leer la hoja {HOJA} del archivo.") from None
     filas = int(diag.get("Riego: filas originales", len(crudos)))
     if filas > MAX_FILAS:
-        raise ArchivoInvalido(f"La hoja {HOJA} supera el máximo de {MAX_FILAS:,} filas.".replace(",", " "))
+        raise ArchivoInvalido(mensaje_max_filas(HOJA))  # segunda barrera (ya se contó en streaming)
     if crudos.empty:
         raise ArchivoInvalido(SIN_FILAS)
     return crudos, diag
@@ -251,8 +267,34 @@ def agrupar(
     return grupos, resumen
 
 
-def clasificar(grupos: list[Grupo], vigentes: dict[tuple[int, dt.date], Any]) -> None:
-    """Fija ``resultado``, ``aplicar`` y ``vigente_id`` comparando con los registros vigentes."""
+def _m3_total(ciclos: list[dict[str, Any]]) -> float:
+    return round(sum(c.get("riego_m3") or 0.0 for c in ciclos), 4)
+
+
+def _aviso(grupo: Grupo, vigente: Any, ultima_fecha: dt.date | None) -> str | None:
+    """Motivo para dejar desmarcado un grupo aplicable que pisaría datos mejores (ver módulo)."""
+    if grupo.resultado == ResultadoCarga.sin_riego:
+        return AVISO_ULTIMA_FECHA if grupo.aplicar and grupo.fecha == ultima_fecha else None
+    if grupo.resultado != ResultadoCarga.reemplaza_aplicado:
+        return None
+    if grupo.fecha == ultima_fecha:
+        return AVISO_ULTIMA_FECHA
+    ciclos_vigente = getattr(vigente, "n_ciclos", None)
+    m3_vigente = getattr(vigente, "m3_total", None)
+    if ciclos_vigente is None or m3_vigente is None:
+        return None
+    m3 = _m3_total(grupo.ciclos)
+    if len(grupo.ciclos) < ciclos_vigente or m3 < float(m3_vigente) - TOLERANCIA_M3:
+        return AVISO_MENOS_RIEGO.format(ciclos=len(grupo.ciclos), m3=m3, ciclos_vigente=ciclos_vigente,
+                                        m3_vigente=round(float(m3_vigente), 4))
+    return None
+
+
+def clasificar(
+    grupos: list[Grupo], vigentes: dict[tuple[int, dt.date], Any], *, ultima_fecha: dt.date | None = None
+) -> None:
+    """Fija ``resultado``, ``aplicar`` y ``vigente_id`` comparando con los registros vigentes.
+    ``ultima_fecha``: la última fecha del archivo (puede venir cortada: ver avisos en el módulo)."""
     for grupo in grupos:
         vigente = vigentes.get((grupo.turno_id, grupo.fecha)) if grupo.turno_id is not None else None
         grupo.vigente_id = vigente.id if vigente is not None else None
@@ -271,6 +313,10 @@ def clasificar(grupos: list[Grupo], vigentes: dict[tuple[int, dt.date], Any]) ->
         else:
             grupo.resultado = ResultadoCarga.reemplaza_aplicado
             grupo.aplicar = vigente.origen != OrigenRiego.manual
+        aviso = _aviso(grupo, vigente, ultima_fecha)
+        if aviso is not None:
+            grupo.aplicar = False
+            grupo.mensajes = [*grupo.mensajes, aviso]
 
 
 def _contadores(resultados) -> dict[str, int]:
@@ -300,9 +346,13 @@ def crear_carga(
     fundo = db.get(Fundo, modulo.fundo_id)
     turnos = [t for t in repo.turnos_de_modulo(db, modulo.id) if t.activo]
     grupos, resumen = agrupar(crudos, modulo, turnos, ambiente_service.nombre_fundo(fundo), hoy_lima())
-    clasificar(grupos, repo.resumen_vigentes(db, modulo.id))
+    ultima_fecha = max(crudos["Fecha"].dt.date)
+    clasificar(grupos, repo.resumen_vigentes(db, modulo.id), ultima_fecha=ultima_fecha)
 
     contadores = _contadores(g.resultado for g in grupos)
+    resumen["ultima_fecha_archivo"] = ultima_fecha.isoformat()
+    resumen["desmarcados_por_aviso"] = sum(
+        1 for g in grupos if any(m.startswith("Aviso:") for m in g.mensajes))
     fechas = [g.fecha for g in grupos]
     resumen = {
         "contadores": contadores,

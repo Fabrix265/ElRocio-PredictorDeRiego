@@ -15,9 +15,13 @@ cerrar el formulario):
    una DTD solo puede ir antes del elemento raíz, así que basta leer hasta él.
 5. Hoja pedida (``MOD5``) presente en ``xl/workbook.xml``.
 6. openpyxl (lo usa ``pandas.read_excel``) debe estar usando ``defusedxml``; si no, se rechaza.
+7. La hoja se recorre una vez en *streaming* (``defusedxml.iterparse``, sin pandas) antes de
+   leerla: a lo sumo :data:`MAX_FILAS` filas de datos (se corta al pasarse, sin leer el resto) y
+   ninguna celda con fórmula sin valor guardado (archivos generados por script u openpyxl y nunca
+   abiertos en Excel: pandas las lee vacías y un turno regado parecería «no se regó»).
 
-Las comprobaciones de columnas (las 10 de ``leer_riego``) y de filas (≤ :data:`MAX_FILAS`) se
-hacen al leer la hoja (``carga_riego_service``).
+Las comprobaciones de columnas (las 10 de ``leer_riego``) se hacen al leer la hoja
+(``carga_riego_service``).
 """
 
 from __future__ import annotations
@@ -44,6 +48,10 @@ MAX_FILAS = 100_000
 EXTENSION = ".xlsx"
 PARTES_OBLIGATORIAS = ("[Content_Types].xml", "xl/workbook.xml")
 _NS_HOJA = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+_NS_REL_DOC = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_NS_REL_PAQ = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+_RELS_LIBRO = "xl/_rels/workbook.xml.rels"
+MAX_EJEMPLOS_FORMULA = 5
 _TROZO = 1024 * 1024
 _NOMBRE_NO_PERMITIDO = re.compile(r"[^\w .,()\[\]-]+")
 
@@ -123,6 +131,74 @@ def _hojas(libro: bytes) -> list[str]:
     return [h.get("name", "") for h in raiz.iter(f"{_NS_HOJA}sheet")]
 
 
+def _parte_de_hoja(archivo_zip: zipfile.ZipFile, hoja: str) -> str | None:
+    """Ruta dentro del ZIP de la hoja ``hoja`` (``xl/worksheets/sheetN.xml``), por su relación."""
+    libro = DefusedET.fromstring(archivo_zip.read("xl/workbook.xml"), forbid_dtd=True)
+    rel_id = next((h.get(f"{_NS_REL_DOC}id") for h in libro.iter(f"{_NS_HOJA}sheet")
+                   if h.get("name") == hoja), None)
+    if rel_id is None or _RELS_LIBRO not in archivo_zip.namelist():
+        return None
+    relaciones = DefusedET.fromstring(archivo_zip.read(_RELS_LIBRO), forbid_dtd=True)
+    destino = next((r.get("Target") for r in relaciones.iter(f"{_NS_REL_PAQ}Relationship")
+                    if r.get("Id") == rel_id), None)
+    if not destino:
+        return None
+    parte = destino.lstrip("/") if destino.startswith("/") else f"xl/{destino}"
+    return parte if parte in archivo_zip.namelist() else None
+
+
+@dataclass
+class EscaneoHoja:
+    filas: int = 0  # incluida la de encabezados
+    formulas_sin_valor: int = 0
+    ejemplos: list[str] | None = None
+    cortado: bool = False  # se pasó de MAX_FILAS y no se leyó el resto
+
+
+def escanear_hoja(archivo_zip: zipfile.ZipFile, parte: str, *, max_filas: int | None = None) -> EscaneoHoja:
+    """Recorre la hoja en streaming: cuenta filas (corta al pasar ``max_filas`` de datos) y
+    busca celdas con fórmula (``<f>``) sin valor guardado (``<v>`` vacío o ausente)."""
+    max_filas = MAX_FILAS if max_filas is None else max_filas
+    resultado = EscaneoHoja(ejemplos=[])
+    fila, celda, formula, valor = f"{_NS_HOJA}row", f"{_NS_HOJA}c", f"{_NS_HOJA}f", f"{_NS_HOJA}v"
+    with archivo_zip.open(parte) as flujo:
+        for _evento, elemento in DefusedET.iterparse(
+            flujo, events=("end",), forbid_dtd=True, forbid_entities=True, forbid_external=True,
+        ):
+            if elemento.tag == fila:
+                resultado.filas += 1
+                elemento.clear()
+                if resultado.filas > max_filas + 1:
+                    resultado.cortado = True
+                    break
+            elif elemento.tag == celda and elemento.find(formula) is not None:
+                guardado = elemento.find(valor)
+                if guardado is None or not (guardado.text or "").strip():
+                    resultado.formulas_sin_valor += 1
+                    if len(resultado.ejemplos) < MAX_EJEMPLOS_FORMULA:
+                        resultado.ejemplos.append(elemento.get("r") or "?")
+    return resultado
+
+
+def mensaje_max_filas(hoja: str) -> str:
+    return f"La hoja {hoja} supera el máximo de {MAX_FILAS:,} filas.".replace(",", " ")
+
+
+def _verificar_contenido_hoja(archivo_zip: zipfile.ZipFile, hoja: str) -> None:
+    parte = _parte_de_hoja(archivo_zip, hoja)
+    if parte is None:
+        raise ArchivoInvalido(f"El archivo no es un Excel .xlsx válido (no se encuentra la hoja {hoja}).")
+    escaneo = escanear_hoja(archivo_zip, parte)
+    if escaneo.cortado:
+        raise ArchivoInvalido(mensaje_max_filas(hoja))
+    if escaneo.formulas_sin_valor:
+        ejemplos = ", ".join(escaneo.ejemplos or [])
+        raise ArchivoInvalido(
+            f"La hoja {hoja} tiene {escaneo.formulas_sin_valor} celda(s) con fórmula sin valor "
+            f"calculado (p. ej. {ejemplos}): ábrelo en Excel, guárdalo y vuelve a subirlo."
+        )
+
+
 def _verificar_xml(archivo_zip: zipfile.ZipFile, info: zipfile.ZipInfo) -> None:
     """Lee la parte hasta el elemento raíz con defusedxml: rechaza DTD, entidades y externos."""
     with archivo_zip.open(info) as flujo:
@@ -176,16 +252,17 @@ def validar_xlsx(nombre: str | None, contenido: bytes, *, hoja: str) -> ArchivoV
                 if info.filename.lower().endswith((".xml", ".rels")):
                     _verificar_xml(archivo_zip, info)
             hojas = _hojas(archivo_zip.read("xl/workbook.xml"))
+            if hoja not in hojas:
+                raise ArchivoInvalido(f"El archivo no tiene la hoja {hoja}.")
+            _verificar_contenido_hoja(archivo_zip, hoja)
         except ArchivoInvalido:
             raise
         except DefusedXmlException:
             raise ArchivoInvalido(
                 "El archivo contiene XML no permitido (DTD o entidades): no se procesa."
             ) from None
-        except (zipfile.BadZipFile, DefusedET.ParseError, OSError, EOFError, RuntimeError):
+        except (zipfile.BadZipFile, DefusedET.ParseError, OSError, EOFError, RuntimeError, KeyError):
             raise ArchivoInvalido("El archivo está dañado y no se puede leer.") from None
-    if hoja not in hojas:
-        raise ArchivoInvalido(f"El archivo no tiene la hoja {hoja}.")
     return ArchivoValidado(
         nombre=nombre_saneado(nombre), contenido=contenido,
         sha256=hashlib.sha256(contenido).hexdigest(),
