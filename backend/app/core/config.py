@@ -6,6 +6,7 @@ completa, con comentarios, está en ``backend/.env.example``.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -21,9 +22,17 @@ def _lista(valor: str) -> list[str]:
     return [parte.strip() for parte in valor.split(",") if parte.strip()]
 
 
+def _archivo_env() -> Path | None:
+    """``backend/.env``, salvo con ``RIEGO_SIN_ENV_FILE=1``: entonces solo cuentan las variables
+    del entorno (hosting sin archivo, o agentes en un sandbox que no puede leer ``.env``)."""
+    if os.environ.get("RIEGO_SIN_ENV_FILE", "").strip().lower() in {"1", "true", "si", "sí"}:
+        return None
+    return BACKEND_ROOT / ".env"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=BACKEND_ROOT / ".env",
+        env_file=_archivo_env(),
         env_file_encoding="utf-8",
         extra="ignore",
     )

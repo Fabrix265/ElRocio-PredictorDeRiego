@@ -18,6 +18,9 @@ TEST_DATABASE_URL = os.environ.get(
 # Debe ir antes de importar app.*: las variables del entorno tienen prioridad sobre backend/.env.
 os.environ.update(
     {
+        # La suite no necesita backend/.env (todo lo fija este diccionario) y así corre también
+        # donde el archivo no se puede leer.
+        "RIEGO_SIN_ENV_FILE": "1",
         "APP_ENV": "test",
         "DEBUG": "false",
         "DATABASE_URL": TEST_DATABASE_URL,
