@@ -40,7 +40,7 @@ export function validarRango(desde: string, hasta: string): string | null {
 interface Seleccion {
   turno: Turno;
   fecha: string;
-  registro: RegistroRiego;
+  registro: RegistroRiego | null;
 }
 
 const LEYENDA: EstadoCelda[] = ["aplicado", "provisional", "sin_riego", "sin_registro"];
@@ -175,6 +175,7 @@ export default function RiegoPage() {
               registros={registros}
               seleccionado={seleccion ? claveTurnoDia(seleccion.turno.id, seleccion.fecha) : null}
               onSeleccionar={(turno, fecha, registro) => setSeleccion({ turno, fecha, registro })}
+              abrirSinRegistro={puede(usuario.rol, "editarRiego")}
             />
           </div>
         )}

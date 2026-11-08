@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CalendarDays, Moon, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 
 import { Alert } from "../../components/ui/Alert";
@@ -26,6 +26,9 @@ import {
 import { useUsuario } from "../auth/AuthProvider";
 import { ETIQUETA_ESTADO, ETIQUETA_ORIGEN_VERSION, MarcasVersion, TONO_ESTADO, formato } from "./etiquetas";
 import { Gantt } from "./Gantt";
+import { EditorPlan } from "./EditorPlan";
+import { AccionesCronograma } from "./AccionesCronograma";
+import { Comparador, DatosCronograma, Diferencias, LineaTiempo } from "./ConsultasCronograma";
 
 const TH = "border-b border-borde bg-hundido px-2.5 py-2 text-left text-xs font-semibold text-texto-2";
 const TD = "border-b border-borde px-2.5 py-2 whitespace-nowrap";
@@ -106,9 +109,6 @@ function ContenidoVersion({ version }: { version: VersionDetalle }) {
           </div>
         </dl>
       </div>
-      <div className="px-4">
-        <Gantt turnos={version.turnos} />
-      </div>
       <TablaTurnos turnos={version.turnos} />
     </div>
   );
@@ -157,10 +157,24 @@ function ListaVersiones({
 
 export default function CronogramaDetallePage() {
   const id = Number(useParams().id);
+  return <Detalle key={id} id={id} />;
+}
+
+function Detalle({ id }: { id: number }) {
   const usuario = useUsuario();
   const queryClient = useQueryClient();
   const [numero, setNumero] = useState<number | null>(null);
   const [confirmar, setConfirmar] = useState(false);
+  const [pestana, setPestana] = useState("Plan");
+  const [edicion, setEdicion] = useState<CronogramaDetalle | null>(null);
+  const apertura = useRef(false);
+  const tabs = puede(usuario.rol, "verRevisionCronograma") ? ["Plan", "Gantt", "Datos", "Versiones", "Línea de tiempo"] : ["Plan", "Gantt"];
+  useEffect(() => {
+    if (!apertura.current && Number.isInteger(id) && id > 0 && puede(usuario.rol, "registrarVista")) {
+      apertura.current = true;
+      void cronogramasApi.vista(id).catch(() => undefined);
+    }
+  }, [id, usuario.rol]);
   const puedeRegenerar = puede(usuario.rol, "generarCronogramas");
 
   const consulta = useQuery({
@@ -171,7 +185,7 @@ export default function CronogramaDetallePage() {
   const otra = useQuery({
     queryKey: claveCronogramas.version(id, numero ?? 0),
     queryFn: ({ signal }) => cronogramasApi.version(id, numero!, signal),
-    enabled: numero !== null,
+    enabled: numero !== null && Number.isInteger(id) && id > 0,
   });
 
   const regenerar = useMutation({
@@ -189,8 +203,12 @@ export default function CronogramaDetallePage() {
   const c: CronogramaDetalle | undefined = consulta.data;
   const version = numero !== null ? otra.data : c?.version ?? undefined;
 
+  const vista = c?.versiones.find((v) => v.numero === c.mi_ultimo_visto_numero);
+  const publicada = c?.versiones.find((v) => v.id === c.version_publicada_id);
+  const editable = c && puede(usuario.rol, "corregirCronogramas") && c.version && c.version.id === (c.borrador_version_id ?? c.version_publicada_id) && (!!c.borrador_version_id || c.estado !== "borrador");
+  if (!Number.isInteger(id) || id <= 0) return <Alert tono="error">Cronograma no válido.</Alert>;
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <Link to="/cronogramas" className="inline-flex w-fit items-center gap-1 text-sm font-semibold text-marca hover:underline">
         <ArrowLeft className="size-4" aria-hidden="true" /> Cronogramas
       </Link>
@@ -200,12 +218,13 @@ export default function CronogramaDetallePage() {
           <Skeleton className="h-16" />
           <Skeleton className="h-64" />
         </div>
-      ) : consulta.isError ? (
+      ) : consulta.isError && !c ? (
         <Alert tono="error" titulo="No se pudo cargar el cronograma">
           {mensajeDeError(consulta.error)}
         </Alert>
       ) : (
         <>
+          {consulta.isError && <Alert tono="error">No se pudo actualizar el detalle: {mensajeDeError(consulta.error)} <Button variante="fantasma" disabled={consulta.isFetching} onClick={() => void consulta.refetch()}>Reintentar</Button></Alert>}
           <PageHeader
             antetitulo={`Cronograma · ${c!.modulo_codigo}`}
             titulo={formatearDiaCorto(c!.fecha)}
@@ -213,12 +232,12 @@ export default function CronogramaDetallePage() {
               <span className="flex flex-wrap items-center gap-2">
                 <Badge tono={TONO_ESTADO[c!.estado]}>{ETIQUETA_ESTADO[c!.estado]}</Badge>
                 {c!.tiene_borrador_cambios && <Badge tono="aviso">Cambios sin publicar</Badge>}
-                <span className="text-xs text-texto-2">La corrección y la publicación llegan en la fase 4.</span>
+                {c!.num_publicaciones > 1 && c!.estado === "publicado" && <Badge tono="aviso">Modificado · pendiente de visto</Badge>}
               </span>
             }
             acciones={
               puedeRegenerar && (
-                <Button variante="secundario" onClick={() => regenerar.mutate(false)} disabled={regenerar.isPending}>
+                <Button variante="secundario" onClick={() => regenerar.mutate(false)} disabled={regenerar.isPending || !!edicion}>
                   <RefreshCw aria-hidden="true" className={regenerar.isPending ? "animate-spin" : undefined} />
                   {regenerar.isPending ? "Regenerando…" : "Regenerar"}
                 </Button>
@@ -239,49 +258,79 @@ export default function CronogramaDetallePage() {
             </Alert>
           )}
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_280px]">
-            <Card className="min-w-0">
-              <CardHeader titulo={numero === null ? "Versión vigente" : `Versión v${numero}`} />
-              {numero !== null && otra.isPending ? (
-                <div className="p-4">
-                  <Skeleton className="h-48" />
-                </div>
+          {c!.estado === "correccion_solicitada" && <Alert tono="aviso" titulo="Corrección solicitada">
+            <p className="break-words">{c!.correccion_solicitada_motivo}</p>
+            <p>{c!.correccion_solicitada_por ?? "—"} · {formatearFechaHora(c!.correccion_solicitada_at)}</p>
+          </Alert>}
+          <AccionesCronograma cronograma={c!} bloqueado={!!edicion || regenerar.isPending} />
+          {usuario.rol === "programador" && vista && publicada && vista.id !== publicada.id && <Card>
+            <CardHeader titulo="Cambió desde tu Visto" />
+            <div className="p-4"><Diferencias id={id} base={vista.numero} contra={publicada.numero} /></div>
+          </Card>}
+          <div role="tablist" aria-label="Detalle del cronograma" className="flex flex-wrap gap-1">
+            {tabs.map((tab, i) => <button key={tab} type="button" role="tab" id={`tab-${i}`} aria-controls={`panel-${i}`} aria-selected={pestana === tab} tabIndex={pestana === tab ? 0 : -1}
+              disabled={!!edicion && tab !== "Plan"}
+              className={cn("rounded-md px-3 py-2 text-sm font-semibold disabled:opacity-50", pestana === tab ? "bg-activo-bg text-activo-tx" : "text-texto-2 hover:bg-hundido")}
+              onClick={() => setPestana(tab)} onKeyDown={(e) => {
+                if (edicion || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+                e.preventDefault();
+                const siguiente = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+                setPestana(tabs[siguiente]); document.getElementById(`tab-${siguiente}`)?.focus();
+              }}>{tab}</button>)}
+          </div>
+          <Card role="tabpanel" id={`panel-${tabs.indexOf(pestana)}`} aria-labelledby={`tab-${tabs.indexOf(pestana)}`} tabIndex={0}>
+            {(pestana === "Plan" || pestana === "Gantt") && <>
+              <CardHeader titulo={edicion ? `Corrigiendo v${edicion.version!.numero}` : numero === null ? "Versión vigente" : `Versión v${numero}`} acciones={pestana === "Plan" && numero === null && !edicion && editable && <Button disabled={regenerar.isPending} onClick={() => setEdicion(c!)}>Corregir</Button>} />
+              {numero !== null && !edicion && <div className="px-4 pt-3"><Button variante="secundario" onClick={() => setNumero(null)}>Volver a la versión vigente</Button></div>}
+              {edicion ? (
+                <EditorPlan cronograma={edicion} alCerrar={() => setEdicion(null)} alRecargar={() => consulta.refetch()} />
+              ) : numero !== null && otra.isPending ? (
+                <div className="p-4"><Skeleton className="h-48" /></div>
               ) : numero !== null && otra.isError ? (
                 <div className="p-4">
-                  <Alert tono="error">{mensajeDeError(otra.error)}</Alert>
+                  <Alert tono="error">
+                    {mensajeDeError(otra.error)}
+                    <Button variante="fantasma" disabled={otra.isFetching} onClick={() => void otra.refetch()}>Reintentar</Button>
+                  </Alert>
                 </div>
-              ) : version ? (
-                <div className="pb-2">
-                  <ContenidoVersion version={version} />
-                </div>
-              ) : (
+              ) : !version ? (
                 <EmptyState compacto icono={<CalendarDays />} titulo="Sin versión visible" />
+              ) : !version.turnos.length ? (
+                <EmptyState compacto icono={<CalendarDays />} titulo="Sin turnos en esta versión" />
+              ) : pestana === "Gantt" ? (
+                <div className="p-4"><Gantt turnos={version.turnos} /></div>
+              ) : (
+                <div className="pb-2"><ContenidoVersion version={version} /></div>
               )}
-            </Card>
-            <Card className="h-fit">
-              <CardHeader titulo="Versiones" descripcion="Toca una para verla" />
-              <ListaVersiones versiones={c!.versiones} elegida={numero} onElegir={setNumero} />
-            </Card>
-          </div>
+            </>}
+            {pestana === "Datos" && <DatosCronograma id={id} />}
+            {pestana === "Versiones" && <>
+              <CardHeader titulo="Versiones" descripcion="Toca una para verla en Plan" />
+              {c!.versiones.length ? <ListaVersiones versiones={c!.versiones} elegida={numero} onElegir={(n) => { setNumero(n); setPestana("Plan"); }} /> : <p className="p-4 text-texto-2">Sin versiones visibles.</p>}
+              <Comparador cronograma={c!} />
+            </>}
+            {pestana === "Línea de tiempo" && <LineaTiempo id={id} />}
+          </Card>
         </>
       )}
 
-      <Dialog open={confirmar} onOpenChange={setConfirmar}>
+      <Dialog open={confirmar} onOpenChange={(v) => { if (!regenerar.isPending) setConfirmar(v); }}>
         <DialogContent
           titulo="¿Regenerar sobre las correcciones?"
           descripcion="El borrador tiene correcciones. Regenerar crea una versión nueva con la propuesta del modelo; las correcciones quedan en el historial de versiones."
           pie={
             <>
-              <Button variante="secundario" onClick={() => setConfirmar(false)}>
+              <Button variante="secundario" disabled={regenerar.isPending} onClick={() => setConfirmar(false)}>
                 Cancelar
               </Button>
-              <Button onClick={() => regenerar.mutate(true)} disabled={regenerar.isPending}>
+              <Button onClick={() => regenerar.mutate(true)} disabled={regenerar.isPending || !!edicion}>
                 Regenerar igual
               </Button>
             </>
           }
         >
           <p className="text-sm text-texto-2">Lo publicado no cambia hasta que se publique el borrador.</p>
+          {regenerar.isError && !(regenerar.error instanceof ApiError && regenerar.error.status === 409 && /Confirma/i.test(regenerar.error.message)) && <Alert tono="error">{mensajeDeError(regenerar.error)}</Alert>}
         </DialogContent>
       </Dialog>
     </div>

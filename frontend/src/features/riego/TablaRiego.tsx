@@ -28,8 +28,10 @@ interface TablaRiegoProps {
   dias: string[];
   turnos: Turno[];
   registros: Map<string, RegistroRiego>;
-  onSeleccionar: (turno: Turno, fecha: string, registro: RegistroRiego) => void;
+  onSeleccionar: (turno: Turno, fecha: string, registro: RegistroRiego | null) => void;
   seleccionado?: string | null;
+  /** A, E y S pueden abrir también los turno-días sin registro para cargar el riego a mano. */
+  abrirSinRegistro?: boolean;
 }
 
 function Celda({
@@ -38,12 +40,14 @@ function Celda({
   registro,
   onSeleccionar,
   seleccionada,
+  abrirSinRegistro = false,
 }: {
   turno: Turno;
   fecha: string;
   registro: RegistroRiego | undefined;
   onSeleccionar: TablaRiegoProps["onSeleccionar"];
   seleccionada: boolean;
+  abrirSinRegistro?: boolean;
 }) {
   const estado = estadoCelda(registro);
   const resumen = resumirCiclos(registro?.ciclos);
@@ -96,7 +100,7 @@ function Celda({
     seleccionada && "ring-2 ring-foco",
   );
 
-  if (!registro) {
+  if (!registro && !abrirSinRegistro) {
     return (
       <div className={clases} aria-label={etiqueta} role="group">
         {contenido}
@@ -106,7 +110,7 @@ function Celda({
   return (
     <button
       type="button"
-      onClick={() => onSeleccionar(turno, fecha, registro)}
+      onClick={() => onSeleccionar(turno, fecha, registro ?? null)}
       aria-label={`Ver detalle: ${etiqueta}`}
       className={cn(
         clases,
@@ -122,7 +126,7 @@ function Celda({
  * Riego por día (filas, la más reciente arriba) × turno (columnas) con sus ciclos.
  * En celular cada día es una tarjeta con los turnos apilados (sin scroll horizontal).
  */
-export function TablaRiego({ dias, turnos, registros, onSeleccionar, seleccionado }: TablaRiegoProps) {
+export function TablaRiego({ dias, turnos, registros, onSeleccionar, seleccionado, abrirSinRegistro }: TablaRiegoProps) {
   const estiloColumnas = { "--n": turnos.length } as CSSProperties;
   // Consulta de contenedor (no de pantalla): con la barra lateral abierta la tabla puede ser angosta.
   const columnas = "@3xl:grid-cols-[104px_repeat(var(--n),minmax(0,1fr))]";
@@ -162,6 +166,7 @@ export function TablaRiego({ dias, turnos, registros, onSeleccionar, seleccionad
                 registro={delDia[i]}
                 onSeleccionar={onSeleccionar}
                 seleccionada={seleccionado === claveTurnoDia(t.id, fecha)}
+                abrirSinRegistro={abrirSinRegistro}
               />
             ))}
           </section>

@@ -5,7 +5,7 @@ import { Link, useNavigate } from "react-router";
 
 import { Alert } from "../../components/ui/Alert";
 import { Badge } from "../../components/ui/Badge";
-import { clasesBoton } from "../../components/ui/Button";
+import { Button, clasesBoton } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { Field } from "../../components/ui/Field";
@@ -26,6 +26,7 @@ export default function CronogramasPage() {
   const navigate = useNavigate();
   const { modulo } = useSeleccion();
   const hoy = hoyLima();
+  const [filtro, setFiltro] = useState("Todos");
   const [rango, setRango] = useState(() => ({ desde: sumarDias(hoy, -30), hasta: sumarDias(hoy, 7) }));
   const errorRango = validarRango(rango.desde, rango.hasta);
   const puedeGenerar = puede(usuario.rol, "generarCronogramas");
@@ -36,6 +37,8 @@ export default function CronogramasPage() {
     enabled: !!modulo && !errorRango,
     placeholderData: keepPreviousData,
   });
+
+  const filtrados = (consulta.data ?? []).filter((c) => filtro === "Todos" || (filtro === "Borrador" ? c.estado === "borrador" || c.tiene_borrador_cambios : filtro === "Modificado" ? c.estado === "publicado" && c.num_publicaciones > 1 : ETIQUETA_ESTADO[c.estado] === filtro));
 
   const botonGenerar = puedeGenerar && (
     <Link to="/generar" className={clasesBoton("primario")}>
@@ -65,6 +68,9 @@ export default function CronogramasPage() {
             <Input type="date" value={rango.hasta} onChange={(e) => setRango((r) => ({ ...r, hasta: e.target.value }))} />
           </Field>
         </div>
+        <div className="flex flex-wrap gap-2 border-b border-borde p-4" aria-label="Filtrar por estado">
+          {["Todos", "Borrador", "Publicado", "Visto", "Corrección solicitada", "Modificado"].map((f) => <Button key={f} tamano="sm" variante={filtro === f ? "primario" : "secundario"} aria-pressed={filtro === f} onClick={() => setFiltro(f)}>{f}</Button>)}
+        </div>
         {errorRango ? (
           <div className="p-4">
             <Alert tono="aviso">{errorRango}</Alert>
@@ -83,17 +89,17 @@ export default function CronogramasPage() {
             <Skeleton className="h-14" />
             <Skeleton className="h-14" />
           </div>
-        ) : consulta.data.length === 0 ? (
+        ) : filtrados.length === 0 ? (
           <EmptyState
             compacto
             icono={<CalendarDays />}
-            titulo="Sin cronogramas en este rango"
+            titulo="Sin cronogramas para estos filtros"
             descripcion={puedeGenerar ? "Genera los de hoy y los próximos días con el modelo." : "Aún no hay cronogramas publicados en estas fechas."}
             accion={botonGenerar}
           />
         ) : (
           <ul className={consulta.isPlaceholderData ? "divide-y divide-borde opacity-60" : "divide-y divide-borde"}>
-            {consulta.data.map((c) => (
+            {filtrados.map((c) => (
               <li key={c.id}>
                 <button
                   type="button"
@@ -107,6 +113,7 @@ export default function CronogramasPage() {
                     </span>
                     <span className="flex flex-wrap items-center gap-1.5">
                       <Badge tono={TONO_ESTADO[c.estado]}>{ETIQUETA_ESTADO[c.estado]}</Badge>
+                      {c.num_publicaciones > 1 && c.estado === "publicado" && <Badge tono="aviso">Modificado · pendiente de visto</Badge>}
                       {c.tiene_borrador_cambios && <Badge tono="aviso">Cambios sin publicar</Badge>}
                       {c.version && (
                         <span className="text-xs text-texto-2">

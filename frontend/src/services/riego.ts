@@ -19,6 +19,11 @@
 import { api } from "./httpClient";
 
 export type EstadoRiego = "provisional" | "aplicado";
+export interface CicloRiegoEntrada { inicio_min: number; duracion_min: number; riego_m3ha: number }
+export interface RegistroRiegoEntrada {
+  turno_id: number; fecha: string; basado_en_id: number | null; estado: EstadoRiego;
+  sin_riego: boolean; motivo: string; comentario?: string | null; ciclos: CicloRiegoEntrada[];
+}
 export type OrigenRiego = "historico" | "cronograma" | "excel" | "manual" | "controlador";
 export type EstadoCarga = "previsualizada" | "confirmada" | "descartada" | "vencida";
 export type ResultadoCarga =
@@ -145,6 +150,9 @@ export function normalizarCarga(c: CargaRiego): CargaRiego {
 // ---------------------------------------------------------------------------
 
 export const riegoApi = {
+  async guardarRegistro(datos: RegistroRiegoEntrada): Promise<RegistroRiego> {
+    return normalizarRegistro(await api.post<RegistroRiego>("/riego/registros", datos));
+  },
   async listar(moduloId: number, desde: string, hasta: string, signal?: AbortSignal): Promise<RegistroRiego[]> {
     const resp = await api.get<RespuestaRiego>("/riego", { modulo_id: moduloId, desde, hasta }, signal);
     return resp.registros.map(normalizarRegistro);

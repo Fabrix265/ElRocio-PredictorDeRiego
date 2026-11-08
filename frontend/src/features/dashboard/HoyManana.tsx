@@ -17,8 +17,7 @@ import { ETIQUETA_ESTADO, MarcasVersion, TONO_ESTADO, formato } from "../cronogr
 import { Gantt } from "../cronogramas/Gantt";
 
 /** Cronograma de hoy y de mañana con su Gantt (el programador solo ve los publicados). */
-export function HoyManana() {
-  const usuario = useUsuario();
+export function useCronogramasHoyManana() {
   const { modulo } = useSeleccion();
   const hoy = hoyLima();
   const fechas = [hoy, sumarDias(hoy, 1)];
@@ -29,6 +28,12 @@ export function HoyManana() {
       enabled: !!modulo,
     })),
   });
+  return { fechas, consultas };
+}
+
+export function HoyManana({ fechas, consultas }: ReturnType<typeof useCronogramasHoyManana>) {
+  const usuario = useUsuario();
+  const { modulo } = useSeleccion();
   const puedeGenerar = puede(usuario.rol, "generarCronogramas");
 
   return (
@@ -54,7 +59,7 @@ export function HoyManana() {
                   </span>
                 )}
               </div>
-              {!modulo || q.isPending ? (
+              {!modulo ? <p className="text-sm text-texto-2">Elige un módulo.</p> : q.isPending ? (
                 <Skeleton className="h-32" />
               ) : q.isError ? (
                 <Alert tono="error">{mensajeDeError(q.error)}</Alert>

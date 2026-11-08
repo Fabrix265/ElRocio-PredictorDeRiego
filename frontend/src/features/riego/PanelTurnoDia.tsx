@@ -5,6 +5,10 @@ import { Alert } from "../../components/ui/Alert";
 import { Badge } from "../../components/ui/Badge";
 import { DialogContent } from "../../components/ui/Dialog";
 import { Skeleton } from "../../components/ui/Skeleton";
+import { Button } from "../../components/ui/Button";
+import { puede } from "../../lib/roles";
+import { useUsuario } from "../auth/AuthProvider";
+import { AccionesRiego } from "./EditorRiego";
 import { cn } from "../../lib/cn";
 import { formatearDia, formatearFechaHora } from "../../lib/fechas";
 import { mensajeDeError } from "../../services/httpClient";
@@ -155,22 +159,33 @@ function HistorialVersiones({ turnoId, fecha }: { turnoId: number; fecha: string
 export function PanelTurnoDia({
   turno,
   fecha,
-  registro,
+  registro: recibido,
   verVersiones,
 }: {
   turno: Turno;
   fecha: string;
-  registro: RegistroRiego;
+  registro: RegistroRiego | null;
   verVersiones: boolean;
 }) {
-  const estado = estadoCelda(registro);
+  const usuario = useUsuario();
+  const puedeEditar = puede(usuario.rol, "editarRiego");
+  // La selección de la página contiene una foto; obtener el vigente evita seguir mostrando
+  // esa foto después de guardar o de resolver un conflicto.
+  const actual = useQuery({
+    queryKey: claveRiego.versiones(turno.id, fecha),
+    queryFn: ({ signal }) => riegoApi.versiones(turno.id, fecha, signal),
+    enabled: puedeEditar,
+  });
+  const registro = actual.data?.find((v) => v.vigente) ?? recibido;
+  const estado = estadoCelda(registro ?? undefined);
   return (
     <DialogContent
       lado="derecha"
       titulo={`${turno.codigo} · ${formatearDia(fecha)}`}
-      descripcion={`Riego ${ETIQUETA_ESTADO_CELDA[estado].toLowerCase()} · versión ${registro.version}`}
+      descripcion={registro ? `Riego ${ETIQUETA_ESTADO_CELDA[estado].toLowerCase()} · versión ${registro.version}` : "Sin registro de riego"}
     >
       <div className="flex flex-col gap-5">
+        {registro ? (
         <section className="flex flex-col gap-2" aria-labelledby="titulo-vigente">
           <h3 id="titulo-vigente" className="text-sm font-semibold">
             Riego vigente
@@ -195,6 +210,17 @@ export function PanelTurnoDia({
             <TablaCiclos ciclos={registro.ciclos} titulo={`Ciclos de ${turno.codigo} el ${formatearDia(fecha)}`} />
           )}
         </section>
+        ) : (
+          <p className="text-[13px] text-texto-2">
+            Este turno-día no tiene riego registrado. Puedes cargarlo con «Editar riego» o indicar que no se regó.
+          </p>
+        )}
+        {puedeEditar && actual.isError && <Alert tono="error">{mensajeDeError(actual.error)} <Button variante="fantasma" disabled={actual.isFetching} onClick={() => void actual.refetch()}>Recargar</Button></Alert>}
+        {puedeEditar && (actual.isPending ? (
+          <Skeleton className="h-16" />
+        ) : actual.data ? (
+          <AccionesRiego key={`${turno.id}-${fecha}`} registro={registro} turnoId={turno.id} fecha={fecha} alRecargar={() => actual.refetch()} />
+        ) : null)}
         {verVersiones && <HistorialVersiones turnoId={turno.id} fecha={fecha} />}
       </div>
     </DialogContent>

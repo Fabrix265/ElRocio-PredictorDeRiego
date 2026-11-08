@@ -1,5 +1,5 @@
 /**
- * Cronogramas (propuesta §3.1–§3.3 y §4; F3: generar, regenerar y lectura).
+ * Cronogramas (propuesta §3.1–§3.4 y §4; F3/F4: generación, lectura y flujo).
  *
  * Contrato del backend (prefijo /api/v1; esquemas en backend/app/schemas/cronograma.py):
  * - POST /cronogramas/generar {modulo_id, fecha_inicio?, dias, regenerar_existentes} → 200 GenerarSalida (A E)
@@ -11,6 +11,9 @@
  * - POST /cronogramas/{id}/regenerar {confirmar}        → 200 GenerarSalida (A E); 409 si el borrador
  *        tiene correcciones y no se confirmó
  *
+ * F4: recalcular, alternativas, versiones, descartar borrador, publicar, Visto, apertura,
+ * solicitar corrección, mantener, diferencias, eventos, datos de campo y motivos activos.
+ * Publicar/Visto devuelven el detalle con avisos; vista responde 204.
  * Minutos desde las 00:00 de la fecha del cronograma (el fin puede pasar de 1440: día siguiente).
  */
 import type { Frescura } from "./datos";
@@ -43,6 +46,9 @@ export interface GenerarSalida {
 }
 
 export interface CicloCronograma {
+  ciclo_modelo: number | null;
+  duracion_manual: boolean;
+  campos_editados: string[];
   ciclo: number;
   riego_m3ha: number;
   riego_m3: number;
@@ -116,6 +122,14 @@ export interface CronogramaListado extends CronogramaCabecera {
 }
 
 export interface CronogramaDetalle extends CronogramaCabecera {
+  visto_version_id: number | null;
+  visto_programador_at: string | null;
+  visto_por: string | null;
+  correccion_solicitada_at: string | null;
+  correccion_solicitada_por: string | null;
+  correccion_solicitada_motivo: string | null;
+  /** Solo para el programador: número de su último Visto (se conserva aunque se republique). */
+  mi_ultimo_visto_numero: number | null;
   version: VersionDetalle | null;
   versiones: VersionResumen[];
 }
@@ -127,15 +141,62 @@ export interface GenerarEntrada {
   regenerar_existentes: boolean;
 }
 
+export type CicloEdicion = Pick<CicloCronograma, "ciclo" | "riego_m3ha" | "inicio_min" | "duracion_min" | "duracion_manual">;
+export interface TurnoEdicion { turno_id: number; n_ciclos: number; ciclos: CicloEdicion[] }
+export interface EdicionEntrada { basada_en_id: number; turnos: TurnoEdicion[] }
+export interface GuardarVersionEntrada extends EdicionEntrada {
+  lock_version: number;
+  motivo_codigo?: string | null;
+  motivo_comentario?: string | null;
+}
+export interface AvisoSolape { turno_id: number; ciclo: number; tipo: "solape"; mensaje: string }
+export interface VersionPrevia extends Omit<VersionDetalle, "id" | "numero"> { avisos: AvisoSolape[] }
+export interface CronogramaConAvisos extends CronogramaDetalle { avisos: string[] }
+/** La foto del modelo no incluye los metadatos de edición de CicloSalida. */
+export type CicloAlternativa = Omit<CicloCronograma, "ciclo_modelo" | "duracion_manual" | "campos_editados"> & {
+  duracion_p10: number | null; duracion_p90: number | null;
+};
+export type Alternativas = Record<string, Record<string, CicloAlternativa[]>>;
+export interface CambioVersion {
+  turno_id: number; turno_codigo: string; ciclo: number | null;
+  campo: string; antes: unknown; despues: unknown;
+}
+export interface DiferenciasSalida { base: number; contra: number; cambios: CambioVersion[] }
+export interface EventoCronograma {
+  tipo: string; ocurrido_at: string; usuario: string | null; version_numero: number | null;
+  motivo_codigo: string | null; comentario: string | null; detalle: Record<string, unknown> | null;
+}
+export interface MotivoCorreccion { id: number; codigo: string; nombre: string; orden: number }
+/** datos-campo conserva las columnas disponibles de AmbienteDiario. */
+export type DatosCampoDia = { fecha: string; fundo_id: number } & Record<string, string | number | boolean | null>;
+
 export const claveCronogramas = {
   todo: ["cronogramas"] as const,
   lista: (moduloId: number, desde: string, hasta: string) => ["cronogramas", "lista", moduloId, desde, hasta] as const,
   detalle: (id: number) => ["cronogramas", "detalle", id] as const,
   version: (id: number, numero: number) => ["cronogramas", "version", id, numero] as const,
   porFecha: (moduloId: number, fecha: string) => ["cronogramas", "por-fecha", moduloId, fecha] as const,
+  alternativas: (id: number, base: number) => ["cronogramas", "alternativas", id, base] as const,
+  diferencias: (id: number, base: number, contra: number) => ["cronogramas", "diferencias", id, base, contra] as const,
+  eventos: (id: number) => ["cronogramas", "eventos", id] as const,
+  datosCampo: (id: number, dias = 7) => ["cronogramas", "datos-campo", id, dias] as const,
+  motivos: ["motivos-correccion"] as const,
 };
 
 export const cronogramasApi = {
+  recalcular: (id: number, datos: EdicionEntrada) => api.post<VersionPrevia>(`/cronogramas/${id}/recalcular`, datos),
+  alternativas: (id: number, signal?: AbortSignal) => api.get<Alternativas>(`/cronogramas/${id}/alternativas`, undefined, signal),
+  guardarVersion: (id: number, datos: GuardarVersionEntrada) => api.post<CronogramaDetalle>(`/cronogramas/${id}/versiones`, datos),
+  descartarBorrador: (id: number) => api.delete<CronogramaDetalle>(`/cronogramas/${id}/borrador`),
+  publicar: (id: number, lock_version: number) => api.post<CronogramaConAvisos>(`/cronogramas/${id}/publicar`, { lock_version }),
+  visto: (id: number, version_id: number) => api.post<CronogramaConAvisos>(`/cronogramas/${id}/visto`, { version_id }),
+  vista: (id: number) => api.post<void>(`/cronogramas/${id}/vista`),
+  solicitarCorreccion: (id: number, version_id: number, motivo: string) => api.post<CronogramaDetalle>(`/cronogramas/${id}/solicitar-correccion`, { version_id, motivo }),
+  mantener: (id: number, comentario: string) => api.post<CronogramaDetalle>(`/cronogramas/${id}/mantener`, { comentario }),
+  diferencias: (id: number, base: number, contra: number, signal?: AbortSignal) => api.get<DiferenciasSalida>(`/cronogramas/${id}/diferencias`, { base, contra }, signal),
+  eventos: (id: number, signal?: AbortSignal) => api.get<EventoCronograma[]>(`/cronogramas/${id}/eventos`, undefined, signal),
+  datosCampo: (id: number, dias = 7, signal?: AbortSignal) => api.get<DatosCampoDia[]>(`/cronogramas/${id}/datos-campo`, { dias }, signal),
+  motivos: (signal?: AbortSignal) => api.get<MotivoCorreccion[]>("/motivos-correccion", undefined, signal),
   generar(datos: GenerarEntrada): Promise<GenerarSalida> {
     return api.post<GenerarSalida>("/cronogramas/generar", datos);
   },

@@ -75,17 +75,17 @@ export function MarcasVersion({ marcas, className }: { marcas: Marcas; className
 }
 
 const fmt1 = new Intl.NumberFormat("es-PE", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
-const fmt0 = new Intl.NumberFormat("es-PE", { maximumFractionDigits: 0 });
+const fmt2 = new Intl.NumberFormat("es-PE", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 
 export const formato = {
-  m3ha: (v: number | null | undefined) => (v == null ? "—" : fmt1.format(v)),
-  m3: (v: number | null | undefined) => (v == null ? "—" : fmt0.format(v)),
-  min: (v: number | null | undefined) => (v == null ? "—" : `${fmt0.format(v)} min`),
+  m3ha: (v: number | null | undefined) => (v == null ? "—" : fmt2.format(v)),
+  m3: (v: number | null | undefined) => (v == null ? "—" : fmt1.format(v)),
+  min: (v: number | null | undefined) => (v == null ? "—" : `${fmt1.format(v)} min`),
 };
 
 /** "07:48" a partir de minutos desde las 00:00 (sin días). */
 export function minutosAHora(min: number | null | undefined): string {
   if (min == null || !Number.isFinite(min)) return "—";
-  const total = Math.round(min) % 1440;
+  const total = Math.floor(min) % 1440;
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }

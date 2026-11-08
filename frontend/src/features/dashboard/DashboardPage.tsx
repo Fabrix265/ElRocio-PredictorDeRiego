@@ -2,6 +2,10 @@ import type { ReactNode } from "react";
 import { CloudSun } from "lucide-react";
 
 import { Badge } from "../../components/ui/Badge";
+import { Alert } from "../../components/ui/Alert";
+import { Skeleton } from "../../components/ui/Skeleton";
+import { mensajeDeError } from "../../services/httpClient";
+import { ETIQUETA_ESTADO, TONO_ESTADO } from "../cronogramas/etiquetas";
 import { Card, CardBody, CardHeader } from "../../components/ui/Card";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -9,10 +13,10 @@ import { formatearFechaLarga, saludoLima } from "../../lib/fechas";
 import { useUsuario } from "../auth/AuthProvider";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
 import { kpisParaRol, type Kpi } from "./kpis";
-import { HoyManana } from "./HoyManana";
+import { HoyManana, useCronogramasHoyManana } from "./HoyManana";
 import { PanelFrescura } from "./PanelFrescura";
 
-function TarjetaKpi({ kpi }: { kpi: Kpi }) {
+function TarjetaKpi({ kpi, estado }: { kpi: Kpi; estado?: ReactNode }) {
   const Icono = kpi.icono;
   return (
     <Card className="flex flex-col gap-1.5 px-4 py-3.5">
@@ -20,10 +24,14 @@ function TarjetaKpi({ kpi }: { kpi: Kpi }) {
         <Icono className="size-3.5 text-green-500" aria-hidden="true" />
         {kpi.titulo}
       </span>
-      <span className="cifras text-[26px] leading-8 font-bold tracking-tight text-sand-300" aria-label="Sin datos">
-        —{kpi.unidad && <small className="ml-1 text-[13px] font-medium text-texto-3">{kpi.unidad}</small>}
-      </span>
-      <span className="text-xs text-texto-3">Se activa en la fase {kpi.fase}</span>
+      {kpi.estadoManana ? estado : (
+        <>
+          <span className="cifras text-[26px] leading-8 font-bold tracking-tight text-sand-300" aria-label="Sin datos">
+            —{kpi.unidad && <small className="ml-1 text-[13px] font-medium text-texto-3">{kpi.unidad}</small>}
+          </span>
+          <span className="text-xs text-texto-3">Se activa en la fase {kpi.fase}</span>
+        </>
+      )}
     </Card>
   );
 }
@@ -55,6 +63,20 @@ export function DashboardPage() {
   const nombre = usuario.nombre.trim().split(/\s+/)[0] || usuario.username;
   const contexto = [fundo?.nombre, modulo?.codigo].filter(Boolean).join(" · ");
   const kpis = kpisParaRol(usuario.rol);
+  // Un único observador por fecha alimenta tanto el KPI como «Hoy y mañana».
+  const cronogramas = useCronogramasHoyManana();
+  const manana = cronogramas.consultas[1];
+  const estadoManana = !modulo ? (
+    <span className="text-sm text-texto-2">Elige un módulo</span>
+  ) : manana.isPending ? (
+    <Skeleton className="h-8" />
+  ) : manana.isError ? (
+    <Alert tono="error">{mensajeDeError(manana.error)}</Alert>
+  ) : manana.data ? (
+    <Badge ajustar tono={TONO_ESTADO[manana.data.estado]}>{ETIQUETA_ESTADO[manana.data.estado]}</Badge>
+  ) : (
+    <span className="text-sm text-texto-2">Sin cronograma</span>
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -66,12 +88,12 @@ export function DashboardPage() {
 
       <section aria-label="Indicadores" className={`grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-3 ${kpis.length >= 5 ? "xl:grid-cols-5" : "xl:grid-cols-4"}`}>
         {kpis.map((kpi) => (
-          <TarjetaKpi key={kpi.titulo} kpi={kpi} />
+          <TarjetaKpi key={kpi.titulo} kpi={kpi} estado={estadoManana} />
         ))}
       </section>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
-        <HoyManana />
+        <HoyManana {...cronogramas} />
         <PanelFrescura />
       </div>
 

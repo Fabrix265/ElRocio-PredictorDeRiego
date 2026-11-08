@@ -7,6 +7,7 @@ export interface Kpi {
   icono: LucideIcon;
   fase: number;
   unidad: string;
+  estadoManana?: boolean;
   /** Roles que lo ven; sin `roles`, todos. */
   roles?: readonly Rol[];
 }
@@ -19,7 +20,7 @@ export const KPIS: Kpi[] = [
   { titulo: "Aplicado vs modelo", icono: Gauge, fase: 5, unidad: "%", roles: ROLES_CON_MODELO },
   { titulo: "MDS (contracción del tronco)", icono: Activity, fase: 5, unidad: "µm" },
   { titulo: "ETo de ayer", icono: ThermometerSun, fase: 5, unidad: "mm" },
-  { titulo: "Estado de mañana", icono: CalendarClock, fase: 4, unidad: "" },
+  { titulo: "Estado de mañana", icono: CalendarClock, fase: 4, unidad: "", estadoManana: true },
 ];
 
 /** KPIs visibles para un rol (F5 hereda la regla al conectar los datos). */
