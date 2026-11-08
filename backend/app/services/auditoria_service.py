@@ -46,6 +46,14 @@ ACCIONES = (
 ENTIDAD_USUARIO = "usuario"
 ENTIDADES = (ENTIDAD_USUARIO,)
 
+# Riego aplicado: carga de Excel (F2, §3.5). Entidad ``carga_riego`` con el id de la carga.
+EXCEL_SUBIDO = "excel_subido"
+EXCEL_CONFIRMADO = "excel_confirmado"
+EXCEL_DESCARTADO = "excel_descartado"
+ENTIDAD_CARGA_RIEGO = "carga_riego"
+ACCIONES += (EXCEL_SUBIDO, EXCEL_CONFIRMADO, EXCEL_DESCARTADO)
+ENTIDADES += (ENTIDAD_CARGA_RIEGO,)
+
 ACTOR_SISTEMA = "sistema"
 
 # Lista blanca de campos por entidad para las instantáneas antes/después.

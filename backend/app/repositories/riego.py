@@ -1,21 +1,28 @@
-"""Consultas de riego aplicado (``riego_registro`` / ``riego_ciclo``) y de los ciclos del
-cronograma de referencia que el Historial usa cuando un turno-día no tiene registro (§2.3)."""
+"""Consultas de riego aplicado (``riego_registro`` / ``riego_ciclo``), de las cargas de Excel
+(``carga_riego`` / ``carga_riego_turno_dia``) y de los ciclos del cronograma de referencia que el
+Historial usa cuando un turno-día no tiene registro (§2.3)."""
 
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Sequence
+import enum
+import json
+from collections.abc import Iterable, Sequence
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import Enum, Text, bindparam, cast, func, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, insert
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
+    CargaRiego,
+    CargaRiegoTurnoDia,
     Cronograma,
     CronogramaCiclo,
     RiegoCiclo,
     RiegoRegistro,
     Turno,
+    Usuario,
 )
 from app.repositories import masivo
 
@@ -109,4 +116,122 @@ def ciclos_cronograma_referencia(db: Session, modulo_id: int, hasta: dt.date) ->
         .join(CronogramaCiclo, CronogramaCiclo.version_id == version)
         .where(Cronograma.modulo_id == modulo_id, Cronograma.fecha < hasta)
         .order_by(Cronograma.fecha, CronogramaCiclo.turno_id, CronogramaCiclo.inicio_min)
+    ))
+
+
+# --- Riego aplicado: listado y versiones (§4 "Riego aplicado") ------------------
+
+def versiones_turno_dia(db: Session, turno_id: int, fecha: dt.date) -> list[RiegoRegistro]:
+    """Todas las versiones de un turno-día (vigente o no), de la 1 (original) en adelante."""
+    return list(db.scalars(
+        select(RiegoRegistro)
+        .where(RiegoRegistro.turno_id == turno_id, RiegoRegistro.fecha == fecha)
+        .options(selectinload(RiegoRegistro.ciclos))
+        .order_by(RiegoRegistro.version)
+    ))
+
+
+def usernames(db: Session, ids: Iterable[int | None]) -> dict[int, str]:
+    """``usuario_id -> username`` de los IDs dados (sin consultar si no hay ninguno)."""
+    unicos = {i for i in ids if i is not None}
+    if not unicos:
+        return {}
+    return dict(db.execute(select(Usuario.id, Usuario.username).where(Usuario.id.in_(unicos))).all())
+
+
+def bloquear_vigentes(db: Session, modulo_id: int, desde: dt.date, hasta: dt.date) -> dict[tuple[int, dt.date], Any]:
+    """Vigentes del módulo con ``desde <= fecha <= hasta`` bloqueados (``FOR UPDATE``) hasta el
+    commit: ``(turno_id, fecha) -> fila(id, version, contenido_sha256, estado, origen)``."""
+    filas = db.execute(
+        select(RiegoRegistro.id, RiegoRegistro.turno_id, RiegoRegistro.fecha, RiegoRegistro.version,
+               RiegoRegistro.contenido_sha256, RiegoRegistro.estado, RiegoRegistro.origen)
+        .where(RiegoRegistro.modulo_id == modulo_id, RiegoRegistro.vigente.is_(True),
+               RiegoRegistro.fecha >= desde, RiegoRegistro.fecha <= hasta)
+        .order_by(RiegoRegistro.id)
+        .with_for_update()
+    )
+    return {(f.turno_id, f.fecha): f for f in filas}
+
+
+# --- Cargas de Excel (§3.5) ---------------------------------------------------------
+
+def carga(db: Session, carga_id: int, *, bloquear: bool = False) -> CargaRiego | None:
+    consulta = select(CargaRiego).where(CargaRiego.id == carga_id)
+    if bloquear:
+        consulta = consulta.with_for_update()
+    return db.scalars(consulta).one_or_none()
+
+
+def insertar_grupos(db: Session, filas: Sequence[dict[str, Any]]) -> None:
+    """Inserta los turno-días de una carga en lotes con ``unnest`` (las columnas ``jsonb``
+    viajan como texto JSON y se convierten en el SELECT)."""
+    if not filas:
+        return
+    tabla = CargaRiegoTurnoDia.__table__
+    columnas = list(filas[0].keys())
+    arreglos = []
+    for columna in columnas:
+        tipo = tabla.c[columna].type
+        tipo_arreglo = ARRAY(Text()) if isinstance(tipo, Enum | JSONB) else ARRAY(tipo)
+        arreglos.append(cast(bindparam(f"p_{columna}", type_=tipo_arreglo), tipo_arreglo))
+    origen = func.unnest(*arreglos).table_valued(*columnas).render_derived(name="u")
+    seleccion = select(*[
+        cast(origen.c[c], tabla.c[c].type) if isinstance(tabla.c[c].type, Enum | JSONB) else origen.c[c]
+        for c in columnas
+    ])
+    sentencia = insert(tabla).from_select(columnas, seleccion)
+
+    def _valor(columna: str, valor: Any) -> Any:
+        if isinstance(tabla.c[columna].type, JSONB):
+            return None if valor is None else json.dumps(valor, ensure_ascii=False)
+        return valor.value if isinstance(valor, enum.Enum) else valor
+
+    for inicio in range(0, len(filas), masivo.LOTE):
+        lote = filas[inicio:inicio + masivo.LOTE]
+        db.execute(sentencia, {f"p_{c}": [_valor(c, f.get(c)) for f in lote] for c in columnas})
+
+
+def grupos_de_carga(db: Session, carga_id: int) -> list[Any]:
+    """Turno-días de la carga con el estado y origen del registro vigente comparado."""
+    g = CargaRiegoTurnoDia
+    return list(db.execute(
+        select(g.id, g.fecha, g.turno_id, g.turno_codigo, g.resultado, g.aplicar,
+               g.vigente_id_comparado, g.ciclos, g.mensajes,
+               RiegoRegistro.estado.label("vigente_estado"), RiegoRegistro.origen.label("vigente_origen"))
+        .outerjoin(RiegoRegistro, RiegoRegistro.id == g.vigente_id_comparado)
+        .where(g.carga_id == carga_id)
+        .order_by(g.fecha, g.turno_codigo, g.id)
+    ))
+
+
+def grupos_por_id(db: Session, carga_id: int, ids: Iterable[int]) -> dict[int, CargaRiegoTurnoDia]:
+    lista = list(set(ids))
+    encontrados: dict[int, CargaRiegoTurnoDia] = {}
+    for inicio in range(0, len(lista), LOTE_INSERT):
+        encontrados.update({
+            g.id: g for g in db.scalars(
+                select(CargaRiegoTurnoDia).where(
+                    CargaRiegoTurnoDia.carga_id == carga_id,
+                    CargaRiegoTurnoDia.id.in_(lista[inicio:inicio + LOTE_INSERT]),
+                )
+            )
+        })
+    return encontrados
+
+
+def fijar_aplicar(db: Session, carga_id: int, ids: Sequence[int], aplicar: bool) -> None:
+    for inicio in range(0, len(ids), LOTE_INSERT):
+        db.execute(
+            update(CargaRiegoTurnoDia)
+            .where(CargaRiegoTurnoDia.carga_id == carga_id,
+                   CargaRiegoTurnoDia.id.in_(list(ids[inicio:inicio + LOTE_INSERT])))
+            .values(aplicar=aplicar)
+            .execution_options(synchronize_session=False)
+        )
+
+
+def grupos_para_confirmar(db: Session, carga_id: int) -> list[CargaRiegoTurnoDia]:
+    return list(db.scalars(
+        select(CargaRiegoTurnoDia).where(CargaRiegoTurnoDia.carga_id == carga_id)
+        .order_by(CargaRiegoTurnoDia.fecha, CargaRiegoTurnoDia.turno_id)
     ))

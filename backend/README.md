@@ -34,6 +34,7 @@ app/
   `rate_limit.reservar` (el intento se ve antes de contar), la auditoría del login o cambio de
   contraseña fallidos, la revocación de una familia de refresh por reuso, y el procesamiento de la
   cola de correos (reclamo confirmado antes de enviar; cada envío es su propia transacción).
+  También el paso de una carga de Excel a `vencida` antes de responder 409.
 - **Consultas** en `repositories/` (SQLAlchemy); los servicios no arman `select`/`update`.
 
 ## Instalación (Windows, Python 3.11.9)
@@ -274,6 +275,52 @@ DATABASE_URL=postgresql+psycopg://postgres@localhost:5432/riego_dev \
   `ambiente_diario` 2 128 días (2021-01-01 a 2026-11-01). Segunda corrida: 0 nuevas, 0
   actualizadas. Tarda ~3 min, casi todo en leer los Excel con openpyxl.
 
+## Riego aplicado y carga de Excel (F2)
+
+Código: `api/v1/endpoints/riego.py`, `services/riego_service.py` (consulta y versiones),
+`services/carga_riego_service.py` (vista previa, marcar, confirmar, descartar, vencimiento),
+`services/archivo_excel.py` (validación del archivo), `schemas/riego.py`, `repositories/riego.py`.
+
+| Método y ruta | Quién | Respuesta |
+|---|---|---|
+| `GET /riego?modulo_id&desde&hasta` | todos | `{modulo_id, desde, hasta, registros}`: vigentes por turno-día con estado, origen, `sin_riego` y ciclos. Por defecto los últimos 14 días; rango máx. 366 |
+| `GET /riego/{turno_id}/{fecha}/versiones` | A E S | Todas las versiones (la 1 es el original), con `vigente` y `basado_en_id` |
+| `POST /riego/cargas` (multipart `archivo`, `modulo_id`) | A E | 201 con la vista previa (`CargaRiegoSalida`: `resumen.contadores` por resultado y `grupos` por turno-día) |
+| `GET /riego/cargas/{id}` · `PATCH …` `{grupos: [{id, aplicar}]}` | A E | La carga; PATCH marca/desmarca grupos aplicables |
+| `POST /riego/cargas/{id}/confirmar` · `POST …/descartar` | A E | La carga confirmada / descartada (409 si venció) |
+
+- **Validación del archivo** (§3.5 punto 1, antes de abrirlo con pandas): nombre `.xlsx`,
+  ≤ `UPLOAD_MAX_MB` (15 MB; se rechaza por `Content-Length` y se lee con tope → 413), firma ZIP,
+  ZIP legible con ≤ 1000 partes, descomprimido declarado ≤ 200 MB y relación ≤ 100 (bomba ZIP),
+  cada parte `.xml`/`.rels` abierta con `defusedxml` (sin DTD, entidades ni externos: *billion
+  laughs* y XXE → 422), hoja `MOD5`, las 10 columnas de `leer_riego` y ≤ 100 000 filas. Si openpyxl
+  no está usando `defusedxml` la carga responde 503. El archivo se procesa en memoria y no se
+  guarda: solo nombre saneado (sin carpetas ni caracteres de control), sha256 y tamaño.
+- **Vista previa**: `leer_riego` + `limpiar_ciclos(5 min, 2 m3/ha)` (lo mismo que la carga
+  histórica y el Historial), agrupado por turno-día y comparado con el vigente por
+  `riego_contenido.hash_contenido`. Resultados: `nuevo`, `igual` (no crea versión),
+  `reemplaza_provisional`, `reemplaza_aplicado` (desmarcado por defecto si el vigente es `manual`),
+  `sin_riego` y `error` (fecha ≥ hoy en Lima, turno desconocido, válvula que no es la del turno
+  —controlador o SIGA—, inicio repetido con valores distintos, fila de otro fundo/módulo). Los
+  duplicados exactos los quita `limpiar_ciclos` sin error.
+- **D7**: si el archivo trae una fecha y un turno activo del módulo no tiene filas (o solo
+  aperturas fallidas), el grupo es `sin_riego` («no se regó», registro con 0 ciclos); marcado
+  salvo que el vigente ya sea aplicado (deducir de una ausencia es más débil que lo guardado).
+- **Confirmar**: bloquea la carga y los vigentes del rango (`FOR UPDATE`); si pasaron 24 h desde
+  la subida o cambió algún registro comparado (otra carga o edición), la carga queda **vencida** y
+  responde 409 «Sube el archivo otra vez» (excepción documentada a la unidad de trabajo: ese cambio
+  de estado se confirma antes del 409). Lo marcado queda como versión nueva **aplicado** origen
+  `excel` (`carga_id`, `basado_en_id` = vigente reemplazado, que pasa a `vigente = false`).
+  `GET` de una carga vencida por tiempo también la marca `vencida`.
+- **Auditoría** (entidad `carga_riego`, id de la carga): `excel_subido` (archivo, sha256,
+  contadores, rango), `excel_confirmado` (aplicados por resultado, registros creados, versiones
+  reemplazadas), `excel_descartado`.
+- **Prueba con el Excel real** (`ml/data/raw/data_riego.xlsx`, 15 148 filas, 2021-04-08 a
+  2025-04-24) contra `riego_dev` con la carga histórica ya hecha: vista previa en ~16 s (≈25 s
+  por HTTP con la respuesta de 4,8 MB) → 7 089 igual, 3 reemplaza aplicado (2025-04-24, distinto
+  en `data_riego_historico.xlsx`), 223 sin riego (222 por D7 y 1 solo con aperturas fallidas);
+  confirmar en ~4 s; **resubir → 7 315 igual**.
+
 ## Correos y tareas programadas
 
 Los correos pasan por la cola `notificacion_correo`: la acción encola (en su misma transacción) y
@@ -325,4 +372,5 @@ gracia del refresh, vencimiento de enlaces, `hoy_lima` a las 23:30).
 | `test_unidad_de_trabajo` | Commit/rollback de la unidad de trabajo (endpoint y CLI), sesión compartida, servicios sin commit |
 | `test_weatherlink_conversion` | Reglas de conversión, 00:00 del día nuevo, payload, coincidencia con `data_metereologica.xlsx` en un mes real |
 | `test_datos_campo` | Lecturas idempotentes (la API no pisa el Excel), `ambiente_diario` = riego_ml, hoy en Lima, riego por turno-día (hash, conflicto, `--reemplazar`), Historial desde la BD y respaldo del cronograma |
+| `test_riego` | Permisos por rol de `/riego` y `/riego/cargas*`, subir → marcar → confirmar → resubir (todo «igual»), reemplazos y versiones, D7, errores de la vista previa, vencimiento (24 h y registro cambiado), auditoría, Excel malicioso (*billion laughs*, XXE, DTD, bomba ZIP) y validación del archivo |
 | `test_paridad_historico` | Ida y vuelta con `ml/data/raw`: ambiente, Historial y plan idénticos a la ruta por archivos (se salta sin los archivos) |

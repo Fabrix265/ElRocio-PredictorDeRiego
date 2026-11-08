@@ -77,7 +77,9 @@ def test_auditoria_opciones(client: TestClient, auth):
     cabeceras = auth("subgerente", username="sub")
     opciones = client.get(f"{API}/auditoria/opciones", headers=cabeceras).json()
     assert "login" in opciones["acciones"] and "usuario_creado" in opciones["acciones"]
-    assert opciones["entidades"] == ["usuario"]
+    assert {"usuario", "carga_riego"} <= set(opciones["entidades"])
+    assert opciones["entidades"] == sorted(opciones["entidades"])
+    assert {"excel_subido", "excel_confirmado", "excel_descartado"} <= set(opciones["acciones"])
     assert {"id", "username", "nombre"} <= set(opciones["usuarios"][0])
     assert "sub" in [u["username"] for u in opciones["usuarios"]]
 
