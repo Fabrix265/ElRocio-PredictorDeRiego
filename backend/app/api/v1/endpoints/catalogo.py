@@ -1,12 +1,15 @@
-"""Catálogos para cualquier usuario autenticado: fundos con módulos y turnos, y motivos."""
+"""Catálogos para cualquier usuario autenticado: fundos con módulos y turnos, turnos de un módulo
+con caudal reciente y motivos."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.deps import DbSesion, UsuarioHabilitado
+from app.api.deps import DbSesion, IdPath, UsuarioHabilitado
 from app.repositories import catalogo as repo_catalogo
 from app.schemas.catalogo import FundoSalida, ModuloSalida, MotivoCorreccionSalida, TurnoSalida
+from app.schemas.datos import TurnoCaudalSalida
+from app.services import datos_service
 
 router = APIRouter()
 
@@ -33,6 +36,13 @@ def fundos(_usuario: UsuarioHabilitado, db: DbSesion) -> list[FundoSalida]:
         )
         for fundo in repo_catalogo.fundos_con_modulos(db)
     ]
+
+
+@router.get("/modulos/{modulo_id}/turnos", response_model=list[TurnoCaudalSalida])
+def turnos_de_modulo(modulo_id: IdPath, _usuario: UsuarioHabilitado, db: DbSesion) -> list[TurnoCaudalSalida]:
+    """Turnos activos con área, válvulas y caudal reciente (mediana de los ciclos aplicados de los
+    últimos 30 días)."""
+    return datos_service.turnos_con_caudal(db, modulo_id)
 
 
 @router.get("/motivos-correccion", response_model=list[MotivoCorreccionSalida])
