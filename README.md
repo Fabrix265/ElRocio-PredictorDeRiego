@@ -16,7 +16,7 @@ campo. El subgerente revisa y puede pedir correcciones, y el administrador gesti
 | F1 Base | Esquema completo de la BD (RLS, rol `riego_app`, semillas), autenticación, recuperación y cambio de contraseña, usuarios, auditoría, cola de correos, CLI de administración. Frontend: tema, login, layout, usuarios y auditoría | **Lista** |
 | F2 Datos | Carga histórica idempotente, ingesta diaria WeatherLink/Phytech (05:00 Lima y «Actualizar ahora»), conversión de unidades de WeatherLink, `ambiente_diario` e Historial desde la BD (paridad con `riego_ml`), riego aplicado (consulta, versiones y carga de Excel con vista previa), frescura de datos en el Dashboard, series de datos de campo (API) | **Lista** |
 | F3 Predicción | Carga del modelo con sha256, bucle de generación desde la BD (idéntico a `planificar` de `riego_ml`), foto de entradas y alternativas de 1 a 5 ciclos, versiones y marcas (preliminar, datos incompletos, regenerado, desactualizado), regenerar. Frontend: Generar, listado y detalle de cronogramas en lectura, «Hoy y mañana» en el Dashboard | **Lista** |
-| F4 Flujo | Corrección con motivo, publicación, Visto del programador, solicitud de corrección, riego provisional, línea de tiempo, correos | Próxima |
+| F4 Flujo | Corrección con motivo y recálculo, publicación y borrador de cambios, Visto, solicitud de corrección y mantener versión, riego provisional y edición manual, línea de tiempo y correos. Frontend: flujo por rol, datos y comparación de versiones, filtros y estado de mañana | **Lista** |
 | F5 Gráficos | Dashboard con KPIs, Datos de campo, exportación PDF/Excel y CSV de refinamiento | Próxima |
 | F6 PWA y pulido | Instalable (manifest e íconos), responsive fino, accesibilidad, guía de usuario final | Próxima |
 

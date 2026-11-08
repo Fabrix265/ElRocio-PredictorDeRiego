@@ -57,13 +57,15 @@ src/
                           EmptyState, PageHeader, Toast, Alert, Tooltip
   services/httpClient.ts  Cliente HTTP: /api/v1, Authorization, refresh de vuelo único, errores tipados,
                           subida multipart (FormData)
-  services/riego.ts       Tipos y llamadas de Riego aplicado y carga de Excel (contrato F2)
+  services/riego.ts       Tipos y llamadas de Riego aplicado, edición manual y carga de Excel (F2/F4)
+  services/cronogramas.ts Contrato de generación, lectura, edición y flujo del cronograma (F3/F4)
   services/datos.ts       Tipos y llamadas de frescura de datos e ingestas (contrato F2)
   features/auth/          AuthProvider, RutaProtegida (guard), login, recuperar, restablecer, cambiar contraseña
   features/layout/        AppLayout, barra lateral, cabecera, selector Fundo › Módulo, menú de usuario, menú inferior
   features/catalogo/      GET /fundos y la selección de fundo y módulo (contexto + URL + preferencia local)
   features/dashboard/     Dashboard: panel de frescura con «Actualizar ahora» y últimas corridas (F2);
-                          «Hoy y mañana» (F3); KPIs y pronóstico en F4–F5
+                          «Hoy y mañana» (F3), estado de mañana (F4); otros KPIs y pronóstico en F5
+  features/cronogramas/   Generar, listado, detalle por pestañas, editor, acciones, comparación y eventos
   features/riego/         Riego aplicado (tabla día × turno × ciclos, panel con versiones) y asistente
                           de carga de Excel (subir → vista previa → confirmar/descartar)
   features/usuarios/      Gestión de usuarios (solo admin)
@@ -117,15 +119,19 @@ src/
 
 | Pantalla | Admin | Encargado | Subgerente | Programador | Fase |
 |---|---|---|---|---|---|
-| Dashboard | ✔ | ✔ | ✔ | ✔ (sin «Aplicado vs modelo») | F1; frescura en F2; KPIs F3–F5 |
+| Dashboard | ✔ | ✔ | ✔ | ✔ (sin «Aplicado vs modelo») | F1/F2/F3; estado de mañana F4; otros KPIs F5 |
 | ↳ «Actualizar ahora» | ✔ | ✔ | — | — | F2 |
 | ↳ Últimas corridas de ingesta | ✔ | ✔ | ✔ | — | F2 |
 | Generar | ✔ | ✔ | — | — | F3 (`/generar`) |
-| Cronogramas | ✔ | ✔ | ✔ | ✔ | F3 lectura (`/cronogramas`, `/cronogramas/:id`); flujo en F4 |
+| Cronogramas | ✔ | ✔ | ✔ | ✔ | F3/F4 disponibles (`/cronogramas`, `/cronogramas/:id`) |
+| ↳ Corregir, publicar, descartar cambios y mantener versión | ✔ | ✔ | — | — | F4 disponible |
+| ↳ Confirmar Visto | ✔ | — | — | ✔ | F4 disponible |
+| ↳ Solicitar corrección | ✔ | — | ✔ | — | F4 disponible |
+| ↳ Datos, Versiones y Línea de tiempo | ✔ | ✔ | ✔ | — | F4 disponible |
 | Riego aplicado (lectura) | ✔ | ✔ | ✔ | ✔ | F2 |
 | ↳ Historial de versiones de un turno-día | ✔ | ✔ | ✔ | — | F2 |
 | ↳ Carga de Excel (`/riego/cargas/…`) | ✔ | ✔ | — | — | F2 |
-| ↳ Editar provisional / marcar aplicado | ✔ | ✔ | ✔ | — | F4 |
+| ↳ Editar riego / No se regó / Marcar aplicado | ✔ | ✔ | ✔ | — | F4 disponible |
 | Datos de campo | ✔ | ✔ | ✔ | ✔ | F5 |
 | Auditoría | ✔ | — | ✔ | — | F1 |
 | Usuarios | ✔ | — | — | — | F1 |
@@ -228,6 +234,45 @@ La auditoría traduce las acciones y entidades de F2 (`excel_subido/confirmado/d
 El `PATCH` devuelve solo los contadores por resultado y la selección final de los grupos
 solicitados. La interfaz combina esos cambios con la carga en caché, conserva ciclos y mensajes,
 y recalcula los totales seleccionados. No repite el `GET` ni descarga la carga completa por clic.
+
+## Fase 4: flujo del cronograma
+
+- **Detalle**: pestañas Plan, Gantt (ancho completo), Datos, Versiones y Línea de tiempo.
+  El programador solo ve Plan y Gantt. Se navega con Tab, flechas, Inicio y Fin.
+- **Corregir** (A/E): parte del borrador abierto o de la publicada si no hay borrador.
+  Edita m³/ha, inicio HH:MM y Día siguiente, duración calculada o Duración manual; cambiar
+  el número de ciclos usa las alternativas guardadas del modelo (1–5). Recálculo local de
+  los ciclos editados, celdas en verde y aviso de solapes sin bloquear, con Ajustar solapes.
+  Cancelar pide confirmación si hay cambios. Guardar corrección exige un motivo del catálogo
+  y permite comentario; envía solo los turnos editados, la base y el lock de apertura.
+- **Acciones**: Publicar, Publicar cambios, Descartar cambios, Confirmar Visto, Solicitar
+  corrección y Mantener versión se ofrecen según rol, estado y fecha, con confirmación.
+  Motivo/comentario de solicitud y mantenimiento: 5–1000 caracteres. Los avisos del backend
+  se muestran tras publicar o confirmar Visto; las consultas se invalidan al terminar.
+- **Concurrencia**: 409 al guardar/publicar → «Otro usuario modificó el cronograma. Recarga
+  para ver los cambios.» y Recargar. En Visto → «Hay una versión publicada más nueva» y
+  recarga automática. Los 422 muestran el mensaje del backend.
+- **Datos**: siete días anteriores, columnas no vacías de ETo, temperatura, HR, lluvia,
+  humedad volumétrica del suelo y MDS. **Versiones** compara números de versión (por defecto,
+  publicada contra borrador), con turno, ciclo, campo y antes → después. **Línea de tiempo**
+  muestra evento, fecha Lima, usuario, versión, motivo/comentario.
+- **Listado**: filtros locales Todos, Borrador (incluye cambios sin publicar), Publicado,
+  Visto, Corrección solicitada y Modificado; chip «Modificado · pendiente de visto».
+- **Riego aplicado**: A/E/S pueden Editar riego (1–5 ciclos), registrar No se regó o Marcar
+  aplicado un provisional de una fecha anterior a hoy. Siempre exige motivo de 1–255
+  caracteres; comentario opcional. Un 409 muestra «Otro usuario cambió este riego. Recarga.».
+  Se obtiene el vigente al abrir el panel y se conserva su ID durante la edición.
+- **Dashboard**: Estado de mañana usa exactamente la consulta `porFecha` de Hoy y mañana,
+  con un único observador por fecha. Muestra el estado o «Sin cronograma»; los demás KPIs
+  continúan pendientes de F5.
+
+El servicio tipa también `recalcular` (vista previa sin guardar). La edición calcula localmente;
+el backend valida y recalcula al guardar. Las horas truncan segundos, como el backend.
+No se agregaron dependencias ni se cambiaron componentes UI o tokens.
+
+**Límites del contrato y del alcance:** publicar cambios de hoy/futuros limpia `visto_version_id`;
+«Cambió desde tu Visto» se muestra solo cuando ese ID existe, pertenece al programador actual y ambas versiones son visibles.
+El panel edita turno-días con registro: la tabla F2 no abre celdas «Sin registro».
 
 ## Pruebas
 
