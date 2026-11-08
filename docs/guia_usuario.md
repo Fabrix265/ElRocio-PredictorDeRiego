@@ -35,11 +35,11 @@ Pantallas del menú por rol:
 
 | Pantalla | Administrador | Encargado | Programador | Subgerente | Disponible |
 |---|---|---|---|---|---|
-| Dashboard | ✔ | ✔ | ✔ (solo lo publicado) | ✔ | **[Disponible]** frescura, Hoy y mañana y Estado de mañana; otros indicadores y pronóstico en fase 5 |
+| Dashboard | ✔ | ✔ | ✔ (solo lo publicado) | ✔ | **[Disponible]** indicadores, frescura, Hoy y mañana y pronóstico |
 | Generar | ✔ | ✔ | — | — | [Disponible] |
 | Cronogramas | ✔ | ✔ edita | ✔ solo publicados, confirma Visto | ✔ lectura, solicita corrección | **[Disponible]** |
 | Riego aplicado | ✔ | ✔ sube Excel y edita | ✔ lectura | ✔ lectura, historial y edición | **[Disponible]** consulta, Excel y edición |
-| Datos de campo | ✔ | ✔ | ✔ | ✔ | [Fase 5] |
+| Datos de campo | ✔ | ✔ | ✔ | ✔ | [Disponible] |
 | Auditoría | ✔ | — | — | ✔ | **[Disponible]** |
 | Usuarios | ✔ | — | — | — | **[Disponible]** |
 
@@ -120,9 +120,9 @@ datos** del Dashboard muestran los datos del módulo elegido.
 
 ## El flujo diario completo
 
-Ya están disponibles los pasos 1 a 8: llegada de datos, carga de Excel, generación, revisión,
-publicación, Visto, solicitud de corrección y registro del riego. El seguimiento con gráficos
-y exportaciones se completa en la fase 5.
+Ya están disponibles los 9 pasos: llegada de datos, carga de Excel, generación, revisión,
+publicación, Visto, solicitud de corrección, registro del riego y seguimiento con gráficos y
+exportaciones.
 
 ```text
 05:00 ingesta ─► Generar ─► Revisar y corregir ─► Publicar ─► Visto del programador ─► Riego aplicado
@@ -325,18 +325,28 @@ Además, un cronograma puede llevar estas marcas de calidad:
   la creación de provisionales ocurre al confirmar Visto y la carga de Excel crea los aplicados.
 - Lo aplicado alimenta al modelo para los días siguientes.
 
-### Paso 9 · Seguimiento [Fase 5]
+### Paso 9 · Seguimiento [Disponible]
 
 - **Quién**: todos, según su rol.
 - El **Dashboard** muestra:
-  - indicadores: agua aplicada ayer, aplicado frente al modelo, MDS (contracción del tronco),
-    ETo de ayer (fase 5); **Estado de mañana** ya está disponible;
+  - indicadores de ayer: **Agua aplicada ayer** (m³/ha del módulo, con cuántos turnos regaron y
+    los m³), **Aplicado vs modelo** (% de lo aplicado frente a la propuesta del modelo; el
+    programador no lo ve), **MDS (contracción del tronco)** en µm, **ETo de ayer** en mm y
+    **Estado de mañana**;
   - la frescura de los datos;
   - los cronogramas de hoy y mañana;
-  - el pronóstico.
-- **Datos de campo** muestra 14 días de agua aplicada frente a la propuesta por turno, MDS,
-  crecimiento del tronco, humedad del suelo por profundidad y clima.
-- Los cronogramas se exportan a PDF y Excel.
+  - el **Pronóstico Phytech** de los próximos días: temperatura máxima, ETo y humedad.
+- **Datos de campo** muestra, para 7, 14 o 30 días hasta ayer:
+  - **Agua aplicada vs propuesta**: m³ por día, aplicado en barras y versión publicada en línea
+    (y la propuesta del modelo en discontinua, salvo para el programador); se puede elegir un turno;
+  - **MDS y crecimiento del tronco** (µm, Phytech);
+  - **Humedad del suelo por profundidad** (15 a 90 cm) con la **línea de estrés** en discontinua;
+  - **Clima**: ETo y lluvia en barras, temperaturas máxima y mínima en líneas.
+- En el detalle de un cronograma, **PDF** y **Excel** descargan la versión vigente (el programador,
+  siempre la publicada). Cada exportación queda en la auditoría y en la línea de tiempo.
+- El administrador descarga el **CSV de refinamiento** desde **Cronogramas** (botón «CSV de
+  refinamiento»), con el rango de fechas del listado: una fila por cronograma, turno y ciclo,
+  con lo que propuso el modelo, lo publicado y lo aplicado, para mejorar el modelo.
 - El programador siempre ve la versión publicada, nunca la propuesta del modelo ni los borradores.
 
 ---
@@ -353,7 +363,7 @@ Además, un cronograma puede llevar estas marcas de calidad:
 | Subir el Excel de riego, usar **Actualizar ahora**, ver las últimas corridas y el historial de versiones (pasos 1, 2 y 8) | **[Disponible]** |
 | Todo lo demás del encargado (generar, corregir, publicar) | [Disponible] |
 | Confirmar Visto o solicitar corrección en lugar del programador o del subgerente | [Disponible] |
-| Exportar el CSV de refinamiento del modelo | [Fase 5] |
+| Exportar el CSV de refinamiento del modelo | [Disponible] |
 
 El primer administrador lo crea el equipo técnico al instalar el sistema (comando `crear-admin`).
 
@@ -367,7 +377,7 @@ El primer administrador lo crea el equipo técnico al instalar el sistema (coman
 | Generar y regenerar cronogramas; ver el detalle (paso 3) | [Disponible] |
 | Corregir con motivo, publicar, publicar cambios, descartar el borrador de cambios y mantener la versión ante una solicitud de corrección (pasos 4, 5 y 7) | [Disponible] |
 | Editar el riego provisional, marcarlo aplicado y registrar «no se regó» (paso 8) | [Disponible] |
-| Dashboard con indicadores, Datos de campo y exportaciones (paso 9) | [Fase 5] |
+| Dashboard con indicadores, Datos de campo y exportaciones (paso 9) | [Disponible] |
 
 ### Programador
 
@@ -378,7 +388,7 @@ El primer administrador lo crea el equipo técnico al instalar el sistema (coman
 | Consultar el riego aplicado por turno y día, con sus ciclos (paso 8) | **[Disponible]** |
 | Ver los cronogramas publicados (nunca borradores ni la propuesta del modelo) | [Disponible] |
 | Recibir el correo de publicación, confirmar **Visto** y ver qué cambió desde su último Visto (paso 6) | [Disponible] |
-| Dashboard, Datos de campo y exportar la versión publicada (paso 9) | [Fase 5] |
+| Dashboard, Datos de campo y exportar la versión publicada (paso 9) | [Disponible] |
 
 ### Subgerente
 
@@ -391,7 +401,7 @@ El primer administrador lo crea el equipo técnico al instalar el sistema (coman
 | Ver los cronogramas (incluidos los borradores) en modo lectura | [Disponible] |
 | Recibir los correos de publicación y de Visto; **Solicitar corrección** con motivo (paso 7) | [Disponible] |
 | Editar el riego provisional, marcarlo aplicado y registrar «no se regó» (paso 8) | [Disponible] |
-| Dashboard con indicadores, Datos de campo y exportaciones (paso 9) | [Fase 5] |
+| Dashboard con indicadores, Datos de campo y exportaciones (paso 9) | [Disponible] |
 
 ---
 
@@ -467,8 +477,8 @@ Desde la fase 2 se registran también:
 - **Datos de campo**: «Lecturas del Excel histórico reemplazadas por WeatherLink» cuando el equipo
   técnico fuerza ese reemplazo.
 
-Desde las fases 3 y 4 se registran las acciones sobre cronogramas y la edición del riego.
-Las exportaciones se agregan en la fase 5.
+Se registran las acciones sobre cronogramas, la edición del riego y las exportaciones (PDF,
+Excel y CSV de refinamiento).
 
 ---
 

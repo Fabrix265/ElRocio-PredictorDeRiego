@@ -487,6 +487,19 @@ Probar en local (BD `riego_dev`, sin tocar `backend/.env`): levanta la API con `
 local, entra como admin y usa **Generar** (3 días tarda unos 10 s), o
 `POST /api/v1/cronogramas/generar {"modulo_id": 1}`.
 
+## Reportes y exportaciones (F5)
+
+| Ruta | Quién | Qué hace |
+|---|---|---|
+| `GET /dashboard?modulo_id` | todos | KPIs de ayer (agua aplicada m³/ha y m³, aplicado vs modelo %, MDS, ETo), estado de mañana y pronóstico de 5 días. El programador no recibe «aplicado vs modelo» |
+| `GET /datos/agua?modulo_id&desde&hasta` | todos | Por día y turno: aplicado (riego vigente), propuesto (versión publicada; A E S: si no hay, el borrador) y `modelo_*` (última versión del modelo, nunca para el programador). Por defecto 14 días hasta ayer, máximo 92 |
+| `GET /cronogramas/{id}/exportar?formato=pdf\|xlsx` | según visibilidad | PDF (ReportLab) o Excel (openpyxl) de la versión visible; el programador exporta siempre la publicada. Audita `exportar_pdf`/`exportar_xlsx` y deja el evento `exportado` |
+| `GET /exportaciones/refinamiento.csv?desde&hasta` | A | §2.4: una fila por cronograma × turno × ciclo con claves, la foto de entradas (features turno-día y de ciclo), bloques `modelo_v1_*`, `modelo_base_*`, `final_*` y `aplicado_*` (n° de ciclos, m³/ha, inicio, duración), `estado_riego`, `motivos`, `ultimo_motivo`, `n_correcciones`, marcas, `num_versiones` y `modelo_version`. Textos escapados contra inyección de fórmulas; UTF-8 con BOM. Por defecto 90 días, máximo 366. Audita `exportar_refinamiento` |
+
+Las series de clima, suelo, planta y pronóstico de la pantalla Datos de campo son las de F2
+(`/datos/clima|suelo|planta|pronostico`). Dependencia nueva: `reportlab==4.5.1` (en
+`requirements.txt`; instalar con `pip install -r requirements.txt`).
+
 ## Correos y tareas programadas
 
 Los correos pasan por la cola `notificacion_correo`: la acción encola (en su misma transacción) y

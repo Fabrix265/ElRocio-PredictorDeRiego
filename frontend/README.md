@@ -64,7 +64,7 @@ src/
   features/layout/        AppLayout, barra lateral, cabecera, selector Fundo › Módulo, menú de usuario, menú inferior
   features/catalogo/      GET /fundos y la selección de fundo y módulo (contexto + URL + preferencia local)
   features/dashboard/     Dashboard: panel de frescura con «Actualizar ahora» y últimas corridas (F2);
-                          «Hoy y mañana» (F3), estado de mañana (F4); otros KPIs y pronóstico en F5
+                          «Hoy y mañana» (F3), estado de mañana (F4); KPIs y pronóstico (F5)
   features/cronogramas/   Generar, listado, detalle por pestañas, editor, acciones, comparación y eventos
   features/riego/         Riego aplicado (tabla día × turno × ciclos, panel con versiones) y asistente
                           de carga de Excel (subir → vista previa → confirmar/descartar)
@@ -119,7 +119,7 @@ src/
 
 | Pantalla | Admin | Encargado | Subgerente | Programador | Fase |
 |---|---|---|---|---|---|
-| Dashboard | ✔ | ✔ | ✔ | ✔ (sin «Aplicado vs modelo») | F1/F2/F3; estado de mañana F4; otros KPIs F5 |
+| Dashboard | ✔ | ✔ | ✔ | ✔ (sin «Aplicado vs modelo») | F1/F2/F3; estado de mañana F4; KPIs y pronóstico F5 |
 | ↳ «Actualizar ahora» | ✔ | ✔ | — | — | F2 |
 | ↳ Últimas corridas de ingesta | ✔ | ✔ | ✔ | — | F2 |
 | Generar | ✔ | ✔ | — | — | F3 (`/generar`) |
@@ -132,7 +132,7 @@ src/
 | ↳ Historial de versiones de un turno-día | ✔ | ✔ | ✔ | — | F2 |
 | ↳ Carga de Excel (`/riego/cargas/…`) | ✔ | ✔ | — | — | F2 |
 | ↳ Editar riego / No se regó / Marcar aplicado | ✔ | ✔ | ✔ | — | F4 disponible |
-| Datos de campo | ✔ | ✔ | ✔ | ✔ | F5 |
+| Datos de campo | ✔ | ✔ | ✔ | ✔ | F5 (`/datos`): gráficos ECharts 6 cargados aparte (`features/datos/Grafico.tsx`) |
 | Auditoría | ✔ | — | ✔ | — | F1 |
 | Usuarios | ✔ | — | — | — | F1 |
 
@@ -263,8 +263,11 @@ y recalcula los totales seleccionados. No repite el `GET` ni descarga la carga c
   caracteres; comentario opcional. Un 409 muestra «Otro usuario cambió este riego. Recarga.».
   Se obtiene el vigente al abrir el panel y se conserva su ID durante la edición.
 - **Dashboard**: Estado de mañana usa exactamente la consulta `porFecha` de Hoy y mañana,
-  con un único observador por fecha. Muestra el estado o «Sin cronograma»; los demás KPIs
-  continúan pendientes de F5.
+  con un único observador por fecha. Muestra el estado o «Sin cronograma». Los demás KPIs y el
+  pronóstico salen de `GET /dashboard` (F5).
+- **Exportar** (F5): botones PDF y Excel en el detalle del cronograma y «CSV de refinamiento»
+  (solo admin) en el listado, con el rango de fechas del listado. Las descargas usan
+  `descargar()` de `services/httpClient.ts` (con renovación de sesión).
 
 El servicio tipa también `recalcular` (vista previa sin guardar). La edición calcula localmente;
 el backend valida y recalcula al guardar. Las horas truncan segundos, como el backend.
