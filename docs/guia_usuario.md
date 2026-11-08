@@ -205,6 +205,10 @@ Además, un cronograma puede llevar estas marcas de calidad:
    aplicado**. Lo reemplazado no se borra: queda como versión anterior.
 5. Si no quieres guardar nada, **Descartar** → «¿Descartar la carga?» → **Descartar**.
 
+- Algunos turno-días llegan **desmarcados con un aviso** en el detalle, para que los revises antes
+  de aplicarlos: los de la **última fecha del archivo** que reemplazan un aplicado o quedan «sin
+  riego» («puede venir incompleta (exportado a mitad del día)») y los que traen **menos riego que
+  lo ya aplicado**. Márcalos solo si comprobaste que el dato del Excel es el correcto.
 - Subir otra vez el archivo acumulado completo no duplica nada: lo ya cargado sale como «Igual».
 - **La carga venció**: la vista previa dura 24 horas y vence también si alguien cambia uno de los
   registros comparados. Toca **Subir otra vez** para revisarla con los datos actuales.
