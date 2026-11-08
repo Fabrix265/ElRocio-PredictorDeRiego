@@ -52,18 +52,26 @@ Desde otro origen responde **403 «Solicitud no permitida»** y el login parece 
 src/
   theme/tokens.css        Tokens de diseño (único lugar con colores, radios, sombras, tipografía)
   index.css               Tailwind 4 (@theme inline que referencia los tokens) y estilos base
-  components/ui/          Button, Input, PasswordInput, Field, Select, Dialog (y panel lateral),
-                          DropdownMenu, Badge, Card, DataTable, Skeleton, EmptyState, PageHeader,
-                          Toast, Alert, Tooltip
-  services/httpClient.ts  Cliente HTTP: /api/v1, Authorization, refresh de vuelo único, errores tipados
+  components/ui/          Button, Input, PasswordInput, Field, Select, Checkbox (con estado mixto),
+                          Dialog (y panel lateral), DropdownMenu, Badge, Card, DataTable, Skeleton,
+                          EmptyState, PageHeader, Toast, Alert, Tooltip
+  services/httpClient.ts  Cliente HTTP: /api/v1, Authorization, refresh de vuelo único, errores tipados,
+                          subida multipart (FormData)
+  services/riego.ts       Tipos y llamadas de Riego aplicado y carga de Excel (contrato F2)
+  services/datos.ts       Tipos y llamadas de frescura de datos e ingestas (contrato F2)
   features/auth/          AuthProvider, RutaProtegida (guard), login, recuperar, restablecer, cambiar contraseña
   features/layout/        AppLayout, barra lateral, cabecera, selector Fundo › Módulo, menú de usuario, menú inferior
   features/catalogo/      GET /fundos y la selección de fundo y módulo (contexto + URL + preferencia local)
-  features/dashboard/     Dashboard (en F1, tarjetas que se activan en fases posteriores)
+  features/dashboard/     Dashboard: panel de frescura con «Actualizar ahora» y últimas corridas (F2);
+                          KPIs, hoy/mañana y pronóstico se activan en F3–F5
+  features/riego/         Riego aplicado (tabla día × turno × ciclos, panel con versiones) y asistente
+                          de carga de Excel (subir → vista previa → confirmar/descartar)
   features/usuarios/      Gestión de usuarios (solo admin)
   features/auditoria/     Auditoría (admin y subgerente)
   pages/                  403, 404, carga y pantallas protegidas que llegan en otras fases
-  lib/                    Fechas en hora de Lima, saneo de `next`, política de contraseña, roles, preferencias
+  lib/                    Fechas en hora de Lima y días de calendario, saneo de `next`, política de
+                          contraseña, roles y permisos por acción, preferencias
+  test/                   Configuración de Vitest y fábricas de datos de prueba
   assets/logos/           avoperu.svg y talsa.svg (placeholders: reemplázalos por los logos reales)
 ```
 
@@ -109,15 +117,93 @@ src/
 
 | Pantalla | Admin | Encargado | Subgerente | Programador | Fase |
 |---|---|---|---|---|---|
-| Dashboard | ✔ | ✔ | ✔ | ✔ (sin «Aplicado vs modelo») | F1 (tarjetas vacías hasta F2–F5) |
+| Dashboard | ✔ | ✔ | ✔ | ✔ (sin «Aplicado vs modelo») | F1; frescura en F2; KPIs F3–F5 |
+| ↳ «Actualizar ahora» | ✔ | ✔ | — | — | F2 |
+| ↳ Últimas corridas de ingesta | ✔ | ✔ | ✔ | — | F2 |
 | Generar | ✔ | ✔ | — | — | F3 |
 | Cronogramas | ✔ | ✔ | ✔ | ✔ | F3–F4 |
-| Riego aplicado | ✔ | ✔ | ✔ | ✔ | F2 |
+| Riego aplicado (lectura) | ✔ | ✔ | ✔ | ✔ | F2 |
+| ↳ Historial de versiones de un turno-día | ✔ | ✔ | ✔ | — | F2 |
+| ↳ Carga de Excel (`/riego/cargas/…`) | ✔ | ✔ | — | — | F2 |
+| ↳ Editar provisional / marcar aplicado | ✔ | ✔ | ✔ | — | F4 |
 | Datos de campo | ✔ | ✔ | ✔ | ✔ | F5 |
 | Auditoría | ✔ | — | ✔ | — | F1 |
 | Usuarios | ✔ | — | — | — | F1 |
 
-El backend vuelve a validar cada permiso; el menú y el guard solo ordenan la interfaz.
+El backend vuelve a validar cada permiso; el menú, el guard y `puede(rol, permiso)` (`lib/roles.ts`)
+solo ordenan la interfaz.
+
+## Fase 2: riego aplicado, carga de Excel y frescura
+
+### Riego aplicado (`/riego`)
+
+- Tabla **día × turno** (la fecha más reciente arriba) del módulo elegido en la cabecera. Cada
+  turno-día muestra su estado con ícono y texto (**Aplicado**, **Provisional**, **Sin riego** o
+  **Sin registro**), el total de m³/ha, los horarios de cada ciclo (luna = termina al día
+  siguiente), la versión si es > 1 y el total de m³ del día.
+- Filtro Desde/Hasta (por defecto los últimos 14 días, hasta hoy; máximo 92 días) y atajos 7/14/30.
+- Tocar un turno-día abre un panel lateral con la tabla de ciclos (horario, duración, m³/ha, m³ y
+  total) y, para admin, encargado y subgerente, el **historial de versiones** (la 1 es el original;
+  la vigente resaltada, con origen, fecha, usuario y motivo).
+- La tabla usa una consulta de **contenedor** (`@container`): con poco ancho (celular o barra lateral
+  abierta en pantallas medianas) cada día se vuelve una tarjeta con los turnos en 2–3 columnas, sin
+  scroll horizontal.
+
+### Carga de Excel (`/riego/cargas/nueva` y `/riego/cargas/:id`, admin y encargado)
+
+1. **Subir**: arrastrar o elegir el `.xlsx` (se valida extensión y ≤ 15 MB antes de enviar; el
+   backend valida todo lo demás: firma, descompresión, hoja `MOD5`, columnas). Se envía como
+   `multipart/form-data` con `archivo` y `modulo_id`.
+2. **Vista previa**: contadores por resultado (nuevo, igual, reemplaza provisional, reemplaza
+   aplicado, sin riego, error). Los aplicables tienen una casilla «Aplicar todos» (marcada,
+   desmarcada o mixta); tocar el contador filtra el detalle. El detalle por turno-día (por defecto
+   «Con cambios», 50 por página) muestra fecha, turno, resultado, ciclos, el registro vigente que se
+   reemplaza y los mensajes de error, con su casilla. Lo que viene marcado o desmarcado lo decide el
+   backend (p. ej. «reemplaza aplicado» de un registro manual llega desmarcado; «sin riego» llega
+   marcado y se puede desmarcar, D7). Cada cambio se envía con `PATCH` y se ve al instante
+   (actualización optimista; si falla, vuelve atrás y avisa).
+3. **Confirmar** (con diálogo de resumen) o **Descartar**. Si la carga venció (24 h, o el backend
+   responde 409/410 porque cambió un registro comparado) se muestra «La carga venció» con «Subir
+   otra vez» y no se puede confirmar ni marcar. Una carga confirmada muestra cuántos turno-días
+   quedaron aplicados y el enlace a Riego aplicado (cuya consulta se invalida).
+
+La URL de la vista previa (`/riego/cargas/:id`) se puede recargar o compartir mientras no venza.
+
+### Frescura de datos (Dashboard)
+
+- `GET /datos/frescura?modulo_id&fecha=<hoy Lima>&dias=7`. Por fuente: última fecha completa,
+  «Al día» / «Atrasado» respecto de ayer (y cuántos días faltan), huecos intermedios de la ventana
+  y, para el riego, los turnos atrasados. NDVI y pronóstico son «Informativo» y no cuentan como
+  atraso. Arriba, un resumen («Todo al día» o «N fuentes atrasadas · M con huecos»).
+- **Actualizar ahora** (admin, encargado): `POST /ingestas/ejecutar` con `{}` (= todas las fuentes);
+  muestra una barra de avance «N de M fuentes terminadas» consultando `GET /ingestas` cada 2,5 s
+  mientras haya corridas en curso; al terminar avisa el resultado (correcta, parcial o error) y
+  vuelve a pedir la frescura. El botón queda deshabilitado mientras haya una ingesta en curso
+  (también si la lanzó otra persona o la tarea de las 05:00).
+- **Últimas corridas** (admin, encargado, subgerente): fuente, estado, inicio, disparo
+  (programada/manual con usuario/script), duración, rango, filas nuevas/actualizadas y el primer
+  error redactado con su código HTTP.
+
+### Contrato con el backend (F2)
+
+Los tipos están en `src/services/riego.ts` y `src/services/datos.ts` (con el detalle de cada campo).
+Los servicios aceptan la lista suelta o envuelta (`{registros}`, `{items}`, `{grupos}`/`{turnos_dia}`,
+`{corridas}`) y recortan las fechas a `AAAA-MM-DD`.
+
+| Endpoint | Respuesta esperada |
+|---|---|
+| `GET /riego?modulo_id&desde&hasta` | `{registros: [{id, turno_id, turno_codigo, fecha, version, estado, origen, sin_riego, motivo, comentario, carga_id, creado_at, creado_por, ciclos: [{inicio_min, fin_min, duracion_min, riego_m3, riego_m3ha, area_ha, valvula, hora_inicio, hora_fin, fin_dia_siguiente}]}]}` (solo vigentes) |
+| `GET /riego/{turno_id}/{fecha}/versiones` | lista de registros como arriba + `vigente`, `basado_en_id` |
+| `POST /riego/cargas` (multipart `archivo`, `modulo_id`) | `CargaRiego` (201) |
+| `GET /riego/cargas/{id}` | `{id, modulo_id, archivo_nombre, tamano_bytes, subido_at, subido_por, estado, vence_at, confirmado_at, confirmado_por, resumen, grupos: [{id, fecha, turno_id, turno_codigo, resultado, aplicar, vigente_id_comparado, vigente_estado, vigente_origen, ciclos, mensajes}]}` |
+| `PATCH /riego/cargas/{id}` | cuerpo `{grupos: [{id, aplicar}]}` → `CargaRiego` |
+| `POST /riego/cargas/{id}/confirmar` · `/descartar` | `CargaRiego` actualizada; 409/410 si venció |
+| `GET /datos/frescura?modulo_id&fecha&dias` | `{fecha, referencia, dias, fuentes: [{fuente, nombre, ultima_fecha, estado (verde, naranja o informativo), informativa, huecos: [fecha], por_turno: [{turno_codigo, ultima_fecha, huecos}], detalle}]}` |
+| `POST /ingestas/ejecutar` | 202 con la lista de corridas creadas (`id` y `estado: en_curso`) |
+| `GET /ingestas?limite=20` | lista de `{id, fuente, disparo, usuario, fecha_programada, desde, hasta, inicio_at, fin_at, duracion_ms, estado, filas_nuevas, filas_actualizadas, filas_omitidas, conflictos, errores: [{tipo, status_code, endpoint, mensaje}]}` (más reciente primero) |
+
+Fuentes reconocidas por nombre: `riego_aplicado`, `riego_provisional`, `weatherlink`,
+`phytech_suelo`, `phytech_planta`, `ndvi`, `pronostico` (otras se muestran humanizadas).
 
 ## Pruebas
 
@@ -128,6 +214,15 @@ tiempo límite, `navigator.locks`, cabeceras, errores 422 en español), AuthProv
 «No se pudo conectar» y Reintentar), acciones de Usuarios sobre la propia cuenta, fechas en Lima
 (incluido el reloj a las 23:30), token del fragmento y detalle antes/después de la auditoría.
 
+En F2 se suman: días de calendario sin corrimiento de zona; subida multipart sin `Content-Type`
+JSON; permisos de la carga de Excel por rol; Riego aplicado (estados de cada turno-día, panel con
+ciclos e historial para A/E/S, programador sin historial ni «Cargar Excel», atajos y validación
+del rango); carga de Excel (archivo no `.xlsx` rechazado sin llamar al backend, error del backend,
+contadores por resultado, «sin riego» desmarcable con actualización optimista, confirmar,
+carga vencida por 409 o por 24 h, descartar); frescura (orden, atraso, huecos, informativas,
+programador sin botón ni corridas, subgerente con corridas sin botón, «Actualizar ahora» con avance
+y sondeo hasta terminar) y el cálculo del avance de las corridas.
+
 ## Librerías y notas de compatibilidad
 
 React Router 7 (modo librería: `BrowserRouter` + `Routes`), TanStack Query 5, TanStack Table 8,
@@ -136,4 +231,4 @@ sonner (notificaciones), lucide-react, date-fns (instalada para los calendarios 
 @tailwindcss/vite, Vitest 5. Todas compatibles con Vite 8 / React 19 / TypeScript 7; no hizo falta
 ninguna alternativa. React Router 8 ya existe, pero se fijó la 7 como pide la propuesta.
 El build separa las librerías en trozos (`react`, `router`, `formularios`, `datos`, `ui`) y carga
-Usuarios y Auditoría bajo demanda.
+Usuarios, Auditoría, Riego aplicado y la carga de Excel bajo demanda.
