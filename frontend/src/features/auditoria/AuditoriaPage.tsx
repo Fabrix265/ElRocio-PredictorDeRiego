@@ -106,7 +106,7 @@ export default function AuditoriaPage() {
         header: "Usuario",
         cell: ({ row: { original: r } }) => (
           <div className="flex flex-col">
-            <span className="font-medium">{r.username ?? "Sistema"}</span>
+            <span className="font-medium">{r.username ?? "Anónimo"}</span>
             <span className="text-xs text-texto-3">{etiquetaRol(r.rol)}</span>
           </div>
         ),

@@ -39,7 +39,7 @@ export function PanelDetalle({ registro }: { registro: RegistroAuditoria }) {
           <Badge tono={tonoAccion(registro.accion)}>{registro.accion}</Badge>
         </div>
         <dl className="cifras grid grid-cols-2 gap-x-4 gap-y-3">
-          <Dato etiqueta="Usuario">{registro.username ?? "Sistema"}</Dato>
+          <Dato etiqueta="Usuario">{registro.username ?? "Anónimo"}</Dato>
           <Dato etiqueta="Rol">{etiquetaRol(registro.rol)}</Dato>
           <Dato etiqueta="Entidad">{registro.entidad ? etiquetaEntidad(registro.entidad) : "—"}</Dato>
           <Dato etiqueta="ID de la entidad">{registro.entidad_id ?? "—"}</Dato>
