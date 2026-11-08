@@ -449,6 +449,44 @@ Código: `api/v1/endpoints/riego.py`, `services/riego_service.py` (consulta y ve
   vista previa los muestra como `reemplaza_aplicado` desmarcados con aviso (validación 1,4 s,
   vista previa 12,6 s).
 
+## Predicción y cronogramas (F3)
+
+| Ruta | Quién | Qué hace |
+|---|---|---|
+| `POST /cronogramas/generar` | A E | `{modulo_id, fecha_inicio?, dias, regenerar_existentes}` → resultado por día (creado / regenerado / omitido), marcas y frescura |
+| `GET /cronogramas?modulo_id&desde&hasta&estado` | todos | Listado por fecha (el programador solo ve los publicados) |
+| `GET /cronogramas/por-fecha?modulo_id&fecha` | todos | Detalle del cronograma de ese día o `null` («Hoy y mañana») |
+| `GET /cronogramas/{id}` | A E S; P publicado | Cabecera, versión vigente (borrador si hay; el programador, la publicada) con turnos y ciclos, e historial de versiones |
+| `GET /cronogramas/{id}/versiones[/{n}]` | A E S; P solo publicadas | Historial o una versión completa |
+| `POST /cronogramas/{id}/regenerar` | A E | `{confirmar}`: versión `regenerado`; 409 si el borrador tiene correcciones y no se confirmó |
+
+- **Modelo** (`app/ml/model_loader.py`): se carga una vez por proceso desde `ML_MODEL_PATH`,
+  comparando antes su sha256 con `ML_MODEL_SHA256` (obligatorio en producción). Se registra en
+  `modelo_version` y el health muestra la versión cargada.
+- **Bucle** (`app/ml/generador.py`): historial desde la BD hasta el último día de la ventana; por
+  cada día que se genera, `features_para_fechas` → `plan.predecir` → se agrega al historial (igual
+  que `planificar`). Los días que no se tocan entran con su riego vigente o su versión de
+  referencia. Con días nuevos el resultado es idéntico a `planificar`.
+- **Foto de entradas** (`prediccion_entrada`): por generación, fecha y turno, las features
+  turno-día y de ciclo, el origen del riego de D-1 y `alternativas_n` (salida del modelo forzando
+  n = 1..5, para cambiar el n° de ciclos en F4).
+- **Reglas por día** (§3.1): sin cronograma → Borrador v1 `modelo`; Borrador sin correcciones →
+  versión `regenerado`; Borrador corregido o Publicado/Visto/Corrección solicitada → se omite,
+  salvo `regenerar_existentes` (queda como borrador de cambios). Fecha inicial entre hoy − 7 y
+  mañana, 1 a 7 días y al menos 45 días de riego antes.
+- **Marcas** (§3.3): *preliminar* (día ≥ 2, fecha inicial mañana, riego de D-1 tomado de un
+  cronograma o D-1 sin ambiente completo); *datos incompletos* (clima, suelo, planta o riego
+  conocido sin D-1, o huecos de riego por turno en la última semana); *regenerado*;
+  *desactualizado* (al leer: riego de D-30..D-1 o ambiente de D-14..D-1 posterior a la versión).
+- **Concurrencia**: candado del modelo en el proceso y `pg_try_advisory_xact_lock` por módulo
+  (de transacción, compatible con el pooler) → 409 si hay otra generación del mismo módulo.
+- Cada cronograma creado o regenerado queda en la auditoría (`generar` / `regenerar`) y en su
+  línea de tiempo (`cronograma_evento`).
+
+Probar en local (BD `riego_dev`, sin tocar `backend/.env`): levanta la API con `DATABASE_URL`
+local, entra como admin y usa **Generar** (3 días tarda unos 10 s), o
+`POST /api/v1/cronogramas/generar {"modulo_id": 1}`.
+
 ## Correos y tareas programadas
 
 Los correos pasan por la cola `notificacion_correo`: la acción encola (en su misma transacción) y

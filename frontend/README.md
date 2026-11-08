@@ -63,7 +63,7 @@ src/
   features/layout/        AppLayout, barra lateral, cabecera, selector Fundo › Módulo, menú de usuario, menú inferior
   features/catalogo/      GET /fundos y la selección de fundo y módulo (contexto + URL + preferencia local)
   features/dashboard/     Dashboard: panel de frescura con «Actualizar ahora» y últimas corridas (F2);
-                          KPIs, hoy/mañana y pronóstico se activan en F3–F5
+                          «Hoy y mañana» (F3); KPIs y pronóstico en F4–F5
   features/riego/         Riego aplicado (tabla día × turno × ciclos, panel con versiones) y asistente
                           de carga de Excel (subir → vista previa → confirmar/descartar)
   features/usuarios/      Gestión de usuarios (solo admin)
@@ -120,8 +120,8 @@ src/
 | Dashboard | ✔ | ✔ | ✔ | ✔ (sin «Aplicado vs modelo») | F1; frescura en F2; KPIs F3–F5 |
 | ↳ «Actualizar ahora» | ✔ | ✔ | — | — | F2 |
 | ↳ Últimas corridas de ingesta | ✔ | ✔ | ✔ | — | F2 |
-| Generar | ✔ | ✔ | — | — | F3 |
-| Cronogramas | ✔ | ✔ | ✔ | ✔ | F3–F4 |
+| Generar | ✔ | ✔ | — | — | F3 (`/generar`) |
+| Cronogramas | ✔ | ✔ | ✔ | ✔ | F3 lectura (`/cronogramas`, `/cronogramas/:id`); flujo en F4 |
 | Riego aplicado (lectura) | ✔ | ✔ | ✔ | ✔ | F2 |
 | ↳ Historial de versiones de un turno-día | ✔ | ✔ | ✔ | — | F2 |
 | ↳ Carga de Excel (`/riego/cargas/…`) | ✔ | ✔ | — | — | F2 |

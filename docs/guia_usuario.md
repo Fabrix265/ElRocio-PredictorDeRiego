@@ -36,8 +36,8 @@ Pantallas del menú por rol:
 | Pantalla | Administrador | Encargado | Programador | Subgerente | Disponible |
 |---|---|---|---|---|---|
 | Dashboard | ✔ | ✔ | ✔ (solo lo publicado) | ✔ | **[Disponible]** con la frescura de datos; indicadores, cronogramas y pronóstico en las fases 3 a 5 |
-| Generar | ✔ | ✔ | — | — | [Fase 3] |
-| Cronogramas | ✔ | ✔ edita | ✔ solo publicados, confirma Visto | ✔ lectura, solicita corrección | [Fase 3] lectura · [Fase 4] flujo |
+| Generar | ✔ | ✔ | — | — | [Disponible] |
+| Cronogramas | ✔ | ✔ edita | ✔ solo publicados, confirma Visto | ✔ lectura, solicita corrección | [Disponible] lectura · [Fase 4] flujo |
 | Riego aplicado | ✔ | ✔ sube Excel (edita en la fase 4) | ✔ lectura | ✔ lectura e historial (edita en la fase 4) | **[Disponible]** consulta y carga de Excel · [Fase 4] edición |
 | Datos de campo | ✔ | ✔ | ✔ | ✔ | [Fase 5] |
 | Auditoría | ✔ | — | — | ✔ | **[Disponible]** |
@@ -132,7 +132,7 @@ turno y día (paso 8, en lectura). Los cronogramas llegan en las fases 3 y 4.
                                                        └── Solicitud de corrección (subgerente)
 ```
 
-### Estados de un cronograma [Fase 3–4]
+### Estados de un cronograma [Disponible: Borrador · Fase 4: el resto]
 
 Hay un cronograma por módulo y fecha. Cada cambio guarda una versión nueva y las anteriores no se
 borran nunca. El cronograma pasa por estos estados:
@@ -214,17 +214,37 @@ Además, un cronograma puede llevar estas marcas de calidad:
   registros comparados. Toca **Subir otra vez** para revisarla con los datos actuales.
 - La subida, la confirmación y el descarte quedan en la **Auditoría**.
 
-### Paso 3 · Generar el cronograma [Fase 3]
+### Paso 3 · Generar el cronograma [Disponible]
 
 - **Quién**: encargado o administrador.
-- En **Generar**, elige la fecha inicial (por defecto, hoy) y el número de días (por defecto, 3),
-  y revisa la frescura de cada día.
+- En **Generar**, elige la **Fecha inicial** (por defecto, hoy; puede ir de 7 días atrás hasta
+  mañana) y los **Días** (por defecto, 3; máximo 7) y toca **Generar**. El modelo tarda unos
+  segundos por día.
 - El modelo propone, por turno, el número de ciclos y, por ciclo, los m³/ha, la duración y el
-  horario, con un rango de confianza.
-- El resultado dice qué pasó con cada día: creado, regenerado u omitido. Un día ya publicado o
-  ya corregido no se toca, salvo que marques «regenerar también estos».
+  horario.
+- **Resultado por día**: dice qué pasó con cada día (**Creado**, **Regenerado** u **Omitido**),
+  su versión y sus marcas, con **Ver detalle**. Si alguna fuente no tenía el día anterior aparece
+  «Datos atrasados al generar»: el plan se calcula igual, con menos precisión.
+- Un día ya publicado o ya corregido no se toca, salvo que marques «Regenerar también los días con
+  correcciones o publicados»: se crea una versión nueva del modelo como borrador y lo publicado no
+  cambia hasta que se publique.
+- Si alguien está generando el mismo módulo en ese momento, el sistema avisa y pide intentar de
+  nuevo en unos segundos.
 
-### Paso 4 · Revisar y corregir [Fase 3 lectura · Fase 4 edición]
+### Ver un cronograma [Disponible]
+
+- En **Cronogramas** están los cronogramas por fecha (por defecto, del último mes a la próxima
+  semana), con su estado, versión y marcas. El programador solo ve los publicados.
+- El **detalle** muestra la versión vigente: el Gantt de ciclos por turno a lo largo del día y la
+  tabla con inicio, fin, duración, m³/ha y m³ de cada ciclo (la luna indica que termina al día
+  siguiente). A la derecha, **Versiones**: toca una para verla.
+- **Regenerar** (encargado y administrador) recalcula el día con el modelo y crea una versión
+  nueva. Si el borrador tenía correcciones, el sistema pide confirmar («Regenerar igual»).
+- Si llegaron datos nuevos después de generar, aparece la marca **Desactualizado** y el aviso
+  «Hay datos nuevos»: conviene regenerar.
+- En el **Dashboard**, **Hoy y mañana** muestra el Gantt de los dos días con su estado y versión.
+
+### Paso 4 · Revisar y corregir [Fase 4]
 
 - **Quién**: encargado o administrador. El subgerente lo ve en modo lectura.
 - En **Cronogramas → detalle** hay cinco pestañas:
@@ -325,7 +345,7 @@ El primer administrador lo crea el equipo técnico al instalar el sistema (coman
 | Ingresar, recuperar y cambiar su contraseña | **[Disponible]** |
 | Ver el Dashboard con la **Frescura de datos** y las últimas corridas | **[Disponible]** |
 | Ver el riego aplicado y su historial, subir el Excel y usar **Actualizar ahora** (pasos 1, 2 y 8) | **[Disponible]** |
-| Generar y regenerar cronogramas; ver el detalle (paso 3) | [Fase 3] |
+| Generar y regenerar cronogramas; ver el detalle (paso 3) | [Disponible] |
 | Corregir con motivo, publicar, publicar cambios, descartar el borrador de cambios y mantener la versión ante una solicitud de corrección (pasos 4, 5 y 7) | [Fase 4] |
 | Editar el riego provisional, marcarlo aplicado y registrar «no se regó» (paso 8) | [Fase 4] |
 | Dashboard con indicadores, Datos de campo y exportaciones (paso 9) | [Fase 5] |
@@ -349,7 +369,7 @@ El primer administrador lo crea el equipo técnico al instalar el sistema (coman
 | Revisar la auditoría ([ver Auditoría](#auditoría-administrador-y-subgerente)) | **[Disponible]** |
 | Ver el Dashboard con la **Frescura de datos** y las últimas corridas (sin «Actualizar ahora») | **[Disponible]** |
 | Consultar el riego aplicado y el historial de versiones de cada turno-día (paso 8) | **[Disponible]** |
-| Ver los cronogramas (incluidos los borradores) en modo lectura | [Fase 3] |
+| Ver los cronogramas (incluidos los borradores) en modo lectura | [Disponible] |
 | Recibir los correos de publicación y de Visto; **Solicitar corrección** con motivo (paso 7) | [Fase 4] |
 | Editar el riego provisional, marcarlo aplicado y registrar «no se regó» (paso 8) | [Fase 4] |
 | Dashboard con indicadores, Datos de campo y exportaciones (paso 9) | [Fase 5] |
