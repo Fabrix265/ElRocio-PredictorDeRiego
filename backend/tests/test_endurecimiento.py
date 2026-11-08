@@ -225,12 +225,15 @@ def test_crear_admin_interactivo_y_por_stdin(cli_con_db: Session, monkeypatch, c
 # --- Tareas programadas -------------------------------------------------------
 
 def test_programador_tiene_la_tarea_de_correos():
-    from app.jobs.runner import INTERVALO_CORREOS_S, crear_programador
+    from app.jobs.runner import INTERVALO_CORREOS_S, INTERVALO_VIGILANCIA_S, crear_programador
 
     programador = crear_programador(en_segundo_plano=True)
     trabajos = {t.id: t for t in programador.get_jobs()}
     # "ingesta_al_arrancar" aparece solo si ya pasó INGESTA_HORA (ver test_ingesta.py).
-    assert set(trabajos) - {"ingesta_al_arrancar"} == {"enviar_correos", "limpiar_intentos", "ingesta_diaria"}
+    assert set(trabajos) - {"ingesta_al_arrancar"} == {
+        "enviar_correos", "limpiar_intentos", "ingesta_diaria", "vigilar_ingestas",
+    }
+    assert trabajos["vigilar_ingestas"].trigger.interval.total_seconds() == INTERVALO_VIGILANCIA_S
     assert trabajos["enviar_correos"].trigger.interval.total_seconds() == INTERVALO_CORREOS_S
     assert str(programador.timezone) == "America/Lima"
 

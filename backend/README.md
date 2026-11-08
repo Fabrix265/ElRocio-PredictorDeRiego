@@ -69,6 +69,13 @@ versiona. Las variables del entorno del proceso tienen prioridad sobre `.env`.
   del refresh). En producción la configuración exige `COOKIE_SECURE=true`, `DEBUG=false`,
   `FRONTEND_URL` con https y un `JWT_SECRET` largo; si falta algo, la app no arranca.
 
+Para ejecutar sin leer `backend/.env`, exporta **`RIEGO_SIN_ENV_FILE=1` en el entorno del
+proceso antes de arrancar** la API, CLI, tareas o Alembic. También acepta `true`, `si` y `sí`
+(sin distinguir mayúsculas y omitiendo espacios). No sirve ponerla dentro de `.env`: la decisión
+se toma antes de abrirlo. Sin esa variable se mantiene la lectura habitual, con prioridad para
+las variables del entorno. Al omitir el archivo, configura en el entorno las conexiones locales
+y demás valores necesarios; las credenciales de API ausentes quedan vacías.
+
 ## Base de datos
 
 ### PostgreSQL local (desarrollo)
@@ -298,7 +305,7 @@ Código: `integraciones/` (clientes), `services/ingesta_service.py`, `repositori
 | Método y ruta | Quién | Respuesta |
 |---|---|---|
 | `POST /ingestas/ejecutar` `{fuentes?, desde?, hasta?}` | A E | 202 con las corridas `en_curso` («Actualizar ahora»); 409 si una fuente ya está en curso (también si dos peticiones llegan a la vez: índice único parcial); 422 si el rango no cumple `2017-01-01 ≤ desde ≤ hasta < hoy` o supera 62 días |
-| `GET /ingestas?limite&fuente` | A E S | Corridas más recientes primero (`limite` ≤ 200, 20 por defecto), con errores `{tipo, status_code, endpoint sin query, mensaje}` |
+| `GET /ingestas?limite&fuente` | A E S | Las últimas `limite` corridas (≤ 200, 20 por defecto) más todas las `en_curso`, sin duplicados y ordenadas por inicio descendente; incluyen `latido_at` (nullable), con errores `{tipo, status_code, endpoint sin query, mensaje}` |
 | `GET /datos/frescura?modulo_id&fecha&dias` | todos | Por fuente: última fecha completa, `verde`/`naranja` respecto de D-1 y huecos de la ventana (`dias` ≤ 60, 7 por defecto); el riego trae detalle `por_turno` |
 | `GET /datos/clima?desde&hasta&resolucion=diaria\|30min` | todos | `ambiente_diario` o `meteo_lectura` (30 min, máx. 31 días) |
 | `GET /datos/suelo?…&resolucion=diaria\|horaria` · `GET /datos/planta` | todos | Resumen diario o `phytech_suelo_horario`; planta diaria con ET y lluvia de Phytech |
@@ -337,8 +344,8 @@ recalcula `ambiente_diario` de los días tocados.
   «Actualizar ahora» o un `ingestar` que choca con otro responde 409 (`Conflicto`) y la tarea
   programada omite la fuente ocupada. Sin candados de sesión (sirve con el pooler 6543).
 - **Latido**: mientras corre, cada corrida actualiza `latido_at` cada 60 s en una transacción
-  aparte (la de la ingesta no toca la fila hasta cerrarla). Una corrida `en_curso` sin latido en
-  10 min quedó sin dueño (proceso muerto, deploy) y se cierra como `error` («interrumpida»).
+  aparte (la de la ingesta no toca la fila hasta cerrarla). El panel usa `latido_at` (o `inicio_at`
+  si es nulo). Una corrida `en_curso` sin latido durante más de 10 min quedó sin dueño (proceso muerto, deploy) y se cierra como `error` («interrumpida»).
 - **Tarea diaria** a `INGESTA_HORA` (05:00 Lima) en `python -m app.jobs` (o dentro de la API con
   `SCHEDULER_ENABLED=true`). Exclusión entre procesos con la fila `uq(fuente, fecha_programada)`
   (`INSERT … ON CONFLICT`, sin candados de sesión). Si el proceso arranca después de esa hora la
@@ -499,3 +506,11 @@ gracia del refresh, vencimiento de enlaces, `hoy_lima` a las 23:30).
 | `test_datos_campo` | Lecturas idempotentes (la API no pisa el Excel), `ambiente_diario` = riego_ml, hoy en Lima, riego por turno-día (hash, conflicto, `--reemplazar`), Historial desde la BD y respaldo del cronograma |
 | `test_riego` | Permisos por rol de `/riego` y `/riego/cargas*`, subir → marcar → confirmar → resubir (todo «igual»), reemplazos y versiones, D7, avisos (última fecha, menos riego), errores de la vista previa, vencimiento (24 h y registro cambiado), auditoría, Excel malicioso (*billion laughs*, XXE, DTD, bomba ZIP), fórmulas sin valor, filas contadas en streaming y validación del archivo |
 | `test_paridad_historico` | Ida y vuelta con `ml/data/raw`: ambiente, Historial y plan idénticos a la ruta por archivos, y clima diario desde WeatherLink (nov-2021) igual al del Excel (se salta sin los archivos) |
+
+### Respuesta al marcar la vista previa
+
+`PATCH /riego/cargas/{id}` devuelve `{id, contadores, grupos: [{id, aplicar}]}`: los contadores
+por resultado de la carga y solo la selección final de los grupos solicitados (si se repite un
+id, gana el último). Los resultados y ciclos no cambian al marcar. La interfaz combina esta
+respuesta con la vista previa en caché y recalcula los totales seleccionados; no descarga otra
+vez los ciclos. `GET`, confirmar y descartar conservan la respuesta completa.

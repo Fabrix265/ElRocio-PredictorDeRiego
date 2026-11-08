@@ -189,12 +189,11 @@ contadores («Reemplaza provisional») hacen salto de línea (`Badge` con `ajust
   «Actualización parcial» o «La actualización falló») y vuelve a pedir la frescura. El botón queda
   en «Actualizando…» mientras haya una ingesta en curso (también si la lanzó otra persona o la
   tarea de las 05:00); un 409 del backend se avisa con su mensaje.
-- **Corridas colgadas**: una corrida `en_curso` que empezó hace más de 3 h (`HORAS_CORRIDA_COLGADA`)
-  se da por interrumpida (el proceso murió a mitad de la ingesta): se muestra «Sin terminar» con
-  «Se cerrará al usar «Actualizar ahora»», **no** deshabilita el botón y **no** mantiene el sondeo.
-  El backend la cierra como error «interrumpida» cuando lleva 10 min sin latido (al lanzar la
-  siguiente ingesta o con la tarea vigilante); como `GET /ingestas` no expone `latido_at`, la
-  interfaz usa ese tope conservador desde `inicio_at`.
+- **Corridas colgadas**: una corrida `en_curso` con más de 10 min desde `latido_at` (o desde
+  `inicio_at` si no tiene latido) se muestra «Sin terminar», no deshabilita el botón ni mantiene
+  el sondeo. Es el mismo umbral estricto del backend (`MINUTOS_SIN_LATIDO`). Una corrida larga
+  con latido reciente sigue activa. `GET /ingestas` agrega todas las `en_curso` a las últimas
+  20, sin duplicados, por lo que una colgada antigua sigue visible.
 - **Últimas corridas** (admin, encargado, subgerente): las 6 más recientes, con las que están en
   curso siempre primero; fuente, estado, inicio, disparo (programada/manual con usuario/script),
   duración, rango, filas nuevas/actualizadas y el primer error redactado con su código HTTP. Las
@@ -214,11 +213,11 @@ Los servicios solo recortan las fechas a `AAAA-MM-DD` y ordenan los ciclos por i
 | `GET /riego/{turno_id}/{fecha}/versiones` | A E S | 200 lista de `VersionRiego` (registro + `vigente`, `basado_en_id`) |
 | `POST /riego/cargas` multipart (`archivo`, `modulo_id`) | A E | 201 `CargaRiego`; 413 archivo > 15 MB; 422 archivo inválido (firma, hoja `MOD5`, columnas, filas); 503 si el servidor no tiene `defusedxml` |
 | `GET /riego/cargas/{id}` | A E | 200 `CargaRiego` `{id, modulo_id, archivo_nombre, sha256, tamano_bytes, subido_at, subido_por, estado, vence_at, confirmado_at, confirmado_por, resumen, grupos: [{id, fecha, turno_id, turno_codigo, resultado, aplicar, vigente_id_comparado, vigente_estado, vigente_origen, ciclos, mensajes}]}`; 404 |
-| `PATCH /riego/cargas/{id}` | A E | cuerpo `{grupos: [{id, aplicar}]}` (al menos uno) → 200 `CargaRiego` completa; 409 vencida; 422 grupo ajeno, «igual» o con error |
+| `PATCH /riego/cargas/{id}` | A E | cuerpo `{grupos: [{id, aplicar}]}` (al menos uno) → 200 `{id, contadores, grupos: [{id, aplicar}]}` (solo grupos solicitados); 409 vencida; 422 grupo ajeno, «igual» o con error |
 | `POST /riego/cargas/{id}/confirmar` · `/descartar` | A E | 200 `CargaRiego` confirmada o descartada; 409 vencida, ya confirmada o ya descartada; 422 si no hay nada marcado |
 | `GET /datos/frescura?modulo_id&fecha&dias` | todos | 200 `{modulo_id, fecha, referencia, dias, fuentes: [{fuente, nombre, ultima_fecha, estado (verde, naranja o informativo), informativa, huecos, detalle, por_turno: [{turno_id, turno_codigo, ultima_fecha, huecos}] o null}]}` |
 | `POST /ingestas/ejecutar` `{fuentes?, desde?, hasta?}` | A E | 202 lista de corridas creadas (`estado: en_curso`); 409 si una fuente ya está en curso; 422 fuente o rango inválidos |
-| `GET /ingestas?limite=20&fuente` | A E S | 200 lista de `{id, fuente, disparo, usuario, fecha_programada, desde, hasta, inicio_at, fin_at, duracion_ms, estado, filas_nuevas, filas_actualizadas, filas_omitidas, conflictos, errores: [{tipo, status_code, endpoint, mensaje}]}` (más reciente primero; incluye carga histórica y reproceso) |
+| `GET /ingestas?limite=20&fuente` | A E S | 200 lista de `{id, fuente, disparo, usuario, fecha_programada, desde, hasta, inicio_at, latido_at, fin_at, duracion_ms, estado, filas_nuevas, filas_actualizadas, filas_omitidas, conflictos, errores: [{tipo, status_code, endpoint, mensaje}]}` (más reciente primero; incluye carga histórica y reproceso) |
 
 Fuentes con nombre propio: `riego_aplicado`, `riego_provisional`, `weatherlink`, `phytech_suelo`,
 `phytech_planta`, `ndvi`, `pronostico` y, en las corridas, `historico_meteo`, `historico_phytech`,
@@ -226,11 +225,9 @@ Fuentes con nombre propio: `riego_aplicado`, `riego_provisional`, `weatherlink`,
 La auditoría traduce las acciones y entidades de F2 (`excel_subido/confirmado/descartado`,
 `meteo_excel_pisado`, `carga_riego`, `ingesta_corrida`).
 
-**Pendiente del backend**: cada `PATCH` de la vista previa devuelve la carga entera (con el Excel
-real, ~4,8 MB por clic en una casilla). La interfaz ya no repite el `GET` tras la subida, pero
-achicar la respuesta del `PATCH` (solo grupos cambiados y contadores) es trabajo del backend. Si
-`IngestaCorridaSalida` llegara a incluir `latido_at`, la interfaz podría usar el mismo criterio de
-10 min sin latido en lugar del tope de 3 h.
+El `PATCH` devuelve solo los contadores por resultado y la selección final de los grupos
+solicitados. La interfaz combina esos cambios con la carga en caché, conserva ciclos y mensajes,
+y recalcula los totales seleccionados. No repite el `GET` ni descarga la carga completa por clic.
 
 ## Pruebas
 
@@ -250,7 +247,7 @@ carga vencida por 409 o por 24 h, 409 «ya confirmada» que no se toma como venc
 vista previa que no se vuelve a pedir tras la subida); frescura (orden, atraso, huecos,
 informativas, línea por turno solo con lo que difiere, programador sin botón ni corridas,
 subgerente con corridas sin botón, «Actualizar ahora» con avance y sondeo hasta terminar, corrida
-colgada de más de 3 h que no bloquea el botón ni deja el sondeo activo), el cálculo del avance de
+colgada con más de 10 min sin latido que no bloquea el botón ni deja el sondeo activo), el cálculo del avance de
 las corridas, los nombres de las corridas históricas y las etiquetas de auditoría de F2.
 
 Prueba manual de punta a punta (backend contra `riego_dev`, nunca contra el `.env` de producción):

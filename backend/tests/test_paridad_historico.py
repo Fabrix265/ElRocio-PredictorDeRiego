@@ -34,12 +34,12 @@ from riego_ml.dataset.limpieza import limpiar_ciclos, tabla_turno_dia
 from riego_ml.dataset.preparar import Historial
 from riego_ml.dataset.unir import columnas_ambiente, unir_fuentes
 from riego_ml.sources.meteo import COLUMNAS_DIARIAS, leer_meteo, meteo_diaria
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.integraciones.weatherlink import conversion
 from app.ml.historial_bd import construir_historial
-from app.models import MeteoLectura
+from app.models import AmbienteDiario, MeteoLectura
 from app.models.enums import OrigenMeteo
 from app.repositories import datos_campo as repo
 from app.services import ambiente_service, ingesta_service, lecturas_service
@@ -192,11 +192,26 @@ INICIO_WL = pd.Timestamp("2021-11-14")      # ... y WeatherLink del 14 al 30: do
 EXACTAS = ["T_media", "T_min", "HR_media", "Viento_media", "meteo_lecturas"]
 
 
+@pytest.fixture
+def bd_clima_weatherlink(bd):
+    """Usa la conexión histórica en un SAVEPOINT limpio: otra conexión quedaría esperando los
+    bloqueos de la fixture de módulo. Al terminar restaura todos los datos de esa fixture."""
+    sesion, _ = bd
+    transaccion = sesion.begin_nested()
+    try:
+        sesion.execute(delete(AmbienteDiario))
+        sesion.execute(delete(MeteoLectura))
+        yield sesion
+    finally:
+        transaccion.rollback()
+
+
 @pytest.mark.skipif(not WL_2021.exists(), reason="sin ml/data/raw/WeatherLink/completo")
-def test_clima_desde_weatherlink_igual_al_del_excel(db):
+def test_clima_desde_weatherlink_igual_al_del_excel(bd_clima_weatherlink):
     """Detecta un corrimiento del corte de día (la lectura de las 24:00) o de las fórmulas: cada día
     armado desde la BD con lecturas de WeatherLink (y el empalme con el Excel, sin lecturas
     repetidas) da el mismo ``meteo_diaria`` que el Excel de entrenamiento."""
+    db = bd_clima_weatherlink
     fundo = repo.fundo_por_id(db, repo.modulo_por_codigo(db, CODIGO_MODULO).fundo_id)
     excel, _ = leer_meteo(RUTAS.meteo)
     dia_excel = excel["fecha_hora"].dt.normalize()
