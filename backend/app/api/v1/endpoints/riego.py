@@ -23,6 +23,7 @@ from app.core.errores import DatosInvalidos
 from app.models import Usuario
 from app.models.enums import RolUsuario
 from app.schemas.riego import CargaMarcadaSalida, CargaMarcar, CargaRiegoSalida, RiegoListado, VersionRiegoSalida
+from app.schemas.riego import RegistroRiegoEntrada, RegistroRiegoSalida
 from app.services import archivo_excel, carga_riego_service, riego_service
 
 router = APIRouter(prefix="/riego")
@@ -74,6 +75,12 @@ def versiones(
     db: DbSesion,
 ) -> list[dict[str, Any]]:
     return riego_service.versiones(db, turno_id, fecha)
+
+
+@router.post("/registros", response_model=RegistroRiegoSalida, status_code=status.HTTP_201_CREATED)
+def guardar_registro(datos: RegistroRiegoEntrada, usuario: AdminEncargadoSubgerente,
+                     db: DbSesion, contexto: Contexto) -> dict[str, Any]:
+    return riego_service.guardar_manual(db, datos, usuario, contexto)
 
 
 def _modulo_id(valor: Any) -> int:

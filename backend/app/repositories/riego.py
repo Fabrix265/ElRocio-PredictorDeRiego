@@ -10,7 +10,7 @@ import json
 from collections.abc import Iterable, Sequence
 from typing import Any
 
-from sqlalchemy import Enum, Text, bindparam, cast, func, select, update
+from sqlalchemy import Enum, Text, bindparam, cast, func, select, text, update
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, insert
 from sqlalchemy.orm import Session, selectinload
 
@@ -27,6 +27,24 @@ from app.models import (
 from app.repositories import masivo
 
 LOTE_INSERT = 1000  # ids por UPDATE
+
+
+def bloquear_turno_dia(db: Session, turno_id: int, fecha: dt.date) -> RiegoRegistro | None:
+    """Serializa también la primera inserción (sin fila aún); luego bloquea el vigente.
+
+    F4 toma primero el cronograma, si existe, y después estos candados en orden de turno.
+    """
+    db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:clave, 0))"),
+               {"clave": f"riego.turno_dia:{turno_id}:{fecha.isoformat()}"})
+    return db.scalar(select(RiegoRegistro).where(
+        RiegoRegistro.turno_id == turno_id, RiegoRegistro.fecha == fecha, RiegoRegistro.vigente.is_(True),
+    ).with_for_update().execution_options(populate_existing=True))
+
+
+def max_version_turno_dia(db: Session, turno_id: int, fecha: dt.date) -> int:
+    return db.scalar(select(func.coalesce(func.max(RiegoRegistro.version), 0)).where(
+        RiegoRegistro.turno_id == turno_id, RiegoRegistro.fecha == fecha,
+    ))
 
 
 def turnos_de_modulo(db: Session, modulo_id: int) -> list[Turno]:

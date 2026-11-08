@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "_componentes.html" import boton %}
+{% block contenido %}
+<h1 style="margin:0 0 16px;font-size:20px;line-height:28px;color:#1B482C;">Versión mantenida</h1>
+<p>Se decidió mantener la versión publicada del cronograma.</p>
+<p><strong>{{ modulo }}</strong> · {{ fecha }} · Versión {{ version }}<br>
+Usuario: {{ usuario }}</p>
+{% if retrospectiva %}
+<p style="padding:12px;background:#EEF6EF;color:#1B482C;">Corrección retrospectiva: no requiere un nuevo Visto del programador.</p>
+{% endif %}
+{% if motivo %}<p><strong>Motivo:</strong> {{ motivo }}</p>{% endif %}
+{% if comentario %}<p><strong>Comentario:</strong> {{ comentario }}</p>{% endif %}
+{% if resumen %}
+<ul>{% for cambio in resumen %}<li>{{ cambio }}</li>{% endfor %}</ul>
+{% endif %}
+{{ boton(enlace, "Ver cronograma") }}
+<p style="font-size:12px;color:#5F5849;">Si el botón no funciona, abre:<br>
+<a href="{{ enlace }}" style="color:#2A7042;word-break:break-all;">{{ enlace }}</a></p>
+{% endblock %}

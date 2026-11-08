@@ -512,6 +512,72 @@ genera al enviar (en la BD su SHA-256) y el enlace es `FRONTEND_URL/restablecer#
   sesiones de refresh y enlaces de recuperación vencidos, revocados o usados hace más de 30 días.
 - Ingesta diaria de las APIs a `INGESTA_HORA` (ver «Ingesta de APIs, frescura y series»).
 
+## Flujo del cronograma (F4)
+
+Rutas relativas a `/api/v1`. A = administrador, E = encargado, P = programador,
+S = subgerente. Las mutaciones se confirman junto con los eventos, auditoría y correos
+en la transacción de `DbSesion`; los servicios solo hacen `flush`.
+
+| Método y endpoint | Quién | Qué hace / esquema |
+|---|---|---|
+| `POST /cronogramas/{id}/recalcular` | A E | `EdicionEntrada` → `VersionPrevia` (sin id ni número, con avisos de solape); no guarda |
+| `GET /cronogramas/{id}/alternativas` | A E | Alternativas 1–5 por turno; sigue `basada_en_id` hasta la generación de la base vigente |
+| `POST /cronogramas/{id}/versiones` | A E | `GuardarVersionEntrada` → `CronogramaDetalle`; nueva corrección/edición inmutable con motivo activo |
+| `DELETE /cronogramas/{id}/borrador` | A E | Descarta el borrador de cambios, conserva versiones y publicación; devuelve `CronogramaDetalle` |
+| `POST /cronogramas/{id}/publicar` | A E | `PublicarEntrada` → `CronogramaConAvisos`; publica, notifica y actualiza los provisionales existentes del cronograma |
+| `POST /cronogramas/{id}/visto` | P A | `VistoEntrada` → `CronogramaConAvisos`; confirma la publicada y crea/actualiza provisionales |
+| `POST /cronogramas/{id}/vista` | P S | 204; audita cada apertura y limita el evento a uno por usuario, versión y 30 minutos |
+| `POST /cronogramas/{id}/solicitar-correccion` | S A | `SolicitarCorreccionEntrada` → `CronogramaDetalle`; conserva el borrador y notifica al encargado |
+| `POST /cronogramas/{id}/mantener` | A E | `MantenerEntrada` → `CronogramaDetalle`; resuelve la solicitud con comentario obligatorio |
+| `GET /cronogramas/{id}/diferencias?base={n}&contra={n}` | A E S; P restringido | `DiferenciasSalida`; números de versión, campos y ciclos agregados/quitados |
+| `GET /cronogramas/{id}/eventos` | A E S | Lista de `EventoSalida`, más reciente primero; usuario por username |
+| `GET /cronogramas/{id}/datos-campo?dias=7` | A E S | Ambiente del fundo del módulo entre D−días y D−1; días entre 1 y 14 |
+| `POST /riego/registros` | A E S | `RegistroRiegoEntrada` → `RegistroRiegoSalida` (201), nueva versión manual del turno-día |
+
+`CronogramaDetalle` incluye `visto_version_id`, `visto_programador_at`, `visto_por`,
+`correccion_solicitada_at`, `correccion_solicitada_por` y `correccion_solicitada_motivo`.
+Los campos de usuario son usernames. Los ciclos exponen también `ciclo_modelo`,
+`duracion_manual` y `campos_editados`.
+
+**Edición y concurrencia.** Guardar y publicar exigen el `lock_version` actual (409 si
+cambió). `basada_en_id` debe ser el borrador abierto o, en un publicado (o visto, o con
+corrección solicitada) sin borrador de cambios, la versión publicada: guardar abre entonces el
+borrador de cambios, que se publica con «Publicar cambios». Los turnos omitidos y
+los ciclos sin cambios conservan sus valores; `campos_editados` compara contra la base
+inmediata. Un cambio de `duracion_manual` también cuenta como edición. Si falta el factor
+de duración, se exige duración manual. Los valores editados se redondean a 2 decimales
+en m³/ha y a 1 en minutos y m³; se validan también después de redondear. Las horas HH:MM
+truncan los segundos y usan minuto módulo 1440. El solape avisa sin impedir guardar.
+
+Las mutaciones bloquean el cronograma con `FOR UPDATE`. Riego bloquea el vigente y usa
+además un candado transaccional por turno-día, para serializar primeras inserciones de
+F4 cuando todavía no existe una fila. Los aplicados y provisionales manuales se conservan
+al sincronizar; contenido idéntico no crea versión. Publicar cambios no crea provisionales
+donde no había. Se agrega un solo evento de sincronización por acción, con todos los
+turnos afectados (`actualizado` si alguno ya existía).
+
+**Límite del esquema existente.** `riego_ciclo` exige inicios únicos por registro. Si una
+versión del cronograma contiene dos ciclos con igual inicio, ese turno no se sincroniza,
+se conserva su riego anterior y se devuelve un aviso; los demás turnos continúan.
+La entrada de riego manual rechaza inicios duplicados con 422. No se cambia el esquema.
+
+**Visto y días pasados.** Publicar cambios futuros/de hoy limpia el Visto. Para permitir
+al programador comparar después de esa limpieza, diferencias verifica que la versión base
+fue confirmada por ese usuario en un evento `visto_programador`, y que la comparación
+termina en la publicada actual. Una publicación retrospectiva conserva el Visto histórico
+(incluidos usuario, instante e id original), sin atribuir confirmación a la versión nueva,
+y solo notifica al subgerente. Abrir el detalle no incrementa `lock_version` porque no
+cambia el cronograma. Aplicado solo se acepta para fechas anteriores a hoy en Lima.
+
+**Datos y correos.** Datos de campo conserva los nombres de `AmbienteDiario`, sin renombrar:
+`eto_mm`, `t_media/t_min/t_max`, `hr_media/hr_min/hr_max`, `lluvia_mm`, `hum_*`,
+`mds_contraccion_um`, `crecimiento_tronco_um`, `estres_planta_ps`, las demás mediciones y
+banderas disponibles, `fundo_id` y `fecha`; omite id interno y marcas de persistencia.
+Las cinco plantillas HTML/texto son `cronograma_publicado`, `cronograma_modificado`,
+`cronograma_visto`, `correccion_solicitada` y `correccion_mantenida`. Resuelven destinatarios
+por rol al enviar, enlazan a `FRONTEND_URL/cronogramas/{id}` y muestran como máximo 20
+cambios en el correo de modificación. La confirmación HTTP solo encola, no envía correo.
+
 ## Pruebas
 
 ```bash

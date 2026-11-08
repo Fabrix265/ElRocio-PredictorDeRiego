@@ -18,7 +18,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Response
 
 from app.api.deps import MAX_ID_BD, Contexto, DbSesion, IdPath, UsuarioHabilitado, requiere_rol
 from app.core.tiempo import hoy_lima
@@ -27,17 +27,34 @@ from app.models.enums import RolUsuario
 from app.schemas.cronograma import (
     CronogramaDetalle,
     CronogramaListado,
+    CronogramaConAvisos,
+    DiferenciasSalida,
+    EdicionEntrada,
+    EventoSalida,
     GenerarEntrada,
     GenerarSalida,
+    GuardarVersionEntrada,
+    MantenerEntrada,
+    PublicarEntrada,
     RegenerarEntrada,
+    SolicitarCorreccionEntrada,
     VersionDetalle,
+    VersionPrevia,
     VersionResumen,
+    VistoEntrada,
 )
-from app.services import cronograma_service
+from app.services import cronograma_service, flujo_cronograma_service as flujo
 
 router = APIRouter(prefix="/cronogramas")
 
 AdminEncargado = Annotated[Usuario, Depends(requiere_rol(RolUsuario.admin, RolUsuario.encargado))]
+AdminProgramador = Annotated[Usuario, Depends(requiere_rol(RolUsuario.admin, RolUsuario.programador))]
+AdminSubgerente = Annotated[Usuario, Depends(requiere_rol(RolUsuario.admin, RolUsuario.subgerente))]
+ProgramadorSubgerente = Annotated[Usuario, Depends(requiere_rol(RolUsuario.programador, RolUsuario.subgerente))]
+AdminEncargadoSubgerente = Annotated[
+    Usuario, Depends(requiere_rol(RolUsuario.admin, RolUsuario.encargado, RolUsuario.subgerente))
+]
+TodosRoles = Annotated[Usuario, Depends(requiere_rol(*RolUsuario))]
 ModuloQuery = Annotated[int, Query(ge=1, le=MAX_ID_BD)]
 
 
@@ -88,3 +105,72 @@ def regenerar(
     return cronograma_service.regenerar(
         db, cronograma_id, confirmar=bool(datos and datos.confirmar), actor=usuario, contexto=contexto
     )
+
+
+@router.post("/{cronograma_id}/recalcular", response_model=VersionPrevia)
+def recalcular(cronograma_id: IdPath, datos: EdicionEntrada, usuario: AdminEncargado, db: DbSesion) -> dict:
+    return flujo.recalcular(db, cronograma_id, datos, usuario)
+
+
+@router.get("/{cronograma_id}/alternativas", response_model=dict[int, dict[str, list[dict[str, Any]]]])
+def alternativas(cronograma_id: IdPath, usuario: AdminEncargado, db: DbSesion) -> dict:
+    return flujo.alternativas(db, cronograma_id, usuario)
+
+
+@router.post("/{cronograma_id}/versiones", response_model=CronogramaDetalle)
+def guardar_version(cronograma_id: IdPath, datos: GuardarVersionEntrada, usuario: AdminEncargado,
+                    db: DbSesion, contexto: Contexto) -> dict:
+    return flujo.guardar_version(db, cronograma_id, datos, usuario, contexto)
+
+
+@router.delete("/{cronograma_id}/borrador", response_model=CronogramaDetalle)
+def descartar_borrador(cronograma_id: IdPath, usuario: AdminEncargado, db: DbSesion, contexto: Contexto) -> dict:
+    return flujo.descartar_borrador(db, cronograma_id, usuario, contexto)
+
+
+@router.post("/{cronograma_id}/publicar", response_model=CronogramaConAvisos)
+def publicar(cronograma_id: IdPath, datos: PublicarEntrada, usuario: AdminEncargado,
+             db: DbSesion, contexto: Contexto) -> dict:
+    return flujo.publicar(db, cronograma_id, datos.lock_version, usuario, contexto)
+
+
+@router.post("/{cronograma_id}/visto", response_model=CronogramaConAvisos)
+def visto(cronograma_id: IdPath, datos: VistoEntrada, usuario: AdminProgramador,
+          db: DbSesion, contexto: Contexto) -> dict:
+    return flujo.visto(db, cronograma_id, datos.version_id, usuario, contexto)
+
+
+@router.post("/{cronograma_id}/vista", status_code=204, response_class=Response)
+def vista(cronograma_id: IdPath, usuario: ProgramadorSubgerente, db: DbSesion, contexto: Contexto) -> Response:
+    flujo.vista(db, cronograma_id, usuario, contexto)
+    return Response(status_code=204)
+
+
+@router.post("/{cronograma_id}/solicitar-correccion", response_model=CronogramaDetalle)
+def solicitar_correccion(cronograma_id: IdPath, datos: SolicitarCorreccionEntrada, usuario: AdminSubgerente,
+                         db: DbSesion, contexto: Contexto) -> dict:
+    return flujo.solicitar_correccion(db, cronograma_id, datos.version_id, datos.motivo, usuario, contexto)
+
+
+@router.post("/{cronograma_id}/mantener", response_model=CronogramaDetalle)
+def mantener(cronograma_id: IdPath, datos: MantenerEntrada, usuario: AdminEncargado,
+             db: DbSesion, contexto: Contexto) -> dict:
+    return flujo.mantener(db, cronograma_id, datos.comentario, usuario, contexto)
+
+
+@router.get("/{cronograma_id}/diferencias", response_model=DiferenciasSalida)
+def diferencias(cronograma_id: IdPath, usuario: TodosRoles, db: DbSesion,
+                 base: Annotated[int, Query(ge=1, le=100_000)],
+                 contra: Annotated[int, Query(ge=1, le=100_000)]) -> dict:
+    return flujo.diferencias(db, cronograma_id, base, contra, usuario)
+
+
+@router.get("/{cronograma_id}/eventos", response_model=list[EventoSalida])
+def eventos(cronograma_id: IdPath, usuario: AdminEncargadoSubgerente, db: DbSesion) -> list[dict]:
+    return flujo.eventos(db, cronograma_id, usuario)
+
+
+@router.get("/{cronograma_id}/datos-campo", response_model=list[dict[str, Any]])
+def datos_campo(cronograma_id: IdPath, usuario: AdminEncargadoSubgerente, db: DbSesion,
+                 dias: Annotated[int, Query(ge=1, le=14)] = 7) -> list[dict]:
+    return flujo.datos_campo(db, cronograma_id, dias, usuario)

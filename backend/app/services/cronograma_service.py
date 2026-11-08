@@ -381,6 +381,8 @@ def _version_salida(db: Session, version: CronogramaVersion, crono: Cronograma, 
                 "hora_inicio": c.hora_inicio, "hora_fin": c.hora_fin, "fin_dia_siguiente": c.fin_dia_siguiente,
                 "m3ha_p10": c.m3ha_p10, "m3ha_p90": c.m3ha_p90,
                 "inicio_desde_min": c.inicio_desde_min, "inicio_hasta_min": c.inicio_hasta_min,
+                "ciclo_modelo": c.ciclo_modelo, "duracion_manual": c.duracion_manual,
+                "campos_editados": c.campos_editados,
             } for c in lista],
         })
     salida["turnos"] = filas
@@ -418,6 +420,14 @@ def _detalle(db: Session, crono: Cronograma, usuario: Usuario) -> dict[str, Any]
     salida = _cabecera(crono, modulo)
     salida["version"] = _version_salida(db, version, crono, modulo) if version else None
     salida["versiones"] = versiones(db, crono.id, usuario, crono=crono, modulo=modulo)
+    nombres = repo_riego.usernames(db, [crono.visto_programador_por, crono.correccion_solicitada_por])
+    salida.update(
+        visto_version_id=crono.visto_version_id, visto_programador_at=crono.visto_programador_at,
+        visto_por=nombres.get(crono.visto_programador_por),
+        correccion_solicitada_at=crono.correccion_solicitada_at,
+        correccion_solicitada_por=nombres.get(crono.correccion_solicitada_por),
+        correccion_solicitada_motivo=crono.correccion_solicitada_motivo,
+    )
     return salida
 
 

@@ -57,6 +57,27 @@ class VersionRiegoSalida(RegistroRiegoSalida):
     basado_en_id: int | None = None
 
 
+class CicloRiegoEntrada(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    inicio_min: float
+    duracion_min: float
+    riego_m3ha: float
+
+
+class RegistroRiegoEntrada(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    turno_id: int = Field(ge=1, le=MAX_ID_BD)
+    fecha: dt.date
+    basado_en_id: int | None = Field(default=None, ge=1, le=MAX_ID_BD)
+    estado: EstadoRiego
+    sin_riego: bool
+    motivo: str = Field(min_length=1, max_length=255)
+    comentario: str | None = Field(default=None, max_length=1000)
+    ciclos: list[CicloRiegoEntrada] = Field(max_length=5)
+
+
 class RiegoListado(BaseModel):
     modulo_id: int
     desde: dt.date

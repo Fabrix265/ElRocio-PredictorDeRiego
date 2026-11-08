@@ -13,13 +13,17 @@ from app.models import (
     AmbienteDiario,
     Cronograma,
     CronogramaCiclo,
+    CronogramaEvento,
     CronogramaTurno,
     CronogramaVersion,
     Modulo,
     ModeloVersion,
+    MotivoCorreccion,
+    PrediccionEntrada,
     RiegoRegistro,
+    Usuario,
 )
-from app.models.enums import EstadoCronograma
+from app.models.enums import EstadoCronograma, TipoEventoCronograma
 
 
 def tomar_candado_generacion(db: Session, modulo_id: int) -> bool:
@@ -42,7 +46,7 @@ def bloquear_rango(db: Session, modulo_id: int, fechas: Sequence[dt.date]) -> di
 def obtener(db: Session, cronograma_id: int, *, bloquear: bool = False) -> Cronograma | None:
     consulta = select(Cronograma).where(Cronograma.id == cronograma_id)
     if bloquear:
-        consulta = consulta.with_for_update()
+        consulta = consulta.with_for_update().execution_options(populate_existing=True)
     return db.scalars(consulta).first()
 
 
@@ -152,3 +156,46 @@ def nombres_modelo(db: Session, ids: Iterable[int | None]) -> dict[int, str]:
     if not ids:
         return {}
     return dict(db.execute(select(ModeloVersion.id, ModeloVersion.version).where(ModeloVersion.id.in_(ids))).all())
+
+
+def motivo_activo(db: Session, codigo: str) -> bool:
+    return bool(db.scalar(select(exists().where(
+        MotivoCorreccion.codigo == codigo, MotivoCorreccion.activo.is_(True)
+    ))))
+
+
+def alternativas(db: Session, generacion_id: int, fecha: dt.date) -> dict[int, Any]:
+    return dict(db.execute(select(PrediccionEntrada.turno_id, PrediccionEntrada.alternativas_n).where(
+        PrediccionEntrada.generacion_id == generacion_id, PrediccionEntrada.fecha == fecha
+    )).all())
+
+
+def ultimo_evento(db: Session, cronograma_id: int, tipo: TipoEventoCronograma,
+                  usuario_id: int, version_id: int) -> dt.datetime | None:
+    return db.scalar(select(CronogramaEvento.ocurrido_at).where(
+        CronogramaEvento.cronograma_id == cronograma_id, CronogramaEvento.tipo == tipo,
+        CronogramaEvento.usuario_id == usuario_id, CronogramaEvento.version_id == version_id,
+    ).order_by(CronogramaEvento.ocurrido_at.desc(), CronogramaEvento.id.desc()).limit(1))
+
+
+def eventos(db: Session, cronograma_id: int) -> list[dict[str, Any]]:
+    filas = db.execute(select(
+        CronogramaEvento.tipo, CronogramaEvento.ocurrido_at, Usuario.username.label("usuario"),
+        CronogramaVersion.numero.label("version_numero"), CronogramaEvento.motivo_codigo,
+        CronogramaEvento.comentario, CronogramaEvento.detalle,
+    ).outerjoin(Usuario, Usuario.id == CronogramaEvento.usuario_id)
+        .outerjoin(CronogramaVersion, CronogramaVersion.id == CronogramaEvento.version_id)
+        .where(CronogramaEvento.cronograma_id == cronograma_id)
+        .order_by(CronogramaEvento.ocurrido_at.desc(), CronogramaEvento.id.desc()))
+    return [dict(f) for f in filas.mappings()]
+
+
+def datos_campo(db: Session, fundo_id: int, desde: dt.date, hasta: dt.date) -> list[dict[str, Any]]:
+    """Conserva los nombres del modelo; omite IDs internos y marcas de persistencia."""
+    columnas = [c for c in AmbienteDiario.__table__.columns if c.name not in {
+        "id", "created_at", "updated_at",
+    }]
+    filas = db.execute(select(*columnas).where(
+        AmbienteDiario.fundo_id == fundo_id, AmbienteDiario.fecha >= desde, AmbienteDiario.fecha < hasta,
+    ).order_by(AmbienteDiario.fecha))
+    return [dict(f) for f in filas.mappings()]
