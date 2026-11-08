@@ -7,20 +7,24 @@ Especificación: [`docs/propuesta_mvp.md`](../docs/propuesta_mvp.md).
 app/
   main.py            create_app: CORS, cabeceras de seguridad, manejo de errores, routers, lifespan
   api/deps.py        DbSesion (unidad de trabajo), usuario_actual (JWT + BD), requiere_rol(...)
-  api/v1/endpoints/  health, auth, usuarios, auditoria, catalogo
+  api/v1/endpoints/  health, auth, usuarios, auditoria, catalogo (+ /modulos/{id}/turnos), riego,
+                     datos (frescura y series), ingestas
   core/              config, security (argon2id, JWT), tiempo (hoy_lima), logging (redacción),
                      middleware (cabeceras), errores (mensajes en español)
   services/          auth_service, usuario_service, auditoria_service, correo_service, rate_limit,
-                     lecturas_service, ambiente_service, carga_historica, riego_contenido
+                     lecturas_service, ambiente_service, carga_historica, riego_contenido,
+                     ingesta_service (APIs), datos_service (frescura, series, caudal)
   repositories/      consultas SQLAlchemy (usuarios, sesiones, intentos, auditoria, correos,
-                     catalogo, datos_campo, riego)
-  integraciones/     weatherlink/conversion.py (°F/pulgadas/millas → °C/mm/km, tabla de reglas)
+                     catalogo, datos_campo, riego, ingestas, datos_series)
+  integraciones/     http.py (reintentos, errores sin secretos), weatherlink/ (cliente v2 y
+                     conversion.py: °F/pulgadas/millas → °C/mm/km), phytech/ (cliente con token
+                     en memoria y adaptador a las tablas de riego_ml)
   ml/                columnas.py (mapeo BD ↔ riego_ml), historial_bd.py (BD → Historial, §2.3)
   models/ · db/      tablas del esquema riego, motor y sesiones
   emails/            plantillas Jinja2 (marca verde y blanca) y envío SMTP / archivo
-  jobs/              APScheduler: cola de correos y mantenimiento (python -m app.jobs)
+  jobs/              APScheduler: cola de correos, mantenimiento e ingesta diaria (python -m app.jobs)
   cli.py             configurar-rol-app, verificar-seguridad-bd, crear-admin, cargar-historico,
-                     recalcular-ambiente
+                     recalcular-ambiente, ingestar, reprocesar-weatherlink
 ```
 
 ### Convención de transacciones y capas (desde F2)
@@ -275,6 +279,77 @@ DATABASE_URL=postgresql+psycopg://postgres@localhost:5432/riego_dev \
   `ambiente_diario` 2 128 días (2021-01-01 a 2026-11-01). Segunda corrida: 0 nuevas, 0
   actualizadas. Tarda ~3 min, casi todo en leer los Excel con openpyxl.
 
+## Ingesta de APIs, frescura y series (F2)
+
+Código: `integraciones/` (clientes), `services/ingesta_service.py`, `repositories/ingestas.py`,
+`api/v1/endpoints/ingestas.py`; frescura y series en `services/datos_service.py`,
+`repositories/datos_series.py`, `api/v1/endpoints/datos.py`; esquemas en `schemas/datos.py`.
+
+| Método y ruta | Quién | Respuesta |
+|---|---|---|
+| `POST /ingestas/ejecutar` `{fuentes?, desde?, hasta?}` | A E | 202 con las corridas `en_curso` («Actualizar ahora»); 409 si una fuente ya está en curso; 422 si el rango no cumple `desde ≤ hasta < hoy` o supera 62 días |
+| `GET /ingestas?limite&fuente` | A E S | Corridas más recientes primero (`limite` ≤ 200, 20 por defecto), con errores `{tipo, status_code, endpoint sin query, mensaje}` |
+| `GET /datos/frescura?modulo_id&fecha&dias` | todos | Por fuente: última fecha completa, `verde`/`naranja` respecto de D-1 y huecos de la ventana (`dias` ≤ 60, 7 por defecto); el riego trae detalle `por_turno` |
+| `GET /datos/clima?desde&hasta&resolucion=diaria\|30min` | todos | `ambiente_diario` o `meteo_lectura` (30 min, máx. 31 días) |
+| `GET /datos/suelo?…&resolucion=diaria\|horaria` · `GET /datos/planta` | todos | Resumen diario o `phytech_suelo_horario`; planta diaria con ET y lluvia de Phytech |
+| `GET /datos/pronostico?desde&hasta&capturado` | todos | La última captura (o la indicada) |
+| `GET /modulos/{id}/turnos` | todos | Turnos con área, válvulas y caudal reciente (mediana m3/h de los ciclos aplicados de 30 días) |
+
+Las series van por defecto de los últimos 14 días cerrados, en las unidades del modelo.
+
+**Fuentes** (`weatherlink`, `phytech_suelo`, `phytech_planta`, `ndvi`, `pronostico`): cada una es
+una corrida en `ingesta_corrida` y cada llamada deja su payload tal cual en `ingesta_crudo` con los
+parámetros de negocio (nunca claves ni token). Luego se guardan las lecturas limpias y se
+recalcula `ambiente_diario` de los días tocados.
+
+- **Rango automático**: desde la última fecha guardada − 3 días (o desde el primer hueco de los
+  últimos 14 días, si es anterior) hasta ayer en hora de Lima; sin datos, los últimos 7 días; tope
+  de 62 días. NDVI: últimos 10 días. Pronóstico: una captura por día (`capturado_fecha` = hoy).
+- **WeatherLink v2**: `api-key` en la query + `X-Api-Secret`, una llamada por día local
+  (`(00:00 − 1 s, 24:00 − 1 s]`, máx. 24 h), conversión con `weatherlink/conversion.py`. Nunca
+  pisa una lectura `excel_historico`.
+- **Phytech**: JWT pedido con `X-API-KEY`/`X-API-SECRET-KEY`, **solo en memoria**; se renueva a las
+  23 h y, ante un 401, una vez (y se reintenta la llamada); un segundo 401 = error `credenciales`.
+  Suelo en tramos de 7 días (una hora cuenta solo si trae alguna humedad, y una hora guardada con
+  dato no se reemplaza por un hueco), planta en tramos de 30 y NDVI de 10 (del ZIP se guardan el
+  manifest y los histogramas). Se guardan todos los projects del plot (el ambiente usa 907557).
+- **Reintentos** (`integraciones/http.py`): timeouts (15 s de conexión, 60 s de lectura), 4
+  intentos con espera creciente ante 429 (respeta `Retry-After`, tope 60 s), 5xx y errores de red.
+  httpx queda en WARNING y con filtro de redacción (en INFO registraría la URL con la `api-key`).
+- **Aislamiento**: un día o tramo con error deja la corrida `parcial` y sigue; una fuente con
+  error no detiene las demás (cada una en su transacción y en un SAVEPOINT). Las corridas
+  `en_curso` de más de 3 h se cierran como `error` («interrumpida»).
+- **Tarea diaria** a `INGESTA_HORA` (05:00 Lima) en `python -m app.jobs` (o dentro de la API con
+  `SCHEDULER_ENABLED=true`). Exclusión entre procesos con la fila `uq(fuente, fecha_programada)`
+  (`INSERT … ON CONFLICT`, sin candados de sesión). Si el proceso arranca después de esa hora la
+  lanza una vez: lo ya hecho hoy se omite y lo que terminó en `error` se repite.
+
+```bash
+# Siempre contra la base local: backend/.env apunta a producción.
+export DATABASE_URL=postgresql+psycopg://postgres@localhost:5432/riego_dev
+export DATABASE_URL_MIGRACIONES=$DATABASE_URL
+.venv/Scripts/python -m app.cli ingestar                       # rango automático, todas las fuentes
+.venv/Scripts/python -m app.cli ingestar --fuentes weatherlink,phytech_suelo --desde 2026-11-05 --hasta 2026-11-07
+# Cambió una regla de conversion.py: re-deriva meteo_lectura (origen weatherlink) desde los
+# payloads guardados, sin descargar, y recalcula ambiente_diario.
+.venv/Scripts/python -m app.cli reprocesar-weatherlink --desde 2026-11-01 --hasta 2026-11-07
+```
+
+**Probar con claves reales**: `WEATHERLINK_API_KEY/SECRET` y `PHYTECH_API_KEY/SECRET` se leen de
+`backend/.env`; exporta la `DATABASE_URL` local como arriba y pide rangos chicos (las APIs se usan
+solo para leer). La suite de pruebas nunca usa claves reales: `tests/conftest.py` las deja vacías
+y los clientes se prueban con `httpx.MockTransport` (`tests/apis_falsas.py`).
+
+Prueba real en `riego_dev` (2026-11-08, del 05 al 07/11): WeatherLink 144 lecturas (3 llamadas),
+Phytech suelo 144 horas (2 projects del plot), planta 3 días, NDVI 0 imágenes (no hubo en esos
+días) y pronóstico 20 filas; al repetirla, 0 nuevas. La ETo diaria de WeatherLink coincide con la
+ET de Phytech (4,37/4,32, 3,65/3,61 y 4,95/4,90 mm). Suelo y planta de la API para el 27–29/10
+son idénticos a los del Excel histórico (planta solo agrega ET y lluvia). WeatherLink del
+30/10 al 01/11 contra `data_metereologica.xlsx` (144 registros): Rad y Lluvia 100 %; T, T_max,
+T_min, HR, DPV y Viento ≈ 98 %: la única diferencia es el registro que cierra a medianoche, que el
+Excel guarda como «00:00» del día que termina y la regla actual asigna al día nuevo (moviéndolo,
+coinciden al 100 %); ETo 84 % porque el 31/10 el Excel trae duplicada la ETo de las horas en punto.
+
 ## Riego aplicado y carga de Excel (F2)
 
 Código: `api/v1/endpoints/riego.py`, `services/riego_service.py` (consulta y versiones),
@@ -329,7 +404,7 @@ genera al enviar (en la BD su SHA-256) y el enlace es `FRONTEND_URL/restablecer#
 `PASSWORD_RESET_MINUTES`.
 
 ```bash
-.venv/Scripts/python -m app.jobs            # proceso de tareas (producción): correos cada 30 s
+.venv/Scripts/python -m app.jobs            # proceso de tareas (producción): correos, ingesta diaria
 .venv/Scripts/python -m app.jobs --una-vez  # procesa la cola una vez y termina
 ```
 
@@ -344,6 +419,7 @@ genera al enviar (en la BD su SHA-256) y el enlace es `FRONTEND_URL/restablecer#
   cliente de correo para ver el enlace.
 - Mantenimiento: a las 03:15 (Lima) se borran los intentos de ingreso de más de 30 días y las
   sesiones de refresh y enlaces de recuperación vencidos, revocados o usados hace más de 30 días.
+- Ingesta diaria de las APIs a `INGESTA_HORA` (ver «Ingesta de APIs, frescura y series»).
 
 ## Pruebas
 
