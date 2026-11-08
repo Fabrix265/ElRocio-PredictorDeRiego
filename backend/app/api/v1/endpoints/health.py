@@ -1,4 +1,4 @@
-"""Estado del servicio (público). ``modelo`` se completa en la fase 3."""
+"""Estado del servicio (público). ``modelo``: versión cargada (null hasta la primera generación)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.seguridad import problemas_rol_conexion
 from app.db.session import bd_disponible, get_db
+from app.ml.model_loader import estado_modelo
 
 logger = logging.getLogger(__name__)
 
@@ -37,5 +38,5 @@ def health(response: Response, db: Session = Depends(get_db)) -> dict:
         "bd": "ok" if bd_ok else "error",
         # "inseguro": DATABASE_URL usa el dueño, un superusuario o un rol con BYPASSRLS.
         "rol_bd": rol_bd,
-        "modelo": None,
+        "modelo": estado_modelo(),
     }
