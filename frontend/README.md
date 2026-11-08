@@ -189,10 +189,12 @@ contadores («Reemplaza provisional») hacen salto de línea (`Badge` con `ajust
   «Actualización parcial» o «La actualización falló») y vuelve a pedir la frescura. El botón queda
   en «Actualizando…» mientras haya una ingesta en curso (también si la lanzó otra persona o la
   tarea de las 05:00); un 409 del backend se avisa con su mensaje.
-- **Corridas colgadas**: una corrida `en_curso` que empezó hace más de 3 h (`HORAS_CORRIDA_COLGADA`,
-  igual que el backend) se da por interrumpida (el proceso murió a mitad de la ingesta): se muestra
-  «Sin terminar» con «Se cerrará al usar «Actualizar ahora»», **no** deshabilita el botón y **no**
-  mantiene el sondeo. El backend la cierra como error «interrumpida» al lanzar la siguiente ingesta.
+- **Corridas colgadas**: una corrida `en_curso` que empezó hace más de 3 h (`HORAS_CORRIDA_COLGADA`)
+  se da por interrumpida (el proceso murió a mitad de la ingesta): se muestra «Sin terminar» con
+  «Se cerrará al usar «Actualizar ahora»», **no** deshabilita el botón y **no** mantiene el sondeo.
+  El backend la cierra como error «interrumpida» cuando lleva 10 min sin latido (al lanzar la
+  siguiente ingesta o con la tarea vigilante); como `GET /ingestas` no expone `latido_at`, la
+  interfaz usa ese tope conservador desde `inicio_at`.
 - **Últimas corridas** (admin, encargado, subgerente): las 6 más recientes, con las que están en
   curso siempre primero; fuente, estado, inicio, disparo (programada/manual con usuario/script),
   duración, rango, filas nuevas/actualizadas y el primer error redactado con su código HTTP. Las
@@ -226,7 +228,9 @@ La auditoría traduce las acciones y entidades de F2 (`excel_subido/confirmado/d
 
 **Pendiente del backend**: cada `PATCH` de la vista previa devuelve la carga entera (con el Excel
 real, ~4,8 MB por clic en una casilla). La interfaz ya no repite el `GET` tras la subida, pero
-achicar la respuesta del `PATCH` (solo grupos cambiados y contadores) es trabajo del backend.
+achicar la respuesta del `PATCH` (solo grupos cambiados y contadores) es trabajo del backend. Si
+`IngestaCorridaSalida` llegara a incluir `latido_at`, la interfaz podría usar el mismo criterio de
+10 min sin latido en lugar del tope de 3 h.
 
 ## Pruebas
 

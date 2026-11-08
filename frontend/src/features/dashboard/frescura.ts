@@ -129,9 +129,11 @@ export const TONO_ESTADO_INGESTA: Record<EstadoIngesta, TonoBadge> = {
 };
 
 /**
- * Horas tras las que una corrida «en_curso» se da por interrumpida (el proceso murió a mitad de la
- * ingesta). Igual que `HORAS_CORRIDA_COLGADA` del backend, que la cierra como error al lanzar la
- * siguiente ingesta: por eso «Actualizar ahora» no debe quedar bloqueado por ella.
+ * Horas tras las que una corrida «en_curso» se da por interrumpida en la interfaz (el proceso murió
+ * a mitad de la ingesta). El backend la cierra como error «interrumpida» cuando lleva 10 min sin
+ * latido (`MINUTOS_SIN_LATIDO`), al lanzar la siguiente ingesta o con la tarea vigilante; pero
+ * `GET /ingestas` no expone `latido_at`, así que aquí se usa un tope conservador desde `inicio_at`
+ * (ninguna ingesta legítima dura tanto) para que «Actualizar ahora» nunca quede bloqueado.
  */
 export const HORAS_CORRIDA_COLGADA = 3;
 

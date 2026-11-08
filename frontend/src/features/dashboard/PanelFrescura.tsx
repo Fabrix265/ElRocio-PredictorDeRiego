@@ -130,7 +130,7 @@ function FilaCorrida({ c, ahora }: { c: IngestaCorrida; ahora: Date }) {
       )}
       {colgada && (
         <span className="text-xs text-warn-tx">
-          Se interrumpió hace más de {HORAS_CORRIDA_COLGADA} horas. Se cerrará al usar «Actualizar ahora».
+          Lleva más de {HORAS_CORRIDA_COLGADA} horas sin terminar. Se cerrará al usar «Actualizar ahora».
         </span>
       )}
       {error && (
