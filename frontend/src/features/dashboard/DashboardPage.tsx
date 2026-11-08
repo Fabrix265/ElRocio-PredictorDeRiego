@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { CalendarDays, CloudSun, RefreshCcw } from "lucide-react";
+import { CalendarDays, CloudSun } from "lucide-react";
 
 import { Badge } from "../../components/ui/Badge";
 import { Card, CardBody, CardHeader } from "../../components/ui/Card";
@@ -9,6 +9,7 @@ import { formatearFechaLarga, saludoLima } from "../../lib/fechas";
 import { useUsuario } from "../auth/AuthProvider";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
 import { kpisParaRol, type Kpi } from "./kpis";
+import { PanelFrescura } from "./PanelFrescura";
 
 function TarjetaKpi({ kpi }: { kpi: Kpi }) {
   const Icono = kpi.icono;
@@ -80,12 +81,7 @@ export function DashboardPage() {
               : "Aquí verás el cronograma de hoy y el de mañana con su Gantt de ciclos, estado y versión."
           }
         />
-        <TarjetaPendiente
-          titulo="Frescura de datos"
-          icono={<RefreshCcw />}
-          fase={2}
-          descripcion="Hasta qué día llegan el riego aplicado, WeatherLink y Phytech, con el botón “Actualizar ahora”."
-        />
+        <PanelFrescura />
       </div>
 
       <TarjetaPendiente
