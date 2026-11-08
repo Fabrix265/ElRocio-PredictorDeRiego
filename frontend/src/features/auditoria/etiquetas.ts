@@ -37,6 +37,7 @@ const ACCIONES: Record<string, string> = {
   excel_confirmado: "Excel de riego confirmado",
   excel_descartado: "Excel de riego descartado",
   ingesta_manual: "Ingesta manual",
+  meteo_excel_pisado: "Lecturas del Excel histórico reemplazadas por WeatherLink",
   exportar_refinamiento: "Exportación para refinamiento",
 };
 
@@ -45,6 +46,8 @@ const ENTIDADES: Record<string, string> = {
   cronograma: "Cronograma",
   riego: "Riego",
   ingesta: "Ingesta",
+  carga_riego: "Carga de Excel de riego",
+  ingesta_corrida: "Corrida de ingesta",
   exportacion: "Exportación",
 };
 
@@ -58,6 +61,20 @@ const CAMPOS: Record<string, string> = {
   identificador: "Identificador",
   motivo: "Motivo",
   comentario: "Comentario",
+  // Cargas de Excel de riego y reproceso de WeatherLink (F2).
+  modulo_id: "Módulo (id)",
+  archivo: "Archivo",
+  sha256: "Huella SHA-256",
+  tamano_bytes: "Tamaño (bytes)",
+  contadores: "Contadores",
+  desde: "Desde",
+  hasta: "Hasta",
+  aplicados: "Turno-días aplicados",
+  registros_creados: "Registros creados",
+  versiones_reemplazadas: "Versiones reemplazadas",
+  estado_anterior: "Estado anterior",
+  lecturas_reemplazadas: "Lecturas reemplazadas",
+  por_dia: "Por día",
 };
 
 /**
@@ -70,6 +87,10 @@ const VALORES: Record<string, Record<string, string>> = {
     usuario_inexistente: "Usuario inexistente",
     usuario_inactivo: "Usuario inactivo",
     password_actual_incorrecta: "Contraseña actual incorrecta",
+  },
+  estado_anterior: {
+    previsualizada: "Vista previa",
+    vencida: "Vencida",
   },
 };
 
