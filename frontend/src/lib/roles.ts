@@ -28,6 +28,8 @@ export function puedeVer(rol: Rol | undefined | null, pantalla: Pantalla): boole
 
 /** Acciones dentro de una pantalla (propuesta §4). El backend vuelve a validar cada una. */
 export const PERMISOS = {
+  /** Generar y regenerar cronogramas con el modelo. */
+  generarCronogramas: ["admin", "encargado"],
   /** Subir, confirmar o descartar el Excel de riego. */
   subirExcelRiego: ["admin", "encargado"],
   /** Historial de versiones de un turno-día. */

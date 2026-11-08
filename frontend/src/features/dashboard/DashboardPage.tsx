@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { CalendarDays, CloudSun } from "lucide-react";
+import { CloudSun } from "lucide-react";
 
 import { Badge } from "../../components/ui/Badge";
 import { Card, CardBody, CardHeader } from "../../components/ui/Card";
@@ -9,6 +9,7 @@ import { formatearFechaLarga, saludoLima } from "../../lib/fechas";
 import { useUsuario } from "../auth/AuthProvider";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
 import { kpisParaRol, type Kpi } from "./kpis";
+import { HoyManana } from "./HoyManana";
 import { PanelFrescura } from "./PanelFrescura";
 
 function TarjetaKpi({ kpi }: { kpi: Kpi }) {
@@ -54,7 +55,6 @@ export function DashboardPage() {
   const nombre = usuario.nombre.trim().split(/\s+/)[0] || usuario.username;
   const contexto = [fundo?.nombre, modulo?.codigo].filter(Boolean).join(" · ");
   const kpis = kpisParaRol(usuario.rol);
-  const soloPublicados = usuario.rol === "programador";
 
   return (
     <div className="flex flex-col gap-4">
@@ -71,16 +71,7 @@ export function DashboardPage() {
       </section>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
-        <TarjetaPendiente
-          titulo="Hoy y mañana"
-          icono={<CalendarDays />}
-          fase={3}
-          descripcion={
-            soloPublicados
-              ? "Aquí verás el cronograma publicado de hoy y el de mañana con su Gantt de ciclos y versión."
-              : "Aquí verás el cronograma de hoy y el de mañana con su Gantt de ciclos, estado y versión."
-          }
-        />
+        <HoyManana />
         <PanelFrescura />
       </div>
 

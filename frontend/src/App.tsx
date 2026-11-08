@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { CalendarDays, ChartLine, Sparkles } from "lucide-react";
+import { ChartLine } from "lucide-react";
 import { lazy, Suspense } from "react";
 import { BrowserRouter, Outlet, Route, Routes } from "react-router";
 
@@ -25,6 +25,9 @@ const AuditoriaPage = lazy(() => import("./features/auditoria/AuditoriaPage"));
 const RiegoPage = lazy(() => import("./features/riego/RiegoPage"));
 const CargaNuevaPage = lazy(() => import("./features/riego/CargaNuevaPage"));
 const CargaDetallePage = lazy(() => import("./features/riego/CargaDetallePage"));
+const GenerarPage = lazy(() => import("./features/cronogramas/GenerarPage"));
+const CronogramasPage = lazy(() => import("./features/cronogramas/CronogramasPage"));
+const CronogramaDetallePage = lazy(() => import("./features/cronogramas/CronogramaDetallePage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -68,27 +71,29 @@ export default function App() {
                     path="generar"
                     element={
                       <RutaProtegida roles={ACCESO.generar}>
-                        <PlaceholderPage
-                          titulo="Generar"
-                          descripcion="Genera los cronogramas de uno o más días con el modelo."
-                          fase={3}
-                          icono={<Sparkles />}
-                          detalle="Elegirás la fecha y el número de días, verás la frescura de los datos de cada día y el resultado por día."
-                        />
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <GenerarPage />
+                        </Suspense>
                       </RutaProtegida>
                     }
                   />
                   <Route
-                    path="cronogramas/*"
+                    path="cronogramas"
                     element={
                       <RutaProtegida roles={ACCESO.cronogramas}>
-                        <PlaceholderPage
-                          titulo="Cronogramas"
-                          descripcion="Listado y detalle de los cronogramas por fecha."
-                          fase={3}
-                          icono={<CalendarDays />}
-                          detalle="El listado y el detalle en lectura llegan en la fase 3; la corrección, publicación y el “Visto” en la fase 4."
-                        />
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <CronogramasPage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route
+                    path="cronogramas/:id"
+                    element={
+                      <RutaProtegida roles={ACCESO.cronogramas}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <CronogramaDetallePage />
+                        </Suspense>
                       </RutaProtegida>
                     }
                   />
