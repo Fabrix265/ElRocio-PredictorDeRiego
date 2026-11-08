@@ -17,7 +17,9 @@ EXCEL_METEO = RAIZ_ML / "data_metereologica.xlsx"
 WL_2021 = RAIZ_ML / "WeatherLink" / "completo" / (
     "Historic_tipo24-Vantage-Pro2-Plus-Cabled_ds4_2021_est28494.xlsx"
 )
-MES_COTEJO = "2021-01"
+# Desde el 13-sep-2021 el Excel pone la lectura de las 24:00 en el día que termina (ver
+# conversion.MEDIANOCHE_AL_DIA_QUE_TERMINA): se coteja un mes posterior.
+MES_COTEJO = "2021-11"
 
 # 2021-01-01 12:00 de Lima (fin del intervalo) = 17:00 UTC.
 REGISTRO_MEDIODIA = {
@@ -57,14 +59,27 @@ def test_tabla_de_reglas_cubre_todas_las_variables():
     assert sorted([r.columna for r in conversion.REGLAS] + ["DPV"]) == sorted(VARIABLES)
 
 
-def test_registro_de_las_00_pertenece_al_dia_nuevo():
-    base = 1609520400  # 2021-01-01 12:00 Lima
-    registros = [dict(REGISTRO_MEDIODIA, ts=base + 1800 * k) for k in range(0, 25)]  # ... 00:00
+def test_registro_de_las_24_pertenece_al_dia_que_termina():
+    """El de ``ts`` local 00:00 cierra el día anterior: se etiqueta ``D 00:00`` (como el Excel desde
+    el 13-sep-2021) y ``meteo_diaria`` lo suma a ``D``."""
+    medianoche = 1609477200  # 2021-01-01 00:00 Lima
+    registros = [dict(REGISTRO_MEDIODIA, ts=medianoche + 1800 * k) for k in range(0, 50)]
     lecturas, _ = conversion.lecturas_saneadas(registros, "ENSUEÑO 1")
-    assert lecturas["fecha_hora"].iloc[-1] == pd.Timestamp("2021-01-02 00:00")
+    etiquetas = set(lecturas["fecha_hora"])
+    assert pd.Timestamp("2020-12-31 00:00") in etiquetas    # ts 2021-01-01 00:00
+    assert pd.Timestamp("2021-01-01 00:00") in etiquetas    # ts 2021-01-02 00:00
+    assert pd.Timestamp("2021-01-02 00:00") not in etiquetas
     diario, _ = meteo_diaria(lecturas)
     conteo = dict(zip(diario["Fecha"].dt.strftime("%Y-%m-%d"), diario["meteo_lecturas"]))
-    assert conteo == {"2021-01-01": 24, "2021-01-02": 1}
+    assert conteo == {"2020-12-31": 1, "2021-01-01": 48, "2021-01-02": 1}
+    assert conversion.dia_de_registro({"ts": medianoche}) == pd.Timestamp("2020-12-31").date()
+    assert conversion.dia_de_registro({"ts": medianoche + 1800}) == pd.Timestamp("2021-01-01").date()
+    assert conversion.dia_de_registro({"ts": None}) is None
+
+
+def test_corte_de_dia_configurable(monkeypatch):
+    monkeypatch.setattr(conversion, "MEDIANOCHE_AL_DIA_QUE_TERMINA", False)
+    assert conversion.fecha_hora_local(1609477200) == pd.Timestamp("2021-01-01 00:00")
 
 
 def test_registros_de_payload_toma_el_sensor_de_la_consola():
@@ -111,9 +126,13 @@ def test_coincidencia_con_data_metereologica_en_un_mes_real():
         iguales = np.isclose(cruce[f"{columna}_api"], cruce[f"{columna}_excel"], atol=tolerancia,
                              equal_nan=True)
         coincidencia[columna] = round(float(iguales.mean()) * 100, 2)
+    a_medianoche = cruce[cruce["fecha_hora"].dt.hour.eq(0) & cruce["fecha_hora"].dt.minute.eq(0)]
+    coincidencia["medianoche"] = round(float(
+        (np.isclose(a_medianoche["T_api"], a_medianoche["T_excel"])
+         & np.isclose(a_medianoche["HR_api"], a_medianoche["HR_excel"])).mean()) * 100, 2)
     print(f"\nCoincidencia WeatherLink vs data_metereologica.xlsx ({MES_COTEJO}, {len(cruce)} "
           f"registros): {coincidencia}")
     for columna, porcentaje in coincidencia.items():
         assert porcentaje >= 95, (columna, porcentaje)
-    for columna in ("T_max", "Rad", "ETo", "Lluvia"):
+    for columna in ("T_max", "Rad", "ETo", "Lluvia", "medianoche"):
         assert coincidencia[columna] >= 99, (columna, coincidencia[columna])

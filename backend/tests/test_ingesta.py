@@ -45,6 +45,7 @@ from tests.apis_falsas import (
     WL_SECRET,
     ApisFalsas,
     dia_wl,
+    registro_wl,
     sin_espera,
 )
 
@@ -105,7 +106,8 @@ def test_ingesta_guarda_lecturas_convertidas_crudos_y_ambiente(db, fundo, reloj,
     assert corridas["weatherlink"].filas_nuevas == 144
     assert corridas["pronostico"].desde == HOY == corridas["pronostico"].hasta
 
-    # WeatherLink: °F → °C (77,5 °F = 25,3 °C), pulgadas → mm, millas → km; 00:00 es del día nuevo.
+    # WeatherLink: °F → °C (77,5 °F = 25,3 °C), pulgadas → mm, millas → km; el de las 24:00 queda
+    # como «D 00:00» (corte de día del Excel).
     lecturas = list(db.scalars(select(MeteoLectura).order_by(MeteoLectura.fecha_hora)))
     assert len(lecturas) == 144 and {l.origen for l in lecturas} == {OrigenMeteo.weatherlink}
     primera = lecturas[0]
@@ -387,3 +389,75 @@ def test_reprocesar_usa_el_ultimo_payload_de_cada_dia(db, reloj):
     crudos = repo_ingestas.crudos_weatherlink(db, D1, D1)
     assert len(crudos) == 1 and crudos[0].payload["sensors"][1]["data"][0]["temp_out"] == 86.0
     assert pd.Series(list(db.scalars(select(MeteoLectura.temp)))).eq(30.3).all()  # 86,5 °F
+
+
+def test_weatherlink_descarta_registros_de_otro_dia(db, reloj):
+    """Si la API devolviera también el registro de las 00:00 del día pedido (cierra el anterior),
+    no se mezcla con el día pedido."""
+    def con_extra(dia):
+        inicio = int(dt.datetime.combine(dia, dt.time(), tzinfo=dt.timezone(dt.timedelta(hours=-5))).timestamp())
+        return [registro_wl(inicio, temp_f=99.0), *dia_wl(dia)]
+
+    corrida = _correr(db, ApisFalsas(wl_registros=con_extra), fuentes=["weatherlink"], desde=D2, hasta=D2)["weatherlink"]
+    assert corrida.filas_nuevas == 48
+    fechas = set(db.scalars(select(MeteoLectura.fecha_hora)))
+    assert {f.date() for f in fechas} == {D2} and 37.5 not in set(db.scalars(select(MeteoLectura.temp)))
+
+
+def _dia_corte_anterior(dia):
+    """Payload de un día pedido con el corte anterior: ``ts`` de 00:00 a 23:30, temperatura
+    distinta en cada registro."""
+    inicio = int(dt.datetime.combine(dia, dt.time(), tzinfo=dt.timezone(dt.timedelta(hours=-5))).timestamp())
+    return [registro_wl(inicio + 1800 * k, temp_f=60.0 + dia.day + k * 0.25) for k in range(48)]
+
+
+def test_reprocesar_corrige_lo_guardado_con_el_corte_anterior(db, fundo, reloj, monkeypatch):
+    with monkeypatch.context() as parche:
+        parche.setattr(conversion, "MEDIANOCHE_AL_DIA_QUE_TERMINA", False)
+        _correr(db, ApisFalsas(wl_registros=_dia_corte_anterior), fuentes=["weatherlink"], desde=D1, hasta=D2)
+    medianoche_d1 = dt.datetime.combine(D1, dt.time())
+    antes = db.scalar(select(MeteoLectura.temp).where(MeteoLectura.fecha_hora == medianoche_d1))
+
+    resultado = ingesta_service.reprocesar_weatherlink(db, D1, D2)
+
+    lecturas = {l.fecha_hora: l for l in db.scalars(select(MeteoLectura))}
+    por_dia = pd.Series([f.date() for f in lecturas]).value_counts().to_dict()
+    # D1: 00:30..23:30 de su payload + el de las 24:00 (ts D2 00:00, del payload de D2) como D1 00:00.
+    # D2: le falta el de las 24:00 (estaría en el payload de D3); su «00:00» viejo se borra.
+    assert por_dia == {D1: 48, D2: 47} and resultado.borradas == 1
+    ts_d2 = int(dt.datetime.combine(D2, dt.time(), tzinfo=dt.timezone(dt.timedelta(hours=-5))).timestamp())
+    esperado = conversion.convertir([registro_wl(ts_d2, temp_f=60.0 + D2.day)], "X").iloc[0]
+    assert lecturas[medianoche_d1].temp == esperado["T"] != antes
+    assert dt.datetime.combine(D2, dt.time()) not in lecturas
+    ambiente = {a.fecha: a for a in db.scalars(select(AmbienteDiario))}
+    assert set(ambiente) == {D1, D2}
+    # Repetirlo no cambia nada.
+    otra = ingesta_service.reprocesar_weatherlink(db, D1, D2)
+    assert otra.borradas == 0 and otra.conteo.nuevas == 0 and otra.conteo.actualizadas == 0
+
+
+def test_reprocesar_pisar_excel_reemplaza_el_excel_del_rango_y_lo_audita(db, fundo, reloj):
+    from app.models import Auditoria
+
+    excel = conversion.lecturas_saneadas(
+        [dict(r, temp_out_hi=50.0, temp_out_lo=49.0, temp_out=49.5) for r in dia_wl(D3)], "ENSUEÑO 1"
+    )[0]
+    lecturas_service.guardar_meteo(db, fundo, excel, origen=OrigenMeteo.excel_historico, corrida_id=None)
+    _correr(db, ApisFalsas(), fuentes=["weatherlink"])
+    assert _contar(db, MeteoLectura, MeteoLectura.origen == OrigenMeteo.excel_historico) == 48
+
+    with pytest.raises(ValueError):
+        ingesta_service.reprocesar_weatherlink(db, D3 - dt.timedelta(days=31), D3, pisar_excel=True)
+    sin_pisar = ingesta_service.reprocesar_weatherlink(db, D3, D3)
+    assert sin_pisar.conteo.omitidas == 48
+    assert _contar(db, MeteoLectura, MeteoLectura.origen == OrigenMeteo.excel_historico) == 48
+
+    resultado = ingesta_service.reprocesar_weatherlink(db, D3, D3, pisar_excel=True)
+    assert resultado.conteo.actualizadas == 48
+    assert _contar(db, MeteoLectura, MeteoLectura.origen == OrigenMeteo.excel_historico) == 0
+    assert set(db.scalars(select(MeteoLectura.temp).where(MeteoLectura.fecha_hora >= dt.datetime(2026, 11, 7)))) == {25.3}
+    assert db.scalar(select(AmbienteDiario.t_media).where(AmbienteDiario.fecha == D3)) == pytest.approx(25.3)
+    auditoria = db.scalars(select(Auditoria).where(Auditoria.accion == "meteo_excel_pisado")).all()
+    assert len(auditoria) == 1 and auditoria[0].entidad_id == str(resultado.corrida_id)
+    assert auditoria[0].detalle["lecturas_reemplazadas"] == 48
+    assert auditoria[0].detalle["por_dia"] == {"2026-11-07": 48}

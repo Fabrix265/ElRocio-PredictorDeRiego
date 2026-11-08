@@ -5,8 +5,10 @@
   negocio y los errores llevan la ruta sin query.
 - Máximo 24 h por llamada: **una llamada por día local de Lima**. La API devuelve los registros
   con ``ts`` (fin del intervalo) en ``(start-timestamp, end-timestamp]``; se pide
-  ``(00:00 − 1 s, 24:00 − 1 s]`` del día, así llegan exactamente los registros de 00:00 a 23:30,
-  que son los que pertenecen a ese día (el de las 00:00 es del día nuevo, como en el Excel).
+  ``(D 00:00, D+1 00:00]``, así llegan exactamente los registros de 00:30 a 24:00, que son los que
+  pertenecen al día ``D`` con el corte de día del Excel (el de las 24:00 se guarda como
+  ``D 00:00``: ver ``conversion.MEDIANOCHE_AL_DIA_QUE_TERMINA``). La ingesta descarta igual
+  cualquier registro de otro día que viniera en la respuesta.
 - Reintentos con espera ante 429, 5xx y errores de red; 401/403 = credenciales inválidas.
 """
 
@@ -30,10 +32,11 @@ from app.integraciones.http import (
 
 
 def rango_dia(dia: dt.date) -> tuple[int, int]:
-    """``(start-timestamp, end-timestamp)`` de un día local de Lima: 24 h exactas."""
+    """``(start-timestamp, end-timestamp)`` de un día local de Lima: de su medianoche a la del día
+    siguiente (24 h exactas, el máximo que admite la API)."""
     inicio = dt.datetime.combine(dia, dt.time(), tzinfo=zona_lima())
     fin = dt.datetime.combine(dia + dt.timedelta(days=1), dt.time(), tzinfo=zona_lima())
-    return int(inicio.timestamp()) - 1, int(fin.timestamp()) - 1
+    return int(inicio.timestamp()), int(fin.timestamp())
 
 
 class ClienteWeatherLink:

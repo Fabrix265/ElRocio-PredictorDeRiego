@@ -27,9 +27,14 @@ DPV         temp_out,       Tetens con temp_out en °C     sin redondeo (temp_ou
             hum_out         redondeada y hum_out          antes de calcular)
 ==========  ==============  ============================  =====================================
 
-``fecha_hora`` = ``ts`` (fin del intervalo) pasado de UTC a la hora local de Lima, sin zona. El
-registro de las 00:00 pertenece al día nuevo (``meteo_diaria`` corta con ``normalize()``), igual
-que en el Excel.
+``fecha_hora`` = ``ts`` (fin del intervalo) pasado de UTC a la hora local de Lima, sin zona, con el
+**corte de día del Excel** (:data:`MEDIANOCHE_AL_DIA_QUE_TERMINA`): el registro con ``ts`` local
+00:00 cierra el intervalo 23:30–24:00 del día anterior ``D`` y se etiqueta ``D 00:00`` (``ts`` − 1
+día), así ``meteo_diaria`` (que corta con ``normalize()``) lo suma al día que termina. Es lo que
+hace ``data_metereologica.xlsx`` desde el 13-sep-2021 (casi todo el histórico de entrenamiento:
+la lectura de las 24:00 queda como ``D 00:00``, fuera de orden, en el día ``D``); antes de esa
+fecha el Excel la ponía en el día nuevo. Cada día local ``D`` tiene entonces exactamente los
+registros con ``ts`` en ``(D 00:00, D+1 00:00]``: lo que pide ``cliente.rango_dia``.
 
 La salida tiene el formato de ``riego_ml.sources.meteo`` (``Fundo``, ``fecha_hora`` y
 ``VARIABLES``); :func:`lecturas_saneadas` le aplica además ``sanear_meteo`` (rangos físicos,
@@ -102,6 +107,11 @@ DPV_DECIMALES_TEMPERATURA = 1
 DPV_CAMPO_HUMEDAD = "hum_out"
 
 CAMPO_TS = "ts"  # segundos UTC del fin del intervalo
+
+# Corte de día: el registro de las 00:00 locales (fin del intervalo 23:30–24:00) va al día que
+# termina, etiquetado "D 00:00" como en data_metereologica.xlsx desde el 13-sep-2021. Con False
+# iría al día nuevo (convención del Excel hasta el 12-sep-2021).
+MEDIANOCHE_AL_DIA_QUE_TERMINA = True
 CAMPOS_REQUERIDOS = frozenset(
     {CAMPO_TS, DPV_CAMPO_TEMPERATURA, DPV_CAMPO_HUMEDAD, *(r.campo for r in REGLAS)}
 )
@@ -147,13 +157,30 @@ def dpv_de_registro(registro: Mapping[str, Any]) -> float:
     return dpv_tetens(celsius, float(humedad))
 
 
-def fecha_hora_local(ts: Any) -> pd.Timestamp | None:
-    """``ts`` (segundos UTC, fin del intervalo) -> hora local de Lima sin zona."""
+def instante_local(ts: Any) -> pd.Timestamp | None:
+    """``ts`` (segundos UTC, fin del intervalo) -> hora local de Lima sin zona (sin corte de día)."""
     numero = _decimal(ts)
     if numero is None:
         return None
     instante = pd.Timestamp(int(numero), unit="s", tz="UTC").tz_convert(zona_lima())
     return instante.tz_localize(None)
+
+
+def fecha_hora_local(ts: Any) -> pd.Timestamp | None:
+    """``fecha_hora`` con que se guarda el registro: :func:`instante_local` con el corte de día de
+    :data:`MEDIANOCHE_AL_DIA_QUE_TERMINA` (``ts`` local ``D+1 00:00`` -> ``D 00:00``)."""
+    instante = instante_local(ts)
+    if instante is None:
+        return None
+    if MEDIANOCHE_AL_DIA_QUE_TERMINA and instante == instante.normalize():
+        return instante - pd.Timedelta(days=1)
+    return instante
+
+
+def dia_de_registro(registro: Mapping[str, Any]) -> Any:
+    """Día local (``datetime.date``) al que pertenece un registro crudo, o ``None`` sin ``ts``."""
+    fecha_hora = fecha_hora_local(registro.get(CAMPO_TS))
+    return None if fecha_hora is None else fecha_hora.date()
 
 
 # --- Payload de la API ----------------------------------------------------------

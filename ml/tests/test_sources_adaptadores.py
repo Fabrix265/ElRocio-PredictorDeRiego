@@ -38,7 +38,8 @@ def test_sanear_meteo_aplica_rangos_sensor_caido_y_grilla():
 def test_sanear_meteo_y_meteo_diaria_con_lecturas_de_un_dia():
     lecturas, _ = sanear_meteo(_lecturas(48))
     diario, _ = meteo_diaria(lecturas)
-    # 00:30 .. 23:30 del 02/01 y 00:00 del 03/01 (el registro de las 00:00 es del día nuevo)
+    # 00:30 .. 23:30 del 02/01 y 00:00 del 03/01: meteo_diaria corta por la fecha de la etiqueta
+    # (una lectura etiquetada «03/01 00:00» cuenta en el 03/01)
     assert diario["Fecha"].dt.strftime("%Y-%m-%d").tolist() == ["2025-01-02", "2025-01-03"]
     assert diario.loc[0, "meteo_lecturas"] == 47
     assert diario.loc[0, "ETo_mm"] == round(0.1 * 48, 3)

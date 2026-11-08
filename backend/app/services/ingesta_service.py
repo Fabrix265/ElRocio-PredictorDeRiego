@@ -51,7 +51,7 @@ from app.models.enums import DisparoIngesta, EstadoIngesta, OrigenMeteo
 from app.repositories import datos_campo as repo_datos
 from app.repositories import ingestas as repo
 from app.repositories.datos_campo import ConteoUpsert
-from app.services import ambiente_service, lecturas_service
+from app.services import ambiente_service, auditoria_service, lecturas_service
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +194,7 @@ def ingestar_weatherlink(ctx: Contexto) -> ResultadoFuente:
     for dia in _dias(ctx.desde, ctx.hasta):
         llamada = _llamar(ctx.db, ctx.corrida, resultado, lambda d=dia: cliente.historico_dia(d))
         if llamada is not None:
-            registros.extend(conversion.registros_de_payload(llamada.payload))
+            registros.extend(registros_del_dia(llamada.payload, dia))
         if _credenciales_fallaron(resultado):
             break
     if registros:
@@ -202,13 +202,22 @@ def ingestar_weatherlink(ctx: Contexto) -> ResultadoFuente:
     return resultado
 
 
+def registros_del_dia(payload: dict[str, Any], dia: dt.date) -> list[dict[str, Any]]:
+    """Registros del payload que pertenecen a ``dia`` con el corte de día de ``conversion``
+    (``ts`` en ``(D 00:00, D+1 00:00]``); si la API devolviera alguno de otro día, se descarta."""
+    return [r for r in conversion.registros_de_payload(payload) if conversion.dia_de_registro(r) == dia]
+
+
 def guardar_lecturas_weatherlink(
-    db: Session, fundo: Fundo, registros: list[dict[str, Any]], corrida_id: int, resultado: ResultadoFuente
+    db: Session, fundo: Fundo, registros: list[dict[str, Any]], corrida_id: int, resultado: ResultadoFuente,
+    *, pisar_excel: bool = False,
 ) -> None:
-    """Conversión a °C/mm/km + ``sanear_meteo`` y guardado (sin pisar el Excel histórico)."""
+    """Conversión a °C/mm/km + ``sanear_meteo`` y guardado (sin pisar el Excel histórico, salvo
+    ``pisar_excel``)."""
     lecturas, _ = conversion.lecturas_saneadas(registros, ambiente_service.nombre_fundo(fundo))
     conteo, fechas = lecturas_service.guardar_meteo(
-        db, fundo, lecturas, origen=OrigenMeteo.weatherlink, corrida_id=corrida_id
+        db, fundo, lecturas, origen=OrigenMeteo.weatherlink, corrida_id=corrida_id,
+        pisar_excel=pisar_excel,
     )
     resultado.conteo = resultado.conteo.sumar(conteo)
     resultado.fechas |= fechas
@@ -532,32 +541,92 @@ class ResultadoReproceso:
     dias_sin_crudo: list[dt.date]
     lecturas: int
     conteo: ConteoUpsert
+    borradas: int
     ambiente: ambiente_service.ResultadoAmbiente | None
 
 
-def reprocesar_weatherlink(db: Session, desde: dt.date, hasta: dt.date) -> ResultadoReproceso:
+def _auditar_excel_pisado(
+    db: Session, corrida_id: int, desde: dt.date, hasta: dt.date, pisadas: list[dt.datetime]
+) -> None:
+    por_dia: dict[str, int] = {}
+    for fecha_hora in pisadas:
+        clave = fecha_hora.date().isoformat()
+        por_dia[clave] = por_dia.get(clave, 0) + 1
+    auditoria_service.registrar(
+        db, accion=auditoria_service.METEO_EXCEL_PISADO,
+        entidad=auditoria_service.ENTIDAD_INGESTA_CORRIDA, entidad_id=corrida_id,
+        actor_username=auditoria_service.ACTOR_SISTEMA,
+        detalle={"desde": desde.isoformat(), "hasta": hasta.isoformat(),
+                 "lecturas_reemplazadas": len(pisadas), "por_dia": por_dia},
+    )
+
+
+def registros_de_crudos(crudos: Sequence[Any], desde: dt.date, hasta: dt.date) -> list[dict[str, Any]]:
+    """Registros de los payloads que pertenecen a ``desde..hasta`` con el corte de día actual de
+    ``conversion``. Un mismo ``ts`` puede venir en dos payloads (días vecinos pedidos con otro
+    corte): queda el del payload más reciente."""
+    por_ts: dict[Any, dict[str, Any]] = {}
+    for crudo in sorted(crudos, key=lambda c: c.id):
+        for registro in conversion.registros_de_payload(crudo.payload):
+            dia = conversion.dia_de_registro(registro)
+            if dia is not None and desde <= dia <= hasta:
+                por_ts[registro[conversion.CAMPO_TS]] = registro
+    return list(por_ts.values())
+
+
+MAX_DIAS_PISAR_EXCEL = 31
+
+
+def reprocesar_weatherlink(
+    db: Session, desde: dt.date, hasta: dt.date, *, pisar_excel: bool = False
+) -> ResultadoReproceso:
     """Vuelve a derivar ``meteo_lectura`` (origen ``weatherlink``) desde los payloads guardados en
     ``ingesta_crudo`` con las reglas actuales de ``conversion`` y recalcula ``ambiente_diario``.
-    Sin descargar nada. Las lecturas del Excel histórico no se tocan."""
+    Sin descargar nada. Las lecturas del Excel histórico no se tocan.
+
+    Se leen también los payloads del día anterior y del siguiente: con otro corte de día (p. ej.
+    los descargados antes de ``MEDIANOCHE_AL_DIA_QUE_TERMINA``) el registro de las 24:00 de un día
+    está en el payload del día siguiente. Las lecturas ``weatherlink`` de ``desde..hasta`` que ya
+    no salen de los payloads (etiquetas de la regla anterior) se borran.
+
+    ``pisar_excel`` (rango de hasta :data:`MAX_DIAS_PISAR_EXCEL` días): las lecturas de WeatherLink
+    reemplazan también las del Excel histórico de esos días (p. ej. un error conocido del Excel) y
+    queda en la auditoría cuántas se reemplazaron por día. Las lecturas del Excel sin par en
+    WeatherLink no se tocan."""
     if desde > hasta:
         raise ValueError("desde debe ser anterior o igual a hasta")
+    if pisar_excel and (hasta - desde).days + 1 > MAX_DIAS_PISAR_EXCEL:
+        raise ValueError(f"Con --pisar-excel el rango no puede superar {MAX_DIAS_PISAR_EXCEL} días")
     inicio = time.monotonic()
     fundo = fundo_de_datos(db)
     corrida = repo_datos.nueva_corrida(
         db, fuente=FUENTE_REPROCESAR, disparo=DisparoIngesta.script, inicio_at=ahora_utc(),
         estado=EstadoIngesta.en_curso, desde=desde, hasta=hasta,
     )
-    crudos = repo.crudos_weatherlink(db, desde, hasta)
-    dias = {dt.date.fromisoformat(c.parametros["dia"]) for c in crudos}
-    registros = [r for c in crudos for r in conversion.registros_de_payload(c.payload)]
+    uno = dt.timedelta(days=1)
+    crudos = repo.crudos_weatherlink(db, desde - uno, hasta + uno)
+    dias = {d for c in crudos if desde <= (d := dt.date.fromisoformat(c.parametros["dia"])) <= hasta}
+    registros = registros_de_crudos(crudos, desde, hasta)
     resultado = ResultadoFuente(llamadas_ok=len(crudos))
-    ambiente = None
+    pisadas: list[dt.datetime] = []
+    if registros and pisar_excel:
+        etiquetas = {conversion.fecha_hora_local(r[conversion.CAMPO_TS]).to_pydatetime() for r in registros}
+        pisadas = repo_datos.lecturas_por_origen(db, fundo.id, OrigenMeteo.excel_historico, etiquetas)
     if registros:
-        guardar_lecturas_weatherlink(db, fundo, registros, corrida.id, resultado)
-        ambiente = ambiente_service.recalcular(db, fundo, resultado.fechas)
+        guardar_lecturas_weatherlink(db, fundo, registros, corrida.id, resultado, pisar_excel=pisar_excel)
+    if pisar_excel:
+        _auditar_excel_pisado(db, corrida.id, desde, hasta, pisadas)
+    conservar = {conversion.fecha_hora_local(r[conversion.CAMPO_TS]).to_pydatetime() for r in registros}
+    # Solo en los días con payload (propio o del vecino): los días sin crudo no se tocan.
+    borradas = repo_datos.borrar_meteo_sobrante(
+        db, fundo.id, OrigenMeteo.weatherlink, dt.datetime.combine(desde, dt.time()),
+        dt.datetime.combine(hasta + uno, dt.time()), conservar, dias | {f.date() for f in conservar},
+    )
+    resultado.fechas |= {f.date() for f in borradas}
+    ambiente = ambiente_service.recalcular(db, fundo, resultado.fechas) if resultado.fechas else None
     corrida.estado = EstadoIngesta.ok
     corrida.filas_nuevas = resultado.conteo.nuevas
-    corrida.filas_actualizadas = resultado.conteo.actualizadas
+    corrida.filas_actualizadas = resultado.conteo.actualizadas + len(borradas)
     corrida.filas_omitidas = resultado.conteo.omitidas
     corrida.fin_at = ahora_utc()
     corrida.duracion_ms = int((time.monotonic() - inicio) * 1000)
@@ -565,5 +634,5 @@ def reprocesar_weatherlink(db: Session, desde: dt.date, hasta: dt.date) -> Resul
     return ResultadoReproceso(
         corrida_id=corrida.id, dias_con_crudo=len(dias),
         dias_sin_crudo=[d for d in _dias(desde, hasta) if d not in dias],
-        lecturas=len(registros), conteo=resultado.conteo, ambiente=ambiente,
+        lecturas=len(registros), conteo=resultado.conteo, borradas=len(borradas), ambiente=ambiente,
     )

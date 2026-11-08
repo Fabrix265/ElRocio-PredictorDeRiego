@@ -54,6 +54,13 @@ ENTIDAD_CARGA_RIEGO = "carga_riego"
 ACCIONES += (EXCEL_SUBIDO, EXCEL_CONFIRMADO, EXCEL_DESCARTADO)
 ENTIDADES += (ENTIDAD_CARGA_RIEGO,)
 
+# Datos de campo: WeatherLink reemplaza lecturas del Excel histórico (reprocesar-weatherlink
+# --pisar-excel). Entidad ``ingesta_corrida`` con el id de la corrida de reproceso.
+METEO_EXCEL_PISADO = "meteo_excel_pisado"
+ENTIDAD_INGESTA_CORRIDA = "ingesta_corrida"
+ACCIONES += (METEO_EXCEL_PISADO,)
+ENTIDADES += (ENTIDAD_INGESTA_CORRIDA,)
+
 ACTOR_SISTEMA = "sistema"
 
 # Lista blanca de campos por entidad para las instantáneas antes/después.

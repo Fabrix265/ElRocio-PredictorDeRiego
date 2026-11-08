@@ -51,10 +51,11 @@ def _misma_finca(serie: pd.Series, fundo: Fundo) -> pd.Series:
 
 def guardar_meteo(
     db: Session, fundo: Fundo, lecturas: pd.DataFrame, *, origen: OrigenMeteo,
-    corrida_id: int | None,
+    corrida_id: int | None, pisar_excel: bool = False,
 ) -> tuple[ConteoUpsert, set[dt.date]]:
     """``lecturas``: salida de ``sanear_meteo`` (``Fundo``, ``fecha_hora``, ``VARIABLES``).
-    Solo se guardan las del fundo indicado. El Excel histórico no se pisa con la API."""
+    Solo se guardan las del fundo indicado. El Excel histórico no se pisa con la API (salvo
+    ``pisar_excel``, ver ``repositories.datos_campo.upsert_meteo``)."""
     propias = lecturas[_misma_finca(lecturas["Fundo"], fundo)]
     filas = []
     for registro in propias.to_dict("records"):
@@ -68,7 +69,7 @@ def guardar_meteo(
             fila[columna_bd] = _valor(registro[columna_ml])
         filas.append(fila)
     fechas = {f["fecha_hora"].date() for f in filas}
-    return repo.upsert_meteo(db, filas), fechas
+    return repo.upsert_meteo(db, filas, pisar_excel=pisar_excel), fechas
 
 
 # --- Phytech --------------------------------------------------------------------

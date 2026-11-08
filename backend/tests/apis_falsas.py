@@ -57,9 +57,10 @@ def registro_wl(ts: int, *, temp_f: float = 77.0, hum: int = 70, et: float = 0.0
 
 
 def dia_wl(dia: dt.date, **kwargs: Any) -> list[dict[str, Any]]:
-    """48 registros: ``ts`` = fin de intervalo, de 00:00 a 23:30 de Lima."""
+    """48 registros: ``ts`` = fin de intervalo, de 00:30 a 24:00 de Lima (lo que devuelve la API
+    para ``(D 00:00, D+1 00:00]``; el de las 24:00 se guarda como ``D 00:00``)."""
     inicio = int(dt.datetime.combine(dia, dt.time(), tzinfo=zona_lima()).timestamp())
-    return [registro_wl(inicio + 1800 * k, **kwargs) for k in range(48)]
+    return [registro_wl(inicio + 1800 * (k + 1), **kwargs) for k in range(48)]
 
 
 def payload_wl(registros: list[dict[str, Any]]) -> dict[str, Any]:

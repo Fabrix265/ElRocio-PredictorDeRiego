@@ -6,6 +6,9 @@
 - ``Historial`` desde la BD = ``Historial`` en memoria desde los archivos (ciclos, turno-día y
   ambiente).
 - Si está el modelo entrenado, el plan del día siguiente al último riego es idéntico.
+- WeatherLink: un mes de la API (``WeatherLink/completo``, nov-2021, posterior al cambio de corte de
+  día del Excel) pasado por ``conversion`` y guardado, empalmado con el Excel, da el mismo clima
+  diario que ``data_metereologica.xlsx``.
 
 Tolerancia del ambiente: 0,001 (una unidad del ``round(3)`` de ``meteo_diaria``). El promedio
 diario de pandas (``groupby().mean()``) puede diferir en el último bit según cuántos días tenga
@@ -30,11 +33,16 @@ from riego_ml.config import load_config
 from riego_ml.dataset.limpieza import limpiar_ciclos, tabla_turno_dia
 from riego_ml.dataset.preparar import Historial
 from riego_ml.dataset.unir import columnas_ambiente, unir_fuentes
+from riego_ml.sources.meteo import COLUMNAS_DIARIAS, leer_meteo, meteo_diaria
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.integraciones.weatherlink import conversion
 from app.ml.historial_bd import construir_historial
+from app.models import MeteoLectura
+from app.models.enums import OrigenMeteo
 from app.repositories import datos_campo as repo
-from app.services import ambiente_service
+from app.services import ambiente_service, ingesta_service, lecturas_service
 from app.services.carga_historica import CODIGO_MODULO, RutasHistorico, cargar_historico
 
 RUTAS = RutasHistorico.por_defecto()
@@ -173,3 +181,48 @@ def test_plan_desde_la_bd_igual_al_de_los_archivos(bd, archivos):
     desde_archivos = planificar(plan, esperado, [fecha], config)
     assert len(desde_bd) >= 5
     pd.testing.assert_frame_equal(desde_bd, desde_archivos, check_dtype=False)
+
+
+WL_2021 = RUTAS.meteo.parent / "WeatherLink" / "completo" / (
+    "Historic_tipo24-Vantage-Pro2-Plus-Cabled_ds4_2021_est28494.xlsx"
+)
+MES_WL = (pd.Timestamp("2021-11-01"), pd.Timestamp("2021-11-30"))
+FIN_EXCEL = pd.Timestamp("2021-11-15")      # el Excel cubre del 01 al 15 ...
+INICIO_WL = pd.Timestamp("2021-11-14")      # ... y WeatherLink del 14 al 30: dos días solapados
+EXACTAS = ["T_media", "T_min", "HR_media", "Viento_media", "meteo_lecturas"]
+
+
+@pytest.mark.skipif(not WL_2021.exists(), reason="sin ml/data/raw/WeatherLink/completo")
+def test_clima_desde_weatherlink_igual_al_del_excel(db):
+    """Detecta un corrimiento del corte de día (la lectura de las 24:00) o de las fórmulas: cada día
+    armado desde la BD con lecturas de WeatherLink (y el empalme con el Excel, sin lecturas
+    repetidas) da el mismo ``meteo_diaria`` que el Excel de entrenamiento."""
+    fundo = repo.fundo_por_id(db, repo.modulo_por_codigo(db, CODIGO_MODULO).fundo_id)
+    excel, _ = leer_meteo(RUTAS.meteo)
+    dia_excel = excel["fecha_hora"].dt.normalize()
+    esperado, _ = meteo_diaria(excel[dia_excel.between(*MES_WL)])
+
+    tramo_excel = excel[dia_excel.between(MES_WL[0], FIN_EXCEL)]
+    lecturas_service.guardar_meteo(db, fundo, tramo_excel, origen=OrigenMeteo.excel_historico, corrida_id=None)
+    registros = [
+        r for r in pd.read_excel(WL_2021).to_dict("records")
+        if (dia := conversion.dia_de_registro(r)) is not None and INICIO_WL <= pd.Timestamp(dia) <= MES_WL[1]
+    ]
+    resultado = ingesta_service.ResultadoFuente()
+    ingesta_service.guardar_lecturas_weatherlink(db, fundo, registros, None, resultado)
+    assert resultado.conteo.omitidas > 90  # el solape (14 y 15) no pisa el Excel
+    dias = pd.date_range(*MES_WL).date
+    ambiente_service.recalcular(db, fundo, dias)
+
+    desde_bd = ambiente_service.ambiente_para_modelo(db, fundo)
+    desde_bd = desde_bd[desde_bd["Fecha"].between(*MES_WL)].reset_index(drop=True)
+    assert desde_bd["Fecha"].tolist() == esperado["Fecha"].tolist() and len(desde_bd) == 30
+    # Ningún día con lecturas de más ni de menos (la misma lectura no cae en dos días).
+    por_dia = pd.Series([f.date() for f in db.scalars(
+        select(MeteoLectura.fecha_hora).where(MeteoLectura.fundo_id == fundo.id))]).value_counts()
+    assert (por_dia.sort_index().to_numpy() == esperado["meteo_lecturas"].to_numpy()).all()
+    pd.testing.assert_frame_equal(desde_bd[EXACTAS].astype(float), esperado[EXACTAS].astype(float),
+                                  check_exact=False, rtol=0, atol=1e-9)
+    pd.testing.assert_frame_equal(desde_bd[COLUMNAS_DIARIAS].astype(float),
+                                  esperado[COLUMNAS_DIARIAS].astype(float), check_exact=False, rtol=0,
+                                  atol=TOLERANCIA)

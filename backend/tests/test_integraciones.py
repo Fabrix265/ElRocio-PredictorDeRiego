@@ -37,11 +37,13 @@ def _sin_secretos(texto: str, extra: tuple[str, ...] = ()) -> None:
 
 # --- WeatherLink ----------------------------------------------------------------
 
-def test_rango_dia_cubre_de_00_00_a_23_30_de_lima():
+def test_rango_dia_va_de_la_medianoche_a_la_del_dia_siguiente_en_lima():
     inicio, fin = rango_dia(DIA)
     assert fin - inicio == 24 * 3600
-    # Lima es UTC-5 sin horario de verano: 2026-11-05 00:00 Lima = 05:00 UTC.
-    assert inicio + 1 == int(dt.datetime(2026, 11, 5, 5, tzinfo=dt.UTC).timestamp())
+    # Lima es UTC-5 sin horario de verano: 2026-11-05 00:00 Lima = 05:00 UTC. La API devuelve
+    # (inicio, fin]: de 00:30 a 24:00, el día completo con el corte del Excel.
+    assert inicio == int(dt.datetime(2026, 11, 5, 5, tzinfo=dt.UTC).timestamp())
+    assert fin == int(dt.datetime(2026, 11, 6, 5, tzinfo=dt.UTC).timestamp())
 
 
 def test_weatherlink_autentica_con_query_y_cabecera_y_no_guarda_la_clave():
@@ -58,7 +60,9 @@ def test_weatherlink_autentica_con_query_y_cabecera_y_no_guarda_la_clave():
     registros = conversion.registros_de_payload(llamada.payload)
     assert len(registros) == 48  # solo el sensor de la consola (el barómetro no trae los campos)
     horas = [conversion.fecha_hora_local(r["ts"]) for r in registros]
-    assert str(horas[0]) == "2026-11-05 00:00:00" and str(horas[-1]) == "2026-11-05 23:30:00"
+    assert str(horas[0]) == "2026-11-05 00:30:00" and str(horas[-2]) == "2026-11-05 23:30:00"
+    assert str(horas[-1]) == "2026-11-05 00:00:00"  # el de las 24:00, en el día que termina
+    assert {conversion.dia_de_registro(r) for r in registros} == {DIA}
 
 
 def test_weatherlink_credenciales_invalidas_sin_reintentar_y_sin_query_en_el_error():

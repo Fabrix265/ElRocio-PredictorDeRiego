@@ -106,9 +106,11 @@ def modulo_por_codigo(db: Session, codigo: str) -> Modulo | None:
 COLUMNAS_METEO = ("temp", "temp_max", "temp_min", "hr", "hr_max", "rad", "eto", "dpv", "viento", "lluvia")
 
 
-def upsert_meteo(db: Session, filas: Sequence[dict[str, Any]]) -> ConteoUpsert:
-    """Lecturas por ``(fundo_id, fecha_hora)``. Una lectura ``excel_historico`` nunca se pisa con
-    una de otro origen (WeatherLink no reemplaza el Excel histórico)."""
+def upsert_meteo(db: Session, filas: Sequence[dict[str, Any]], *, pisar_excel: bool = False) -> ConteoUpsert:
+    """Lecturas por ``(fundo_id, fecha_hora)``. Una lectura ``excel_historico`` no se pisa con una
+    de otro origen (WeatherLink no reemplaza el Excel histórico), salvo con ``pisar_excel``: solo
+    ``reprocesar-weatherlink --pisar-excel`` en un rango acotado y auditado (error conocido del
+    Excel)."""
     tabla = MeteoLectura.__table__
     protegida = and_(
         tabla.c.origen == OrigenMeteo.excel_historico,
@@ -117,8 +119,40 @@ def upsert_meteo(db: Session, filas: Sequence[dict[str, Any]]) -> ConteoUpsert:
     return upsert(
         db, MeteoLectura, filas, conflicto=("fundo_id", "fecha_hora"),
         columnas_valor=(*COLUMNAS_METEO, "origen"), columnas_extra=("corrida_id",),
-        condicion=~protegida,
+        condicion=None if pisar_excel else ~protegida,
     )
+
+
+def lecturas_por_origen(
+    db: Session, fundo_id: int, origen: OrigenMeteo, fechas_hora: Iterable[dt.datetime]
+) -> list[dt.datetime]:
+    """De ``fechas_hora``, las que hoy están guardadas con ``origen``."""
+    fechas_hora = list(fechas_hora)
+    if not fechas_hora:
+        return []
+    return sorted(db.scalars(select(MeteoLectura.fecha_hora).where(
+        MeteoLectura.fundo_id == fundo_id, MeteoLectura.origen == origen,
+        MeteoLectura.fecha_hora.in_(fechas_hora))))
+
+
+def borrar_meteo_sobrante(
+    db: Session, fundo_id: int, origen: OrigenMeteo, desde: dt.datetime, hasta: dt.datetime,
+    conservar: set[dt.datetime], dias: set[dt.date],
+) -> list[dt.datetime]:
+    """Borra las lecturas de ``origen`` con ``desde <= fecha_hora < hasta`` de los ``dias``
+    indicados que no están en ``conservar`` (reproceso con otra regla). Devuelve sus
+    ``fecha_hora``."""
+    existentes = db.scalars(
+        select(MeteoLectura.fecha_hora).where(
+            MeteoLectura.fundo_id == fundo_id, MeteoLectura.origen == origen,
+            MeteoLectura.fecha_hora >= desde, MeteoLectura.fecha_hora < hasta)
+    )
+    sobrantes = sorted(f for f in existentes if f.date() in dias and f not in conservar)
+    if sobrantes:
+        db.execute(delete(MeteoLectura).where(
+            MeteoLectura.fundo_id == fundo_id, MeteoLectura.origen == origen,
+            MeteoLectura.fecha_hora.in_(sobrantes)))
+    return sobrantes
 
 
 def lecturas_meteo(db: Session, fundo_id: int, desde: dt.datetime, hasta: dt.datetime) -> list[Any]:

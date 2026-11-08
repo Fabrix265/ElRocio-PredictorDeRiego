@@ -345,6 +345,9 @@ def ingestar(args: argparse.Namespace) -> int:
 def _args_reprocesar(p: argparse.ArgumentParser) -> None:
     p.add_argument("--desde", type=_fecha, required=True, help="AAAA-MM-DD")
     p.add_argument("--hasta", type=_fecha, required=True, help="AAAA-MM-DD (incluido)")
+    p.add_argument("--pisar-excel", action="store_true",
+                   help="Reemplaza también las lecturas del Excel histórico de esos días con las de "
+                        "WeatherLink (error conocido del Excel; máx. 31 días; queda en la auditoría)")
 
 
 @comando("reprocesar-weatherlink", "Vuelve a derivar meteo_lectura (origen weatherlink) desde los "
@@ -356,11 +359,17 @@ def reprocesar_weatherlink(args: argparse.Namespace) -> int:
     if args.desde > args.hasta:
         print("Indica --desde <= --hasta.", file=sys.stderr)
         return 2
-    with _sesion_app() as db:
-        r = ingesta_service.reprocesar_weatherlink(db, args.desde, args.hasta)
+    try:
+        with _sesion_app() as db:
+            r = ingesta_service.reprocesar_weatherlink(db, args.desde, args.hasta,
+                                                       pisar_excel=args.pisar_excel)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     print(f"Días con payload guardado: {r.dias_con_crudo}; lecturas reprocesadas: {r.lecturas}")
     print(f"meteo_lectura: {r.conteo.nuevas} nuevas, {r.conteo.actualizadas} actualizadas, "
-          f"{r.conteo.omitidas} sin cambios o protegidas (Excel histórico)")
+          f"{r.conteo.omitidas} sin cambios o protegidas (Excel histórico), {r.borradas} borradas "
+          f"(etiquetas de la regla anterior)")
     if r.dias_sin_crudo:
         muestra = ", ".join(d.isoformat() for d in r.dias_sin_crudo[:10])
         extra = f" y {len(r.dias_sin_crudo) - 10} más" if len(r.dias_sin_crudo) > 10 else ""
