@@ -98,6 +98,9 @@ En `.env`: `DATABASE_URL_MIGRACIONES=postgresql+psycopg://postgres@localhost:543
   (`sesion_refresh.gracia_usada_at`), `riego_registro` inmutable (la app solo puede pasar
   `vigente` de true a false; no borra ni reescribe versiones, también por trigger) y
   `updated_at` mantenido por trigger (`riego.fijar_updated_at`, cubre upserts y SQL directo).
+- `0004_ingesta_exclusion_latido`: `ingesta_corrida.latido_at` e índice único parcial
+  `uq_ingesta_corrida_en_curso (fuente) WHERE estado = 'en_curso'` (una sola corrida en curso por
+  fuente; antes de crearlo cierra como interrumpidas las repetidas).
 - `alembic downgrade base` deja el esquema vacío (conserva `riego.alembic_version` y el rol).
 - `configurar-rol-app` solo hace `ALTER ROLE riego_app WITH LOGIN PASSWORD ...` (los demás
   atributos los fija la migración 0001; así funciona con un dueño no superusuario, como en
@@ -238,9 +241,13 @@ Las tablas guardan la salida **saneada** de `riego_ml` (las reglas viven en
 - **Conversión de WeatherLink**: `app/integraciones/weatherlink/conversion.py` es el único lugar
   con las reglas de H7 (tabla `REGLAS` documentada: T° Prom = T° Máx = `temp_out_hi`, ETo =
   `et`×25,4, viento = `wind_run`×1,609344, DPV por Tetens con `temp_out`…). `lecturas_saneadas`
-  devuelve lo que va a `meteo_lectura`. Coincidencia medida contra `data_metereologica.xlsx`
-  (enero 2021, 1487 registros): T_max 99,9 %, Rad 99,4 %, ETo 99,2 %, Lluvia 100 %, Viento 97,5 %,
-  T/T_min/HR/DPV ≈ 96,8 % (el resto son lecturas que en el Excel vienen promediadas de otra fuente).
+  devuelve lo que va a `meteo_lectura`. **Corte de día** (`MEDIANOCHE_AL_DIA_QUE_TERMINA`): el
+  registro con `ts` local 00:00 cierra el día anterior y se guarda como `D 00:00` del día que
+  termina, como hace el Excel desde el 13-sep-2021 (antes lo ponía en el día nuevo); cada día local
+  tiene los registros con `ts` en `(D 00:00, D+1 00:00]`. Coincidencia medida contra
+  `data_metereologica.xlsx` (nov-2021, 1440 registros): 100 % en todas las columnas, también la
+  lectura de medianoche; y el clima diario armado desde la BD con un mes de WeatherLink empalmado
+  con el Excel es idéntico al del Excel (`test_paridad_historico`).
 - **Mapeo de columnas** BD (minúsculas) ↔ `riego_ml`: solo en `app/ml/columnas.py`.
 - **`ambiente_diario`**: solo días `< hoy_lima()`; un día con solo NDVI se escribe con banderas en
   0; un día sin datos no tiene fila (la ruta por archivos agrega días vacíos al calendario, pero
@@ -250,7 +257,10 @@ Las tablas guardan la salida **saneada** de `riego_ml` (las reglas viven en
   ciclos del cronograma de referencia de ese día (informados en `turno_dias_cronograma`);
   `limpiar_ciclos(5, 2)` → `tabla_turno_dia` → ambiente con los nombres de `riego_ml`.
 - **Paridad** (`tests/test_paridad_historico.py`): con todo `ml/data/raw` cargado, el ambiente y el
-  Historial de la BD coinciden con la ruta por archivos y el plan del día siguiente es idéntico. El
+  Historial de la BD coinciden con la ruta por archivos y el plan del día siguiente es idéntico;
+  además, nov-2021 de `WeatherLink/completo` pasado por `conversion` y guardado (del 14 al 30,
+  solapado dos días con el Excel del 1 al 15) da exactamente el mismo `meteo_diaria` que el Excel
+  (T_media, T_min, HR_media, Viento_media y lecturas por día sin diferencia). El
   ambiente admite 0,001 en ≈0,1 % de los valores: `groupby().mean()` de pandas puede diferir en el
   último bit según el tamaño del DataFrame y, en un empate, cambia el `round(3)` (pasa también
   dentro de `riego_ml` con archivos de distinto rango).
@@ -287,7 +297,7 @@ Código: `integraciones/` (clientes), `services/ingesta_service.py`, `repositori
 
 | Método y ruta | Quién | Respuesta |
 |---|---|---|
-| `POST /ingestas/ejecutar` `{fuentes?, desde?, hasta?}` | A E | 202 con las corridas `en_curso` («Actualizar ahora»); 409 si una fuente ya está en curso; 422 si el rango no cumple `desde ≤ hasta < hoy` o supera 62 días |
+| `POST /ingestas/ejecutar` `{fuentes?, desde?, hasta?}` | A E | 202 con las corridas `en_curso` («Actualizar ahora»); 409 si una fuente ya está en curso (también si dos peticiones llegan a la vez: índice único parcial); 422 si el rango no cumple `2017-01-01 ≤ desde ≤ hasta < hoy` o supera 62 días |
 | `GET /ingestas?limite&fuente` | A E S | Corridas más recientes primero (`limite` ≤ 200, 20 por defecto), con errores `{tipo, status_code, endpoint sin query, mensaje}` |
 | `GET /datos/frescura?modulo_id&fecha&dias` | todos | Por fuente: última fecha completa, `verde`/`naranja` respecto de D-1 y huecos de la ventana (`dias` ≤ 60, 7 por defecto); el riego trae detalle `por_turno` |
 | `GET /datos/clima?desde&hasta&resolucion=diaria\|30min` | todos | `ambiente_diario` o `meteo_lectura` (30 min, máx. 31 días) |
@@ -295,7 +305,8 @@ Código: `integraciones/` (clientes), `services/ingesta_service.py`, `repositori
 | `GET /datos/pronostico?desde&hasta&capturado` | todos | La última captura (o la indicada) |
 | `GET /modulos/{id}/turnos` | todos | Turnos con área, válvulas y caudal reciente (mediana m3/h de los ciclos aplicados de 30 días) |
 
-Las series van por defecto de los últimos 14 días cerrados, en las unidades del modelo.
+Las series van por defecto de los últimos 14 días cerrados, en las unidades del modelo. Las
+fechas de frescura, series y `/riego` deben estar entre 2017-01-01 y hoy + 366 días (422 si no).
 
 **Fuentes** (`weatherlink`, `phytech_suelo`, `phytech_planta`, `ndvi`, `pronostico`): cada una es
 una corrida en `ingesta_corrida` y cada llamada deja su payload tal cual en `ingesta_crudo` con los
@@ -306,23 +317,35 @@ recalcula `ambiente_diario` de los días tocados.
   últimos 14 días, si es anterior) hasta ayer en hora de Lima; sin datos, los últimos 7 días; tope
   de 62 días. NDVI: últimos 10 días. Pronóstico: una captura por día (`capturado_fecha` = hoy).
 - **WeatherLink v2**: `api-key` en la query + `X-Api-Secret`, una llamada por día local
-  (`(00:00 − 1 s, 24:00 − 1 s]`, máx. 24 h), conversión con `weatherlink/conversion.py`. Nunca
-  pisa una lectura `excel_historico`.
+  (`(D 00:00, D+1 00:00]`, 24 h: de 00:30 a 24:00; un registro de otro día se descarta),
+  conversión con `weatherlink/conversion.py`. No pisa una lectura `excel_historico` (salvo
+  `reprocesar-weatherlink --pisar-excel`).
 - **Phytech**: JWT pedido con `X-API-KEY`/`X-API-SECRET-KEY`, **solo en memoria**; se renueva a las
   23 h y, ante un 401, una vez (y se reintenta la llamada); un segundo 401 = error `credenciales`.
-  Suelo en tramos de 7 días (una hora cuenta solo si trae alguna humedad, y una hora guardada con
-  dato no se reemplaza por un hueco), planta en tramos de 30 y NDVI de 10 (del ZIP se guardan el
+  Suelo en tramos de 7 días (una hora cuenta si trae alguna medición —humedad, temperatura,
+  presión o zona radicular—, como en `data_phytech.xlsx`; las de relleno sin ninguna lectura quedan
+  como hueco; y una hora guardada con dato no se reemplaza por un hueco), planta en tramos de 30
+  y NDVI de 10 (del ZIP se guardan el
   manifest y los histogramas). Se guardan todos los projects del plot (el ambiente usa 907557).
 - **Reintentos** (`integraciones/http.py`): timeouts (15 s de conexión, 60 s de lectura), 4
   intentos con espera creciente ante 429 (respeta `Retry-After`, tope 60 s), 5xx y errores de red.
   httpx queda en WARNING y con filtro de redacción (en INFO registraría la URL con la `api-key`).
 - **Aislamiento**: un día o tramo con error deja la corrida `parcial` y sigue; una fuente con
-  error no detiene las demás (cada una en su transacción y en un SAVEPOINT). Las corridas
-  `en_curso` de más de 3 h se cierran como `error` («interrumpida»).
+  error no detiene las demás (cada una en su transacción y en un SAVEPOINT). Si falla el commit
+  final de una fuente, la corrida se cierra como `error` en otra transacción.
+- **Una corrida en curso por fuente**: índice único parcial `uq_ingesta_corrida_en_curso`; un
+  «Actualizar ahora» o un `ingestar` que choca con otro responde 409 (`Conflicto`) y la tarea
+  programada omite la fuente ocupada. Sin candados de sesión (sirve con el pooler 6543).
+- **Latido**: mientras corre, cada corrida actualiza `latido_at` cada 60 s en una transacción
+  aparte (la de la ingesta no toca la fila hasta cerrarla). Una corrida `en_curso` sin latido en
+  10 min quedó sin dueño (proceso muerto, deploy) y se cierra como `error` («interrumpida»).
 - **Tarea diaria** a `INGESTA_HORA` (05:00 Lima) en `python -m app.jobs` (o dentro de la API con
   `SCHEDULER_ENABLED=true`). Exclusión entre procesos con la fila `uq(fuente, fecha_programada)`
   (`INSERT … ON CONFLICT`, sin candados de sesión). Si el proceso arranca después de esa hora la
   lanza una vez: lo ya hecho hoy se omite y lo que terminó en `error` se repite.
+- **Vigilante** (`vigilar_ingestas`, cada 5 min): cierra las corridas sin latido y, pasada
+  `INGESTA_HORA`, ejecuta las programadas de hoy interrumpidas o que faltan (p. ej. se omitieron
+  por un «Actualizar ahora» en curso). Un error de la API no se repite ahí.
 
 ```bash
 # Siempre contra la base local: backend/.env apunta a producción.
@@ -331,8 +354,14 @@ export DATABASE_URL_MIGRACIONES=$DATABASE_URL
 .venv/Scripts/python -m app.cli ingestar                       # rango automático, todas las fuentes
 .venv/Scripts/python -m app.cli ingestar --fuentes weatherlink,phytech_suelo --desde 2026-11-05 --hasta 2026-11-07
 # Cambió una regla de conversion.py: re-deriva meteo_lectura (origen weatherlink) desde los
-# payloads guardados, sin descargar, y recalcula ambiente_diario.
+# payloads guardados, sin descargar, y recalcula ambiente_diario. Lee también los payloads del
+# día anterior y del siguiente (el de las 24:00 puede estar en el del día siguiente) y borra las
+# etiquetas que dejó la regla anterior.
 .venv/Scripts/python -m app.cli reprocesar-weatherlink --desde 2026-11-01 --hasta 2026-11-07
+# Error conocido del Excel histórico (p. ej. la ETo duplicada del 31/10/2026): WeatherLink
+# reemplaza también las lecturas excel_historico de esos días (máx. 31 días; auditoría
+# meteo_excel_pisado con lo reemplazado por día).
+.venv/Scripts/python -m app.cli reprocesar-weatherlink --desde 2026-10-31 --hasta 2026-10-31 --pisar-excel
 ```
 
 **Probar con claves reales**: `WEATHERLINK_API_KEY/SECRET` y `PHYTECH_API_KEY/SECRET` se leen de
@@ -346,9 +375,14 @@ días) y pronóstico 20 filas; al repetirla, 0 nuevas. La ETo diaria de WeatherL
 ET de Phytech (4,37/4,32, 3,65/3,61 y 4,95/4,90 mm). Suelo y planta de la API para el 27–29/10
 son idénticos a los del Excel histórico (planta solo agrega ET y lluvia). WeatherLink del
 30/10 al 01/11 contra `data_metereologica.xlsx` (144 registros): Rad y Lluvia 100 %; T, T_max,
-T_min, HR, DPV y Viento ≈ 98 %: la única diferencia es el registro que cierra a medianoche, que el
-Excel guarda como «00:00» del día que termina y la regla actual asigna al día nuevo (moviéndolo,
-coinciden al 100 %); ETo 84 % porque el 31/10 el Excel trae duplicada la ETo de las horas en punto.
+T_min, HR, DPV y Viento ≈ 98 %: la única diferencia era el registro que cierra a medianoche, que el
+Excel guarda como «00:00» del día que termina (con el corte de día actual coinciden al 100 %); ETo
+84 % porque el 31/10 el Excel trae duplicada la ETo de las horas en punto.
+
+Corrección en `riego_dev` (2026-11-08, revisión de F2): `reprocesar-weatherlink` del 30/10 al 07/11
+con el corte nuevo (5 lecturas actualizadas, 2 etiquetas viejas borradas; el 03/11 la T_min pasó
+de 21,7 a 21,1 °C), `ingestar --fuentes weatherlink` del 04 al 07/11 (trae la lectura de las 24:00
+del 07/11) y `--pisar-excel` del 31/10 (ETo 4,395 → 3,63 mm; Phytech: 3,58).
 
 ## Riego aplicado y carga de Excel (F2)
 
@@ -368,7 +402,11 @@ Código: `api/v1/endpoints/riego.py`, `services/riego_service.py` (consulta y ve
   ≤ `UPLOAD_MAX_MB` (15 MB; se rechaza por `Content-Length` y se lee con tope → 413), firma ZIP,
   ZIP legible con ≤ 1000 partes, descomprimido declarado ≤ 200 MB y relación ≤ 100 (bomba ZIP),
   cada parte `.xml`/`.rels` abierta con `defusedxml` (sin DTD, entidades ni externos: *billion
-  laughs* y XXE → 422), hoja `MOD5`, las 10 columnas de `leer_riego` y ≤ 100 000 filas. Si openpyxl
+  laughs* y XXE → 422), hoja `MOD5`, las 10 columnas de `leer_riego` y ≤ 100 000 filas. Antes de
+  pandas la hoja se recorre una vez en streaming (`defusedxml.iterparse`): corta al pasar las
+  100 000 filas (sin leer el resto) y rechaza celdas con **fórmula sin valor guardado** (archivo
+  generado por script u openpyxl y nunca abierto en Excel: pandas las leería vacías y un turno
+  regado parecería «no se regó»). Si openpyxl
   no está usando `defusedxml` la carga responde 503. El archivo se procesa en memoria y no se
   guarda: solo nombre saneado (sin carpetas ni caracteres de control), sha256 y tamaño.
 - **Vista previa**: `leer_riego` + `limpiar_ciclos(5 min, 2 m3/ha)` (lo mismo que la carga
@@ -381,6 +419,11 @@ Código: `api/v1/endpoints/riego.py`, `services/riego_service.py` (consulta y ve
 - **D7**: si el archivo trae una fecha y un turno activo del módulo no tiene filas (o solo
   aperturas fallidas), el grupo es `sin_riego` («no se regó», registro con 0 ciclos); marcado
   salvo que el vigente ya sea aplicado (deducir de una ausencia es más débil que lo guardado).
+- **Avisos** (desmarcado por defecto, el motivo va en `mensajes` y empieza con «Aviso:»): en la
+  **última fecha del archivo** (puede venir cortada si se exportó a mitad del día) ningún
+  `reemplaza_aplicado` ni `sin_riego` queda marcado; en cualquier fecha, un `reemplaza_aplicado`
+  con menos ciclos o menos m3 que el vigente tampoco. `resumen` trae `ultima_fecha_archivo` y
+  `desmarcados_por_aviso`. El usuario puede marcarlos si los revisó.
 - **Confirmar**: bloquea la carga y los vigentes del rango (`FOR UPDATE`); si pasaron 24 h desde
   la subida o cambió algún registro comparado (otra carga o edición), la carga queda **vencida** y
   responde 409 «Sube el archivo otra vez» (excepción documentada a la unidad de trabajo: ese cambio
@@ -394,7 +437,10 @@ Código: `api/v1/endpoints/riego.py`, `services/riego_service.py` (consulta y ve
   2025-04-24) contra `riego_dev` con la carga histórica ya hecha: vista previa en ~16 s (≈25 s
   por HTTP con la respuesta de 4,8 MB) → 7 089 igual, 3 reemplaza aplicado (2025-04-24, distinto
   en `data_riego_historico.xlsx`), 223 sin riego (222 por D7 y 1 solo con aperturas fallidas);
-  confirmar en ~4 s; **resubir → 7 315 igual**.
+  confirmar en ~4 s; **resubir → 7 315 igual**. Ese 2025-04-24 venía cortado (última fecha: un
+  ciclo de dos en TE03–TE05); en `riego_dev` se restauró el histórico como versión 3 y hoy la
+  vista previa los muestra como `reemplaza_aplicado` desmarcados con aviso (validación 1,4 s,
+  vista previa 12,6 s).
 
 ## Correos y tareas programadas
 
@@ -404,7 +450,7 @@ genera al enviar (en la BD su SHA-256) y el enlace es `FRONTEND_URL/restablecer#
 `PASSWORD_RESET_MINUTES`.
 
 ```bash
-.venv/Scripts/python -m app.jobs            # proceso de tareas (producción): correos, ingesta diaria
+.venv/Scripts/python -m app.jobs            # proceso de tareas (producción): correos, ingesta diaria y vigilante
 .venv/Scripts/python -m app.jobs --una-vez  # procesa la cola una vez y termina
 ```
 
@@ -446,7 +492,10 @@ gracia del refresh, vencimiento de enlaces, `hoy_lima` a las 23:30).
 | `test_auditoria_catalogo` | Filtros y permisos de auditoría, lista blanca, fundos y motivos |
 | `test_endurecimiento` | Cabeceras, producción, redacción de logs, zona horaria, `crear-admin`, tareas |
 | `test_unidad_de_trabajo` | Commit/rollback de la unidad de trabajo (endpoint y CLI), sesión compartida, servicios sin commit |
-| `test_weatherlink_conversion` | Reglas de conversión, 00:00 del día nuevo, payload, coincidencia con `data_metereologica.xlsx` en un mes real |
+| `test_weatherlink_conversion` | Reglas de conversión, corte de día (la lectura de las 24:00 en el día que termina), payload, coincidencia con `data_metereologica.xlsx` en nov-2021 (medianoche incluida) |
+| `test_ingesta` | Ingesta con APIs falsas, idempotencia, Excel protegido, errores aislados, rango a las 23:30 de Lima, una corrida en curso por fuente (carrera → 409), latido y vigilante, commit fallido, reproceso (corte anterior, `--pisar-excel`), sin claves en BD ni logs |
+| `test_integraciones` | Clientes HTTP con transporte simulado: autenticación, token de Phytech (401), reintentos, rango del día, suelo con paridad de `limpiar_suelo` |
+| `test_datos_endpoints` | Permisos, «Actualizar ahora», frescura, series, fechas extremas (422) y turnos |
 | `test_datos_campo` | Lecturas idempotentes (la API no pisa el Excel), `ambiente_diario` = riego_ml, hoy en Lima, riego por turno-día (hash, conflicto, `--reemplazar`), Historial desde la BD y respaldo del cronograma |
-| `test_riego` | Permisos por rol de `/riego` y `/riego/cargas*`, subir → marcar → confirmar → resubir (todo «igual»), reemplazos y versiones, D7, errores de la vista previa, vencimiento (24 h y registro cambiado), auditoría, Excel malicioso (*billion laughs*, XXE, DTD, bomba ZIP) y validación del archivo |
-| `test_paridad_historico` | Ida y vuelta con `ml/data/raw`: ambiente, Historial y plan idénticos a la ruta por archivos (se salta sin los archivos) |
+| `test_riego` | Permisos por rol de `/riego` y `/riego/cargas*`, subir → marcar → confirmar → resubir (todo «igual»), reemplazos y versiones, D7, avisos (última fecha, menos riego), errores de la vista previa, vencimiento (24 h y registro cambiado), auditoría, Excel malicioso (*billion laughs*, XXE, DTD, bomba ZIP), fórmulas sin valor, filas contadas en streaming y validación del archivo |
+| `test_paridad_historico` | Ida y vuelta con `ml/data/raw`: ambiente, Historial y plan idénticos a la ruta por archivos, y clima diario desde WeatherLink (nov-2021) igual al del Excel (se salta sin los archivos) |
