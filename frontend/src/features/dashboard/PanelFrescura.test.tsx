@@ -64,6 +64,7 @@ function corrida(id: number, estado: IngestaCorrida["estado"], extra: Partial<In
     desde: null,
     hasta: null,
     inicio_at: new Date().toISOString(),
+    latido_at: null,
     fin_at: null,
     duracion_ms: null,
     estado,
@@ -162,13 +163,13 @@ describe("PanelFrescura", () => {
     expect(vi.mocked(datosApi.frescura).mock.calls.length).toBeGreaterThan(llamadasFrescura);
   }, 10_000);
 
-  it("una corrida «en_curso» de hace más de 3 h (proceso muerto) no bloquea «Actualizar ahora» ni deja el sondeo activo", async () => {
-    const hace5h = new Date(Date.now() - 5 * 3600_000).toISOString();
+  it("una corrida «en_curso» sin latido hace más de 10 min no bloquea «Actualizar ahora» ni deja el sondeo activo", async () => {
+    const hace30min = new Date(Date.now() - 30 * 60_000).toISOString();
     // La colgada es la más vieja: antes ni siquiera estaba entre las 6 visibles.
-    const recientes = Array.from({ length: 7 }, (_, i) =>
+    const recientes = Array.from({ length: 25 }, (_, i) =>
       corrida(100 + i, "ok", { fuente: "phytech_planta", inicio_at: new Date(Date.now() - (i + 1) * 60_000).toISOString() }),
     );
-    vi.mocked(ingestasApi.listar).mockResolvedValue([...recientes, corrida(50, "en_curso", { inicio_at: hace5h })]);
+    vi.mocked(ingestasApi.listar).mockResolvedValue([...recientes, corrida(50, "en_curso", { inicio_at: hace30min })]);
     montar();
     const lista = await screen.findByRole("list", { name: "Últimas corridas de ingesta" });
     expect(within(lista).getByText("Sin terminar")).toBeInTheDocument();
@@ -180,6 +181,18 @@ describe("PanelFrescura", () => {
     });
     expect(vi.mocked(ingestasApi.listar).mock.calls.length).toBe(llamadas);
   }, 10_000);
+
+  it("una corrida larga con latido reciente mantiene Actualizar ahora deshabilitado", async () => {
+    vi.mocked(ingestasApi.listar).mockResolvedValue([corrida(50, "en_curso", {
+      inicio_at: new Date(Date.now() - 5 * 3600_000).toISOString(),
+      latido_at: new Date(Date.now() - 60_000).toISOString(),
+    })]);
+    montar();
+    const lista = await screen.findByRole("list", { name: "Últimas corridas de ingesta" });
+    expect(within(lista).getByText("En curso")).toBeInTheDocument();
+    expect(within(lista).queryByText("Sin terminar")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Actualizando/ })).toBeDisabled();
+  });
 
   it("en riego, la línea por turno dice solo lo que difiere: el hueco propio de TE05", async () => {
     const turno = (codigo: string, huecos: string[]) => ({
@@ -232,21 +245,23 @@ describe("cálculos de frescura e ingestas", () => {
     expect(progresoIngesta([1, 99], [corrida(1, "ok")])).toMatchObject({ completo: true });
     expect(progresoIngesta([1, 99], [corrida(1, "ok"), corrida(5, "en_curso")])).toMatchObject({ completo: false });
     expect(progresoIngesta([], [])).toMatchObject({ completo: false });
-    // Una corrida lanzada que quedó colgada (> 3 h) termina el seguimiento como error.
+    // Una corrida lanzada que quedó colgada (> 10 min sin latido) termina el seguimiento como error.
     const colgada = corrida(3, "en_curso", { inicio_at: new Date(Date.now() - 4 * 3600_000).toISOString() });
     expect(progresoIngesta([3], [colgada])).toMatchObject({ completo: true, resultado: "error" });
   });
 
-  it("una corrida «en_curso» de más de 3 h se da por colgada y no cuenta como en curso", () => {
+  it("usa el latido, el inicio como respaldo y el límite estricto de 10 minutos", () => {
     const ahora = new Date("2026-11-08T12:00:00-05:00");
-    const hace = (h: number) => new Date(ahora.getTime() - h * 3600_000).toISOString();
-    expect(corridaColgada(corrida(1, "en_curso", { inicio_at: hace(2.9) }), ahora)).toBe(false);
-    expect(corridaColgada(corrida(1, "en_curso", { inicio_at: hace(3.1) }), ahora)).toBe(true);
-    expect(corridaColgada(corrida(1, "error", { inicio_at: hace(10) }), ahora)).toBe(false);
-    expect(hayIngestaEnCurso([corrida(1, "en_curso", { inicio_at: hace(5) })], ahora)).toBe(false);
-    expect(
-      hayIngestaEnCurso([corrida(1, "en_curso", { inicio_at: hace(5) }), corrida(2, "en_curso", { inicio_at: hace(0.1) })], ahora),
-    ).toBe(true);
+    const hace = (min: number) => new Date(ahora.getTime() - min * 60_000).toISOString();
+    const viva = corrida(1, "en_curso", { inicio_at: hace(600), latido_at: hace(2) });
+    expect(corridaColgada(viva, ahora)).toBe(false);
+    expect(hayIngestaEnCurso([viva], ahora)).toBe(true);
+    expect(corridaColgada(corrida(1, "en_curso", { latido_at: hace(10) }), ahora)).toBe(false);
+    expect(corridaColgada(corrida(1, "en_curso", { latido_at: hace(10.01) }), ahora)).toBe(true);
+    expect(corridaColgada(corrida(1, "en_curso", { inicio_at: hace(10) }), ahora)).toBe(false);
+    expect(corridaColgada(corrida(1, "en_curso", { inicio_at: hace(11) }), ahora)).toBe(true);
+    expect(corridaColgada(corrida(1, "error", { latido_at: hace(11) }), ahora)).toBe(false);
+    expect(hayIngestaEnCurso([corrida(1, "en_curso", { inicio_at: hace(11) })], ahora)).toBe(false);
   });
 
   it("muestra primero las corridas en curso aunque sean viejas", () => {

@@ -38,6 +38,7 @@ def corrida_salida(corrida: IngestaCorrida, username: str | None) -> IngestaCorr
         id=corrida.id, fuente=corrida.fuente, disparo=corrida.disparo.value, usuario=username,
         fecha_programada=corrida.fecha_programada, desde=corrida.desde, hasta=corrida.hasta,
         inicio_at=corrida.inicio_at, fin_at=corrida.fin_at, duracion_ms=corrida.duracion_ms,
+        latido_at=corrida.latido_at,
         estado=corrida.estado.value, filas_nuevas=corrida.filas_nuevas or 0,
         filas_actualizadas=corrida.filas_actualizadas or 0, filas_omitidas=corrida.filas_omitidas or 0,
         conflictos=corrida.conflictos or 0, errores=corrida.errores or [],
@@ -68,5 +69,5 @@ def listar(
     limite: Annotated[int, Query(ge=1, le=MAX_LIMITE)] = 20,
     fuente: Annotated[str | None, Query(max_length=40)] = None,
 ) -> list[IngestaCorridaSalida]:
-    """Corridas más recientes primero (también las de la carga histórica y el reproceso)."""
+    """Las últimas ``limite`` corridas más todas las en curso, ordenadas por inicio descendente."""
     return [corrida_salida(c, u) for c, u in repo_ingestas.listar(db, limite=limite, fuente=fuente)]

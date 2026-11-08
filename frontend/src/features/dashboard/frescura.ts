@@ -128,24 +128,17 @@ export const TONO_ESTADO_INGESTA: Record<EstadoIngesta, TonoBadge> = {
   error: "error",
 };
 
-/**
- * Horas tras las que una corrida «en_curso» se da por interrumpida en la interfaz (el proceso murió
- * a mitad de la ingesta). El backend la cierra como error «interrumpida» cuando lleva 10 min sin
- * latido (`MINUTOS_SIN_LATIDO`), al lanzar la siguiente ingesta o con la tarea vigilante; pero
- * `GET /ingestas` no expone `latido_at`, así que aquí se usa un tope conservador desde `inicio_at`
- * (ninguna ingesta legítima dura tanto) para que «Actualizar ahora» nunca quede bloqueado.
- */
-export const HORAS_CORRIDA_COLGADA = 3;
+/** Mismo umbral que MINUTOS_SIN_LATIDO del backend; sin latido se usa el inicio. */
+export const MINUTOS_SIN_LATIDO = 10;
 
-/** true si la corrida sigue «en_curso» pero empezó hace más de `HORAS_CORRIDA_COLGADA` horas. */
-export function corridaColgada(c: Pick<IngestaCorrida, "estado" | "inicio_at">, ahora: Date = new Date()): boolean {
+export function corridaColgada(c: Pick<IngestaCorrida, "estado" | "inicio_at" | "latido_at">, ahora: Date = new Date()): boolean {
   if (c.estado !== "en_curso") return false;
-  const inicio = Date.parse(c.inicio_at);
-  return Number.isFinite(inicio) && ahora.getTime() - inicio > HORAS_CORRIDA_COLGADA * 3_600_000;
+  const ultimoLatido = Date.parse(c.latido_at ?? c.inicio_at);
+  return Number.isFinite(ultimoLatido) && ahora.getTime() - ultimoLatido > MINUTOS_SIN_LATIDO * 60_000;
 }
 
 /** Corrida realmente en curso: «en_curso» y no colgada. */
-export function corridaActiva(c: Pick<IngestaCorrida, "estado" | "inicio_at">, ahora: Date = new Date()): boolean {
+export function corridaActiva(c: Pick<IngestaCorrida, "estado" | "inicio_at" | "latido_at">, ahora: Date = new Date()): boolean {
   return c.estado === "en_curso" && !corridaColgada(c, ahora);
 }
 

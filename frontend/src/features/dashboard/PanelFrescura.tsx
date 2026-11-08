@@ -26,7 +26,7 @@ import {
   esInformativa,
   etiquetaDisparo,
   formatearDuracionMs,
-  HORAS_CORRIDA_COLGADA,
+  MINUTOS_SIN_LATIDO,
   hayIngestaEnCurso,
   nombreFuente,
   ordenarFuentes,
@@ -130,7 +130,7 @@ function FilaCorrida({ c, ahora }: { c: IngestaCorrida; ahora: Date }) {
       )}
       {colgada && (
         <span className="text-xs text-warn-tx">
-          Lleva más de {HORAS_CORRIDA_COLGADA} horas sin terminar. Se cerrará al usar «Actualizar ahora».
+          Lleva más de {MINUTOS_SIN_LATIDO} minutos sin latido. Se cerrará al usar «Actualizar ahora».
         </span>
       )}
       {error && (
@@ -166,7 +166,7 @@ export function PanelFrescura() {
     queryKey: claveDatos.ingestas,
     queryFn: ({ signal }) => ingestasApi.listar(20, signal),
     enabled: verCorridas,
-    // Sondea solo mientras haya corridas activas: una «en_curso» de hace más de 3 h (proceso muerto)
+    // Sondea solo mientras haya corridas activas: una «en_curso» con más de 10 min sin latido
     // no cuenta, así el panel no queda consultando sin fin ni con el botón bloqueado.
     refetchInterval: (q) => (lanzadas.length > 0 || hayIngestaEnCurso(q.state.data) ? INTERVALO_SONDEO_MS : false),
   });

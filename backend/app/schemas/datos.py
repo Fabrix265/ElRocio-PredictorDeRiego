@@ -58,6 +58,7 @@ class IngestaCorridaSalida(BaseModel):
     desde: dt.date | None = None
     hasta: dt.date | None = None
     inicio_at: dt.datetime
+    latido_at: dt.datetime | None = None
     fin_at: dt.datetime | None = None
     duracion_ms: int | None = None
     estado: str

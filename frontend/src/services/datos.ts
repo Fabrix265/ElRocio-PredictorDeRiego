@@ -6,7 +6,7 @@
  * - POST /ingestas/ejecutar {fuentes?, desde?, hasta?}  → 202 IngestaCorrida[] (A E)
  *        409 si alguna fuente ya está en curso · 422 fuente desconocida o fechas inválidas
  * - GET  /ingestas?limite&fuente                        → 200 IngestaCorrida[] (A E S), más recientes
- *        primero; incluye las corridas de la carga histórica y del reproceso. Sin secretos.
+ *        primero; agrega todas las en curso aunque excedan el límite. Incluye histórico y reproceso. Sin secretos.
  */
 import { api } from "./httpClient";
 
@@ -70,6 +70,7 @@ export interface IngestaCorrida {
   desde: string | null;
   hasta: string | null;
   inicio_at: string;
+  latido_at: string | null;
   fin_at: string | null;
   duracion_ms: number | null;
   estado: EstadoIngesta;

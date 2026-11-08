@@ -104,12 +104,16 @@ def marcar_latido(db: Session, corrida_id: int, ahora: dt.datetime) -> bool:
 
 
 def listar(db: Session, *, limite: int, fuente: str | None = None) -> list[tuple[IngestaCorrida, str | None]]:
-    """Corridas más recientes primero, con el username de quien la lanzó."""
+    """Las últimas ``limite`` más todas las en curso (sin duplicados), con su username."""
+    recientes = select(IngestaCorrida.id)
+    if fuente:
+        recientes = recientes.where(IngestaCorrida.fuente == fuente)
+    recientes = recientes.order_by(IngestaCorrida.inicio_at.desc(), IngestaCorrida.id.desc()).limit(limite)
     consulta = (
         select(IngestaCorrida, Usuario.username)
         .outerjoin(Usuario, Usuario.id == IngestaCorrida.usuario_id)
+        .where(IngestaCorrida.id.in_(recientes) | (IngestaCorrida.estado == EstadoIngesta.en_curso))
         .order_by(IngestaCorrida.inicio_at.desc(), IngestaCorrida.id.desc())
-        .limit(limite)
     )
     if fuente:
         consulta = consulta.where(IngestaCorrida.fuente == fuente)

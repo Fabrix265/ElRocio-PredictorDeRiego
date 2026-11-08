@@ -140,7 +140,7 @@ def test_listar_ingestas_sin_secretos_y_mas_recientes_primero(client: TestClient
     assert cuerpo[1]["errores"] == [{"tipo": "credenciales", "status_code": 401, "endpoint": "/auth/api-token",
                                      "mensaje": "Phytech rechazó las credenciales"}]
     assert set(cuerpo[0]) == {"id", "fuente", "disparo", "usuario", "fecha_programada", "desde", "hasta",
-                              "inicio_at", "fin_at", "duracion_ms", "estado", "filas_nuevas",
+                              "inicio_at", "latido_at", "fin_at", "duracion_ms", "estado", "filas_nuevas",
                               "filas_actualizadas", "filas_omitidas", "conflictos", "errores"}
     solo = client.get(f"{API}/ingestas", params={"fuente": "weatherlink", "limite": 1}, headers=auth("admin"))
     assert [c["id"] for c in solo.json()] == [nueva.id]
@@ -278,3 +278,30 @@ def test_turnos_con_caudal_reciente(client: TestClient, auth, db, modulo, turnos
     assert primero["area_ha"] == te01.area_ha and primero["valvula_controlador"] == te01.valvula_controlador
     assert cuerpo[1]["caudal_m3h"] is None and cuerpo[1]["ciclos_considerados"] == 0
     assert client.get(f"{API}/modulos/999999/turnos", headers=auth("admin")).status_code == 404
+
+
+def test_ingestas_incluye_en_curso_fuera_del_limite_y_su_latido(client: TestClient, auth, db):
+    inicio = dt.datetime(2026, 11, 7, 10, tzinfo=dt.UTC)
+    colgada = IngestaCorrida(fuente="weatherlink", disparo=DisparoIngesta.manual,
+                            inicio_at=inicio, latido_at=inicio + dt.timedelta(minutes=1),
+                            estado=EstadoIngesta.en_curso)
+    sin_latido = IngestaCorrida(fuente="ndvi", disparo=DisparoIngesta.manual,
+                               inicio_at=inicio, estado=EstadoIngesta.en_curso)
+    recientes = [IngestaCorrida(fuente="weatherlink", disparo=DisparoIngesta.manual,
+                               inicio_at=inicio + dt.timedelta(hours=i + 1), estado=EstadoIngesta.ok)
+                 for i in range(25)]
+    db.add_all([colgada, sin_latido, *recientes])
+    db.commit()
+    cabeceras = auth("admin")
+    cuerpo = client.get(f"{API}/ingestas", headers=cabeceras).json()
+    ids = [c["id"] for c in cuerpo]
+    assert len(ids) == len(set(ids)) == 22
+    assert set(ids) == {c.id for c in recientes[-20:]} | {colgada.id, sin_latido.id}
+    salida = next(c for c in cuerpo if c["id"] == colgada.id)
+    assert dt.datetime.fromisoformat(salida["latido_at"]) == colgada.latido_at
+    assert next(c for c in cuerpo if c["id"] == sin_latido.id)["latido_at"] is None
+    filtradas = client.get(f"{API}/ingestas", headers=cabeceras,
+                          params={"fuente": "weatherlink", "limite": 1}).json()
+    assert [c["id"] for c in filtradas] == [recientes[-1].id, colgada.id]
+    todas = client.get(f"{API}/ingestas", headers=cabeceras, params={"limite": 200}).json()
+    assert len(todas) == len({c["id"] for c in todas}) == 27
