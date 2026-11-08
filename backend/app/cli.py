@@ -15,14 +15,13 @@ import argparse
 import getpass
 import os
 import sys
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 
 from sqlalchemy import text
 
 from app.core.config import settings
 from app.db.seguridad import ROL_APP, verificar_seguridad
-from app.db.session import crear_engine, nueva_sesion
+from app.db.session import crear_engine, unidad_de_trabajo
 
 LARGO_MINIMO_PASSWORD_ROL = 16
 
@@ -146,13 +145,9 @@ def _args_crear_admin(p: argparse.ArgumentParser) -> None:
                    help="Obliga a cambiar la contraseña en el primer ingreso")
 
 
-@contextmanager
-def _sesion_app() -> Iterator:
-    db = nueva_sesion()
-    try:
-        yield db
-    finally:
-        db.close()
+def _sesion_app():
+    """Unidad de trabajo de la CLI (commit al terminar sin error)."""
+    return unidad_de_trabajo()
 
 
 def _pedir(valor: str | None, etiqueta: str) -> str:

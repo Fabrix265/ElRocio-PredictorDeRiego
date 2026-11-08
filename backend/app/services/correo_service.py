@@ -7,6 +7,11 @@
   con ``bloqueado_hasta`` (si el proceso muere, otro lo retoma al vencer ese plazo).
 - :func:`procesar_pendientes` resuelve destinatarios, arma el mensaje y lo envía. Si falla,
   reintenta con espera creciente; al quinto intento queda en ``error``.
+
+Transacciones: :func:`encolar` solo agrega la fila (confirma quien llama, junto con la acción que
+la origina). El procesamiento de la cola es la **excepción documentada** a la convención del
+backend: :func:`reclamar` confirma el reclamo antes de enviar y cada envío
+(:func:`procesar_uno`) es su propia transacción, para que un fallo no deshaga los demás.
 """
 
 from __future__ import annotations
@@ -19,7 +24,6 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 from typing import Any
 
-from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -30,6 +34,8 @@ from app.emails import renderizar
 from app.emails.smtp import Mailer, remitente
 from app.models import NotificacionCorreo, PasswordReset, Usuario
 from app.models.enums import EstadoCorreo, RolUsuario
+from app.repositories import correos as repo_correos
+from app.repositories import sesiones as repo_sesiones
 from app.repositories import usuarios as repo_usuarios
 
 logger = logging.getLogger(__name__)
@@ -70,30 +76,8 @@ def encolar(
 def reclamar(db: Session, limite: int = LOTE_POR_DEFECTO) -> list[int]:
     """Marca como ``enviando`` un lote listo para enviar y devuelve sus IDs (hace commit)."""
     ahora = ahora_utc()
-    candidatos = (
-        select(NotificacionCorreo.id)
-        .where(
-            or_(
-                (NotificacionCorreo.estado == EstadoCorreo.pendiente)
-                & (NotificacionCorreo.proximo_intento_at <= ahora),
-                (NotificacionCorreo.estado == EstadoCorreo.enviando)
-                & (NotificacionCorreo.bloqueado_hasta < ahora),
-            )
-        )
-        .order_by(NotificacionCorreo.proximo_intento_at, NotificacionCorreo.id)
-        .limit(limite)
-        .with_for_update(skip_locked=True)
-    )
-    ids = list(
-        db.scalars(
-            update(NotificacionCorreo)
-            .where(NotificacionCorreo.id.in_(candidatos.scalar_subquery()))
-            .values(estado=EstadoCorreo.enviando, bloqueado_hasta=ahora + BLOQUEO_ENVIO)
-            .returning(NotificacionCorreo.id)
-            .execution_options(synchronize_session=False)
-        )
-    )
-    db.commit()
+    ids = repo_correos.reclamar_lote(db, ahora, ahora + BLOQUEO_ENVIO, limite)
+    db.commit()  # excepción documentada: el reclamo se confirma antes de enviar
     return sorted(ids)
 
 
@@ -116,12 +100,7 @@ def _preparar_recuperacion(db: Session, notificacion: NotificacionCorreo) -> Cor
         return None
     ahora = ahora_utc()
     # Al crear un enlace nuevo se invalidan los anteriores sin usar.
-    db.execute(
-        update(PasswordReset)
-        .where(PasswordReset.usuario_id == usuario.id, PasswordReset.usado_at.is_(None))
-        .values(usado_at=ahora)
-        .execution_options(synchronize_session=False)
-    )
+    repo_sesiones.invalidar_resets(db, usuario.id, ahora)
     token = generar_token_opaco()
     minutos = settings.password_reset_minutes
     db.add(
@@ -201,7 +180,7 @@ class ResultadoEnvio:
 
 
 def _registrar_fallo(db: Session, notificacion_id: int, error: Exception) -> str:
-    notificacion = db.get(NotificacionCorreo, notificacion_id, populate_existing=True)
+    notificacion = repo_correos.por_id_actualizado(db, notificacion_id)
     notificacion.intentos = (notificacion.intentos or 0) + 1
     notificacion.ultimo_error = redactar(f"{type(error).__name__}: {error}")[:500]
     notificacion.bloqueado_hasta = None
@@ -221,7 +200,7 @@ def procesar_uno(db: Session, notificacion_id: int, mailer: Mailer) -> str:
     """Envía una notificación reclamada. Devuelve enviado / sin_destinatarios / reintento / error."""
     try:
         with db.begin_nested():  # el token de recuperación solo queda si el envío funcionó
-            notificacion = db.get(NotificacionCorreo, notificacion_id, populate_existing=True)
+            notificacion = repo_correos.por_id_actualizado(db, notificacion_id)
             if notificacion is None or notificacion.estado != EstadoCorreo.enviando:
                 resultado = "omitido"  # lo tomó otro proceso o ya no está en envío
             else:

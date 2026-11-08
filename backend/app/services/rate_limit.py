@@ -17,6 +17,10 @@ puede escribir su contraseña en el campo usuario); el conteo funciona igual.
 
 Se cuenta en la BD (no en memoria) para que valga con varios procesos y tras reinicios. Las horas
 salen del reloj de la app (``ahora_utc``), igual que el resto de reglas de vencimiento.
+
+Transacciones: :func:`reservar` es la **excepción documentada** a la convención del backend (los
+servicios hacen ``flush`` y confirma quien llama): hace commit para que el intento sea visible a
+las demás peticiones antes de contar, y lo vuelve a hacer al borrar un intento rechazado.
 """
 
 from __future__ import annotations
@@ -26,7 +30,6 @@ import hmac
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -34,6 +37,7 @@ from app.core.errores import LimiteExcedido
 from app.core.tiempo import ahora_utc
 from app.models import IntentoLogin
 from app.models.enums import TipoIntento
+from app.repositories import intentos as repo_intentos
 
 
 @dataclass(frozen=True)
@@ -81,16 +85,6 @@ def clave_usuario(valor: str | None) -> str | None:
     return hmac.new(llave, normalizado.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def _ultimo_exito(db: Session, tipo: TipoIntento, usuario: str) -> datetime | None:
-    return db.scalar(
-        select(func.max(IntentoLogin.created_at)).where(
-            IntentoLogin.tipo == tipo,
-            IntentoLogin.username_intentado == usuario,
-            IntentoLogin.exito.is_(True),
-        )
-    )
-
-
 def _bloqueado_hasta(
     db: Session, tipo: TipoIntento, regla: Regla, usuario: str | None, ip: str | None,
     ahora: datetime, excluir_id: int | None = None,
@@ -104,7 +98,7 @@ def _bloqueado_hasta(
     if regla.por_usuario:
         condiciones.append(IntentoLogin.username_intentado == usuario)
         if regla.solo_fallos:
-            exito = _ultimo_exito(db, tipo, usuario)
+            exito = repo_intentos.ultimo_exito(db, tipo, usuario)
             if exito is not None:
                 condiciones.append(IntentoLogin.created_at > exito)
     if regla.por_ip:
@@ -113,13 +107,7 @@ def _bloqueado_hasta(
         condiciones.append(IntentoLogin.exito.is_(False))
     # El intento n.º `maximo` más reciente dentro de la ventana: si existe, se llegó al límite
     # y el bloqueo dura hasta que salga de la ventana.
-    enesimo = db.scalar(
-        select(IntentoLogin.created_at)
-        .where(*condiciones)
-        .order_by(IntentoLogin.created_at.desc())
-        .offset(regla.maximo - 1)
-        .limit(1)
-    )
+    enesimo = repo_intentos.enesimo_reciente(db, condiciones, regla.maximo)
     return None if enesimo is None else enesimo + regla.ventana
 
 
@@ -167,7 +155,7 @@ def reservar(
     db.commit()  # visible para las demás peticiones antes de contar
     segundos = _segundos_bloqueo(db, tipo, intento.username_intentado, ip, excluir_id=intento.id)
     if segundos is not None:
-        db.execute(delete(IntentoLogin).where(IntentoLogin.id == intento.id))
+        repo_intentos.borrar(db, intento.id)
         db.commit()
         raise LimiteExcedido(segundos)
     return intento
@@ -175,17 +163,9 @@ def reservar(
 
 def marcar_exito(db: Session, intento: IntentoLogin) -> None:
     """El intento reservado salió bien (el commit lo hace quien llama)."""
-    db.execute(
-        update(IntentoLogin)
-        .where(IntentoLogin.id == intento.id)
-        .values(exito=True)
-        .execution_options(synchronize_session=False)
-    )
+    repo_intentos.marcar_exito(db, intento.id)
 
 
 def limpiar_antiguos(db: Session, *, dias: int = 30) -> int:
     """Borra intentos con más de ``dias`` (mantenimiento diario)."""
-    resultado = db.execute(
-        delete(IntentoLogin).where(IntentoLogin.created_at < ahora_utc() - timedelta(days=dias))
-    )
-    return resultado.rowcount or 0
+    return repo_intentos.borrar_anteriores(db, ahora_utc() - timedelta(days=dias))

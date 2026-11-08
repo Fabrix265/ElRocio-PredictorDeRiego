@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Annotated
 
 import jwt
@@ -32,7 +32,25 @@ MENSAJE_SOLICITUD_NO_PERMITIDA = "Solicitud no permitida"
 
 _bearer = HTTPBearer(auto_error=False)
 
-DbSesion = Annotated[Session, Depends(get_db)]
+
+
+def unidad_de_trabajo(db: Annotated[Session, Depends(get_db)]) -> Iterator[Session]:
+    """Unidad de trabajo de cada petición: los servicios hacen ``flush`` y aquí se hace ``commit``
+    si el endpoint termina sin error (``rollback`` si lanza una excepción).
+
+    Con ``scope="function"`` el commit ocurre **antes** de enviar la respuesta: si falla, el
+    cliente recibe el error y nunca ve como hecho algo que no quedó guardado.
+    """
+    try:
+        yield db
+    except BaseException:
+        db.rollback()
+        raise
+    else:
+        db.commit()
+
+
+DbSesion = Annotated[Session, Depends(unidad_de_trabajo, scope="function")]
 
 # --- Parámetros acotados ------------------------------------------------------
 # Los enteros sin tope desbordan bigint en Postgres (500). Usar estos tipos en todos los IDs y

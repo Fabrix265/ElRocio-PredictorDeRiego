@@ -3,6 +3,9 @@
 Reglas: un admin no puede desactivarse a sí mismo y siempre debe quedar al menos un admin activo.
 Desactivar, cambiar el rol o asignar una contraseña temporal invalida de inmediato los accesos
 del usuario (``token_version + 1`` y revocación de sus sesiones).
+
+Transacciones: las funciones hacen ``flush``; el commit lo hace quien llama (la unidad de trabajo
+del endpoint o de la CLI), que también hace rollback si se lanza un error.
 """
 
 from __future__ import annotations
@@ -85,7 +88,7 @@ def crear(
         db.flush()
     except IntegrityError:
         # Carrera con otra alta simultánea: los índices únicos (lower) tienen la última palabra.
-        db.rollback()
+        # La unidad de trabajo de quien llama deshace la transacción.
         raise Conflicto("Ya existe un usuario con ese nombre de usuario o correo.") from None
     auditoria.registrar(
         db,
@@ -97,7 +100,7 @@ def crear(
         detalle={"despues": auditoria.instantanea_usuario(usuario)},
         contexto=contexto,
     )
-    db.commit()
+    db.flush()
     return usuario
 
 
@@ -172,9 +175,7 @@ def editar(
     try:
         db.flush()
     except IntegrityError:
-        db.rollback()
         raise Conflicto(MENSAJE_CORREO_DUPLICADO) from None
-    db.commit()
     return usuario
 
 
@@ -196,5 +197,5 @@ def asignar_password_temporal(
         detalle=auditoria.diferencias(antes, auditoria.instantanea_usuario(usuario)),
         contexto=contexto,
     )
-    db.commit()
+    db.flush()
     return usuario

@@ -6,7 +6,7 @@ Especificación: [`docs/propuesta_mvp.md`](../docs/propuesta_mvp.md).
 ```text
 app/
   main.py            create_app: CORS, cabeceras de seguridad, manejo de errores, routers, lifespan
-  api/deps.py        get_db, usuario_actual (JWT + BD), usuario_habilitado, requiere_rol(...)
+  api/deps.py        DbSesion (unidad de trabajo), usuario_actual (JWT + BD), requiere_rol(...)
   api/v1/endpoints/  health, auth, usuarios, auditoria, catalogo
   core/              config, security (argon2id, JWT), tiempo (hoy_lima), logging (redacción),
                      middleware (cabeceras), errores (mensajes en español)
@@ -17,6 +17,19 @@ app/
   jobs/              APScheduler: cola de correos y mantenimiento (python -m app.jobs)
   cli.py             configurar-rol-app, verificar-seguridad-bd, crear-admin
 ```
+
+### Convención de transacciones y capas (desde F2)
+
+- **Servicios** (`services/`): reglas y permisos; hacen `flush`, **nunca** `commit`.
+- **Quien llama confirma**: en los endpoints, la dependencia `DbSesion`
+  (`api/deps.unidad_de_trabajo`, `scope="function"`) hace `commit` cuando el endpoint termina
+  sin error, *antes* de enviar la respuesta, y `rollback` si lanza una excepción. La CLI y las
+  tareas usan `with unidad_de_trabajo() as db:` (`db/session.py`).
+- **Excepciones documentadas** (lo que debe persistir aunque la operación termine en error):
+  `rate_limit.reservar` (el intento se ve antes de contar), la auditoría del login o cambio de
+  contraseña fallidos, la revocación de una familia de refresh por reuso, y el procesamiento de la
+  cola de correos (reclamo confirmado antes de enviar; cada envío es su propia transacción).
+- **Consultas** en `repositories/` (SQLAlchemy); los servicios no arman `select`/`update`.
 
 ## Instalación (Windows, Python 3.11.9)
 
@@ -244,3 +257,4 @@ gracia del refresh, vencimiento de enlaces, `hoy_lima` a las 23:30).
 | `test_usuarios` | Permisos, alta, edición, último admin, revocación inmediata, contraseña temporal |
 | `test_auditoria_catalogo` | Filtros y permisos de auditoría, lista blanca, fundos y motivos |
 | `test_endurecimiento` | Cabeceras, producción, redacción de logs, zona horaria, `crear-admin`, tareas |
+| `test_unidad_de_trabajo` | Commit/rollback de la unidad de trabajo (endpoint y CLI), sesión compartida, servicios sin commit |
