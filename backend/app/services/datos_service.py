@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.errores import DatosInvalidos, NoEncontrado
-from app.core.tiempo import hoy_lima
+from app.core.tiempo import fuera_de_limites, hoy_lima, mensaje_fuera_de_limites
 from app.models import Modulo
 from app.models.enums import EstadoRiego
 from app.repositories import datos_series as repo
@@ -53,6 +53,12 @@ def modulo_o_404(db: Session, modulo_id: int) -> Modulo:
     if modulo is None or not modulo.activo:
         raise NoEncontrado("Módulo no encontrado")
     return modulo
+
+
+def validar_fechas(*fechas: dt.date | None) -> None:
+    """422 si alguna fecha pedida está fuera de los límites (``app.core.tiempo``)."""
+    if fuera_de_limites(*fechas) is not None:
+        raise DatosInvalidos(mensaje_fuera_de_limites())
 
 
 def _dias(desde: dt.date, hasta: dt.date) -> list[dt.date]:
@@ -108,6 +114,7 @@ def _ambiente(db: Session, fundo_id: int, fuente: str, ventana: list[dt.date],
 
 def frescura(db: Session, modulo_id: int, fecha: dt.date | None = None,
              dias: int = DIAS_FRESCURA) -> FrescuraSalida:
+    validar_fechas(fecha)
     modulo = modulo_o_404(db, modulo_id)
     fecha = fecha or hoy_lima()
     referencia = fecha - dt.timedelta(days=1)
@@ -136,6 +143,7 @@ def frescura(db: Session, modulo_id: int, fecha: dt.date | None = None,
 
 def rango_serie(desde: dt.date | None, hasta: dt.date | None, maximo: int) -> tuple[dt.date, dt.date]:
     """Por defecto los últimos 14 días cerrados."""
+    validar_fechas(desde, hasta)
     hasta = hasta or (hoy_lima() - dt.timedelta(days=1))
     desde = desde or (hasta - dt.timedelta(days=DIAS_SERIE - 1))
     if desde > hasta:

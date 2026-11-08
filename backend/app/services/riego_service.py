@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.errores import DatosInvalidos, NoEncontrado
-from app.core.tiempo import hoy_lima
+from app.core.tiempo import fuera_de_limites, hoy_lima, mensaje_fuera_de_limites
 from app.models import Modulo, RiegoRegistro, Turno
 from app.repositories import riego as repo
 
@@ -22,6 +22,8 @@ MAX_DIAS_RANGO = 366
 
 def rango(desde: dt.date | None, hasta: dt.date | None) -> tuple[dt.date, dt.date]:
     """Rango inclusivo; por defecto los últimos 14 días hasta hoy (Lima)."""
+    if fuera_de_limites(desde, hasta) is not None:
+        raise DatosInvalidos(mensaje_fuera_de_limites())
     hasta = hasta or hoy_lima()
     desde = desde or hasta - dt.timedelta(days=DIAS_POR_DEFECTO - 1)
     if desde > hasta:

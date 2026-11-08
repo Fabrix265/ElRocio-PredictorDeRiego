@@ -115,6 +115,8 @@ def test_actualizar_ahora_crea_corridas_y_las_lanza_en_segundo_plano(client: Tes
     {"desde": "2026-11-07", "hasta": "2026-11-01"},
     {"desde": "2026-01-01", "hasta": "2026-11-07"},  # más de 62 días
     {"fuentes": ["weatherlink"], "api_key": "x"},
+    {"desde": "0001-01-01", "hasta": "0001-01-02"},  # antes de los datos: llamadas absurdas
+    {"desde": "2016-12-31", "hasta": "2017-01-01"},
 ])
 def test_actualizar_ahora_valida_la_peticion(client: TestClient, auth, monkeypatch, cuerpo):
     monkeypatch.setattr(ingesta_service, "ejecutar_en_segundo_plano", lambda ids: None)
@@ -234,6 +236,21 @@ def test_series_por_defecto_ultimos_14_dias_y_resoluciones(client: TestClient, a
     assert pronostico["capturado_fecha"] == "2026-11-08" and pronostico["puntos"][0]["t_max"] == 29.0
     anterior = client.get(f"{API}/datos/pronostico", params={"capturado": "2026-11-07"}, headers=cabeceras).json()
     assert anterior["puntos"][0]["t_max"] == 27.0
+
+
+@pytest.mark.parametrize("ruta, params", [
+    ("/datos/frescura", {"fecha": "0001-01-01"}),
+    ("/datos/frescura", {"fecha": "9999-12-31"}),
+    ("/datos/clima", {"hasta": "0001-01-05"}),
+    ("/datos/clima", {"desde": "9999-12-30", "hasta": "9999-12-31"}),
+    ("/datos/suelo", {"desde": "0001-01-01", "hasta": "0001-01-02", "resolucion": "horaria"}),
+    ("/riego", {"hasta": "0001-01-01"}),
+    ("/riego", {"desde": "9999-12-31", "hasta": "9999-12-31"}),
+])
+def test_fechas_extremas_dan_422_y_no_500(client: TestClient, auth, modulo, ruta, params):
+    respuesta = client.get(f"{API}{ruta}", params={"modulo_id": modulo.id, **params}, headers=auth("admin"))
+    assert respuesta.status_code == 422, respuesta.text
+    assert "2017-01-01" in str(respuesta.json()["detail"])
 
 
 def test_series_validan_el_rango(client: TestClient, auth):

@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.errores import Conflicto, DatosInvalidos
 from app.core.logging import redactar
-from app.core.tiempo import ahora_utc, hoy_lima
+from app.core.tiempo import FECHA_MINIMA_DATOS, ahora_utc, hoy_lima
 from app.db.session import unidad_de_trabajo
 from app.integraciones.http import ErrorIntegracion, Llamada, TipoError
 from app.integraciones.phytech import adaptador as phytech_adaptador
@@ -435,11 +435,14 @@ def validar_rango(desde: dt.date | None, hasta: dt.date | None, hoy: dt.date, *,
                   maximo: int | None = None) -> tuple[dt.date | None, dt.date | None]:
     """Rango pedido a mano. Sin fechas: ``(None, None)`` (rango automático de cada fuente). Con
     solo ``hasta`` se pide ese día; con solo ``desde``, hasta ayer. Debe cumplir
-    ``desde <= hasta < hoy`` y, si hay ``maximo``, no superar esa cantidad de días."""
+    ``FECHA_MINIMA_DATOS <= desde <= hasta < hoy`` y, si hay ``maximo``, no superar esa cantidad
+    de días (las APIs no tienen datos antes de 2017: un año 0001 solo daría llamadas absurdas)."""
     if desde is None and hasta is None:
         return None, None
     hasta = hasta or hoy - dt.timedelta(days=1)
     desde = desde or hasta
+    if desde < FECHA_MINIMA_DATOS:
+        raise ValueError(f"«desde» no puede ser anterior a {FECHA_MINIMA_DATOS.isoformat()}")
     if desde > hasta or hasta >= hoy:
         raise ValueError("El rango debe cumplir desde <= hasta < hoy (hora de Lima)")
     if maximo is not None and (hasta - desde).days + 1 > maximo:
@@ -688,6 +691,8 @@ def reprocesar_weatherlink(
     WeatherLink no se tocan."""
     if desde > hasta:
         raise ValueError("desde debe ser anterior o igual a hasta")
+    if desde < FECHA_MINIMA_DATOS:
+        raise ValueError(f"desde no puede ser anterior a {FECHA_MINIMA_DATOS.isoformat()}")
     if pisar_excel and (hasta - desde).days + 1 > MAX_DIAS_PISAR_EXCEL:
         raise ValueError(f"Con --pisar-excel el rango no puede superar {MAX_DIAS_PISAR_EXCEL} días")
     inicio = time.monotonic()
