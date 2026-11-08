@@ -79,9 +79,11 @@ def _dias(desde: dt.date, hasta: dt.date) -> list[dt.date]:
     return [desde + dt.timedelta(days=i) for i in range((hasta - desde).days + 1)]
 
 
-def hora_suelo(humedad: float | None) -> dict[str, Any]:
+def hora_suelo(humedad: float | None, *, temp: float | None = None) -> dict[str, Any]:
+    """Una hora de ``SoilHourlyData``. Sin ``humedad``: hora de relleno (todo ``null``) o, con
+    ``temp``, una hora que solo trae temperatura."""
     if humedad is None:
-        return {p: {"temp": None, "moisture": None, "pressure": None} for p in ("15", "30", "45", "60", "75", "90")} | {
+        return {p: {"temp": temp, "moisture": None, "pressure": None} for p in ("15", "30", "45", "60", "75", "90")} | {
             "rootZone": {"moisture": None, "saturation": None, "stressline": None, "rootZoneNormalized": None}}
     capas = {p: {"temp": 26.5, "moisture": humedad - i, "pressure": None}
              for i, p in enumerate(("15", "30", "45", "60", "75", "90"))}

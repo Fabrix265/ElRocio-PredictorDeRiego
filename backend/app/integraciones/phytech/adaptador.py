@@ -5,9 +5,13 @@ Excel y ``riego_ml.sources.phytech_crudo`` lo limpiaba): ``aplanar``/``recorrer`
 de ``descargar_phytech.py`` y la limpieza es la de ``riego_ml`` (``limpiar_suelo``,
 ``limpiar_planta``), sin cambiar reglas. Lo único propio del adaptador:
 
-- Suelo: la API devuelve las 24 h de cada día aunque no haya lectura (con ``null``). Una hora
-  cuenta como dato solo si trae **alguna humedad** (H8); las demás se descartan antes de
-  ``limpiar_suelo`` y quedan como hueco (``hay_dato = false``) dentro de la rejilla horaria.
+- Suelo: la API puede devolver horas de relleno sin ninguna lectura (todo ``null``). Esas se
+  descartan antes de ``limpiar_suelo`` y quedan como hueco (``hay_dato = false``) dentro de la
+  rejilla horaria. Una hora con **alguna medición** (humedad, temperatura, presión o zona
+  radicular) se conserva aunque no traiga humedad, como en la ruta por archivos
+  (``data_phytech.xlsx``: ``limpiar_suelo`` marca ``hay_dato`` toda fila presente), para que
+  ``suelo_horas`` y ``tiene_suelo`` coincidan con el entrenamiento. Esto ajusta la regla de H8
+  (antes: solo horas con humedad).
 - Planta: ``limpiar_planta`` no conserva ET ni lluvia; se agregan como ``et_mm`` y ``lluvia_mm``.
 - Las horas de Phytech ya vienen en hora local (``PHYTECH_HORAS_EN_HORA_LOCAL = True`` en
   ``riego_ml.settings``).
@@ -92,7 +96,7 @@ def _numericas(df: pd.DataFrame, columnas: Iterable[str]) -> None:
 
 def suelo_crudo(payloads: Iterable[Any], plot_id: int) -> tuple[pd.DataFrame, int]:
     """``SoilHourlyData`` -> filas como ``SoilHourlyData_*.xlsx`` (con ``datetime_local``), solo
-    las horas con alguna humedad; y cuántas horas se descartaron por venir sin humedad."""
+    las horas con alguna medición; y cuántas horas se descartaron por venir sin ninguna."""
     df = _tabla(payloads, NIVELES_SUELO, plot_id)
     if df.empty:
         return df, 0
@@ -103,17 +107,18 @@ def suelo_crudo(payloads: Iterable[Any], plot_id: int) -> tuple[pd.DataFrame, in
         df["date"].astype(str) + " " + df["hour"].astype(str), errors="coerce"
     )
     df = df.dropna(subset=["datetime_local"])
-    con_humedad = df[COLUMNAS_HUMEDAD].notna().any(axis=1)
-    return df[con_humedad].reset_index(drop=True), int((~con_humedad).sum())
+    con_medicion = df[list(dict.fromkeys([*medidas, *COLUMNAS_HUMEDAD, *COLUMNAS_ZONA]))].notna().any(axis=1)
+    return df[con_medicion].reset_index(drop=True), int((~con_medicion).sum())
 
 
 def suelo_horario(payloads: list[Any], plot_id: int, fundo: str) -> tuple[pd.DataFrame, int]:
-    """Hoja ``Suelo_horario`` (salida de ``limpiar_suelo``) y cuántas horas llegaron sin humedad."""
-    crudo, sin_humedad = suelo_crudo(payloads, plot_id)
+    """Hoja ``Suelo_horario`` (salida de ``limpiar_suelo``) y cuántas horas llegaron sin ninguna
+    medición."""
+    crudo, sin_medicion = suelo_crudo(payloads, plot_id)
     if crudo.empty:
-        return pd.DataFrame(), sin_humedad
+        return pd.DataFrame(), sin_medicion
     horario, _ = limpiar_suelo(crudo, fundo, {})
-    return horario, sin_humedad
+    return horario, sin_medicion
 
 
 # --- Planta ---------------------------------------------------------------------

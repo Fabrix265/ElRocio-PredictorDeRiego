@@ -8,6 +8,7 @@ import datetime as dt
 import logging
 
 import httpx
+import pandas as pd
 import pytest
 
 from app.integraciones.http import ErrorIntegracion, Reintentos, TipoError, ruta_sin_query
@@ -241,17 +242,45 @@ def test_tramos_respetan_el_maximo_por_llamada():
         cliente.suelo_horario(12537, dt.date(2026, 10, 1), dt.date(2026, 10, 8))  # 8 días > 7
 
 
-def test_suelo_descarta_horas_sin_humedad_y_filtra_el_plot():
+def test_suelo_descarta_horas_sin_ninguna_medicion_y_filtra_el_plot():
     apis = ApisFalsas(humedad=lambda _d, h: None if 10 <= h < 14 else 30.0)
     with apis.phytech() as cliente:
         llamada = cliente.suelo_horario(12537, DIA, DIA)
-    crudo, sin_humedad = adaptador.suelo_crudo([llamada.payload], PLOT)
-    assert len(crudo) == 20 and sin_humedad == 4
+    crudo, sin_medicion = adaptador.suelo_crudo([llamada.payload], PLOT)
+    assert len(crudo) == 20 and sin_medicion == 4
     assert set(crudo["project_id"]) == {PROJECT}  # el otro plot del área se descarta
     horario, _ = adaptador.suelo_horario([llamada.payload], PLOT, "ENSUEÑO 1")
     del_dia = horario[horario["fecha_hora"].dt.date == DIA]
-    # Las horas sin humedad quedan como hueco de la rejilla horaria (hay_dato = false).
+    # Las horas de relleno quedan como hueco de la rejilla horaria (hay_dato = false).
     assert len(del_dia) == 24 and int(del_dia["hay_dato_phytech"].sum()) == 20
+
+
+def test_suelo_hora_sin_humedad_con_temperatura_como_la_ruta_por_archivos():
+    """Paridad con ``data_phytech.xlsx``: ``limpiar_suelo`` sobre las filas del archivo (todas las
+    horas con alguna medición) marca ``hay_dato`` también la hora que solo trae temperatura."""
+    from riego_ml.sources.phytech_crudo import limpiar_suelo
+
+    from tests.apis_falsas import hora_suelo, payload_suelo
+
+    payload = payload_suelo(DIA, DIA, lambda _d, h: None if h in (10, 11) else 30.0)
+    dia = payload["12537"][str(PLOT)][str(PROJECT)][DIA.isoformat()]
+    dia["10:00"] = hora_suelo(None, temp=25.5)  # sin humedad, con temperatura
+    horario, sin_medicion = adaptador.suelo_horario([payload], PLOT, "ENSUEÑO 1")
+    assert sin_medicion == 1  # solo la de las 11:00, de relleno
+    por_hora = horario.set_index(horario["fecha_hora"].dt.hour)
+    assert por_hora.loc[10, "hay_dato_phytech"] == 1 and por_hora.loc[10, "temp_15cm"] == 25.5
+    assert pd.isna(por_hora.loc[10, "hum_15cm"]) and por_hora.loc[11, "hay_dato_phytech"] == 0
+
+    # Ruta por archivos: las filas del Excel de descarga (sin la hora de relleno) y limpiar_suelo.
+    filas = pd.DataFrame(list(adaptador.recorrer(payload, adaptador.NIVELES_SUELO)))
+    for columna in ("area_id", "plot_id", "project_id"):
+        filas[columna] = pd.to_numeric(filas[columna])
+    filas = filas[(filas["plot_id"] == PLOT) & (filas["date"] + filas["hour"] != DIA.isoformat() + "11:00")]
+    filas["datetime_local"] = pd.to_datetime(filas["date"] + " " + filas["hour"])
+    esperado, _ = limpiar_suelo(filas, "ENSUEÑO 1", {})
+    columnas = ["fecha_hora", "hay_dato_phytech", "hum_15cm", "temp_15cm", "hum_zona_radicular"]
+    pd.testing.assert_frame_equal(horario[columnas].reset_index(drop=True),
+                                  esperado[columnas].reset_index(drop=True), check_dtype=False)
 
 
 def test_planta_y_pronostico_adaptados():
