@@ -14,3 +14,12 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
+
+// PWA (F6): el service worker solo se registra en producción (en desarrollo interferiría con Vite).
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      /* sin service worker la app funciona igual; solo no es instalable */
+    });
+  });
+}

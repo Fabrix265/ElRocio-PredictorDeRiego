@@ -8,7 +8,6 @@ export type CampoKpi = "agua_aplicada_m3ha" | "aplicado_vs_modelo_pct" | "mds_um
 export interface Kpi {
   titulo: string;
   icono: LucideIcon;
-  fase: number;
   unidad: string;
   campo?: CampoKpi;
   decimales?: number;
@@ -21,11 +20,11 @@ export interface Kpi {
 const ROLES_CON_MODELO: readonly Rol[] = ["admin", "encargado", "subgerente"];
 
 export const KPIS: Kpi[] = [
-  { titulo: "Agua aplicada ayer", icono: Droplet, fase: 5, unidad: "m³/ha", campo: "agua_aplicada_m3ha", decimales: 1 },
-  { titulo: "Aplicado vs modelo", icono: Gauge, fase: 5, unidad: "%", roles: ROLES_CON_MODELO, campo: "aplicado_vs_modelo_pct", decimales: 0 },
-  { titulo: "MDS (contracción del tronco)", icono: Activity, fase: 5, unidad: "µm", campo: "mds_um", decimales: 0 },
-  { titulo: "ETo de ayer", icono: ThermometerSun, fase: 5, unidad: "mm", campo: "eto_mm", decimales: 2 },
-  { titulo: "Estado de mañana", icono: CalendarClock, fase: 4, unidad: "", estadoManana: true },
+  { titulo: "Agua aplicada ayer", icono: Droplet, unidad: "m³/ha", campo: "agua_aplicada_m3ha", decimales: 1 },
+  { titulo: "Aplicado vs modelo", icono: Gauge, unidad: "%", roles: ROLES_CON_MODELO, campo: "aplicado_vs_modelo_pct", decimales: 0 },
+  { titulo: "MDS (contracción del tronco)", icono: Activity, unidad: "µm", campo: "mds_um", decimales: 0 },
+  { titulo: "ETo de ayer", icono: ThermometerSun, unidad: "mm", campo: "eto_mm", decimales: 2 },
+  { titulo: "Estado de mañana", icono: CalendarClock, unidad: "", estadoManana: true },
 ];
 
 /** KPIs visibles para un rol. */
