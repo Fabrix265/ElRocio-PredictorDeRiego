@@ -1,0 +1,11 @@
+{#- Componentes reutilizables de los correos (estilos en línea). -#}
+{% macro boton(url, texto) -%}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;">
+  <tr>
+    <td style="border-radius:8px;background:#2A7042;">
+      <a href="{{ url }}" target="_blank" rel="noopener"
+         style="display:inline-block;padding:12px 28px;font-size:15px;font-weight:600;line-height:20px;color:#FFFFFF;text-decoration:none;border-radius:8px;">{{ texto }}</a>
+    </td>
+  </tr>
+</table>
+{% endmacro %}

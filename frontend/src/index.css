@@ -1,0 +1,147 @@
+@import "tailwindcss";
+@import "./theme/tokens.css";
+
+/* Tailwind solo conoce los tokens del proyecto (sin la paleta por defecto). */
+@theme inline {
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-white: #ffffff;
+
+  --color-green-50: var(--green-50);
+  --color-green-100: var(--green-100);
+  --color-green-200: var(--green-200);
+  --color-green-300: var(--green-300);
+  --color-green-400: var(--green-400);
+  --color-green-500: var(--green-500);
+  --color-green-600: var(--green-600);
+  --color-green-700: var(--green-700);
+  --color-green-800: var(--green-800);
+  --color-green-900: var(--green-900);
+
+  --color-sand-0: var(--sand-0);
+  --color-sand-25: var(--sand-25);
+  --color-sand-50: var(--sand-50);
+  --color-sand-100: var(--sand-100);
+  --color-sand-200: var(--sand-200);
+  --color-sand-300: var(--sand-300);
+  --color-sand-400: var(--sand-400);
+  --color-sand-500: var(--sand-500);
+  --color-sand-600: var(--sand-600);
+  --color-sand-700: var(--sand-700);
+  --color-sand-900: var(--sand-900);
+
+  --color-ok-bg: var(--ok-bg);
+  --color-ok: var(--ok);
+  --color-ok-tx: var(--ok-tx);
+  --color-warn-bg: var(--warn-bg);
+  --color-warn: var(--warn);
+  --color-warn-tx: var(--warn-tx);
+  --color-err-bg: var(--err-bg);
+  --color-err: var(--err);
+  --color-err-tx: var(--err-tx);
+  --color-info-bg: var(--info-bg);
+  --color-info: var(--info);
+  --color-info-tx: var(--info-tx);
+
+  --color-sidebar: var(--sidebar);
+  --color-fondo: var(--fondo);
+  --color-superficie: var(--superficie);
+  --color-hundido: var(--hundido);
+  --color-deshabilitado: var(--deshabilitado);
+  --color-borde: var(--borde);
+  --color-borde-input: var(--borde-input);
+  --color-texto: var(--texto);
+  --color-texto-2: var(--texto-2);
+  --color-texto-3: var(--texto-3);
+  --color-marca: var(--marca);
+  --color-marca-hover: var(--marca-hover);
+  --color-marca-texto: var(--marca-texto);
+  --color-activo-bg: var(--activo-bg);
+  --color-activo-tx: var(--activo-tx);
+  --color-foco: var(--foco);
+  --color-foco-anillo: var(--foco-anillo);
+
+  --radius-sm: var(--radio-sm);
+  --radius-md: var(--radio-md);
+  --radius-lg: var(--radio-lg);
+  --radius-xl: var(--radio-xl);
+  --shadow-suave: var(--sombra);
+  --shadow-elevada: var(--sombra-lg);
+
+  --font-sans: var(--fuente);
+  --font-mono: var(--fuente-mono);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--fondo);
+    color: var(--texto);
+    font-family: var(--fuente);
+    font-size: 14px;
+    line-height: 20px;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  :focus-visible {
+    outline: 2px solid var(--foco);
+    outline-offset: 2px;
+  }
+  ::placeholder {
+    color: var(--texto-3);
+    opacity: 1;
+  }
+}
+
+@layer utilities {
+  /* Cifras tabulares en tablas y KPIs */
+  .cifras {
+    font-variant-numeric: tabular-nums;
+  }
+  .anillo-foco {
+    outline: 2px solid var(--foco);
+    outline-offset: 0;
+    box-shadow: 0 0 0 4px var(--foco-anillo);
+  }
+  /* Panel de marca del login: degradado green-600 → green-700 con un brillo suave */
+  .panel-marca {
+    background-color: var(--green-600);
+    background-image:
+      radial-gradient(circle at 85% 15%, rgb(255 255 255 / 0.18), transparent 45%),
+      linear-gradient(160deg, var(--green-600), var(--green-700));
+  }
+  .sin-barra::-webkit-scrollbar {
+    display: none;
+  }
+  .sin-barra {
+    scrollbar-width: none;
+  }
+}
+
+@keyframes aparecer {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

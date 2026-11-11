@@ -1,0 +1,20 @@
+# Solo empaquetado: permite instalar riego_ml con `pip install -e ../ml` desde el backend.
+# Las dependencias (con versiones fijas) están en ml/requirements.txt; no se declaran aquí
+# para tener una sola fuente de verdad.
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "riego-ml"
+version = "0.1.0"
+description = "Modelo de plan de riego del Grupo El Rocío (fundo ENSUEÑO 1, módulo EN01-MOD5)"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["riego_ml*"]

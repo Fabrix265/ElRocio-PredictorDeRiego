@@ -1,76 +1,169 @@
-import { useEffect, useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { lazy, Suspense } from "react";
+import { BrowserRouter, Outlet, Route, Routes } from "react-router";
 
-type HealthResponse = {
-  status: string;
-  service: string;
-  environment: string;
-};
+import { Toaster } from "./components/ui/Toast";
+import { TooltipProvider } from "./components/ui/Tooltip";
+import { AuthProvider } from "./features/auth/AuthProvider";
+import { CambiarPasswordPage } from "./features/auth/pages/CambiarPasswordPage";
+import { LoginPage } from "./features/auth/pages/LoginPage";
+import { RecuperarPage } from "./features/auth/pages/RecuperarPage";
+import { RestablecerPage } from "./features/auth/pages/RestablecerPage";
+import { RutaProtegida } from "./features/auth/RutaProtegida";
+import { SeleccionProvider } from "./features/catalogo/SeleccionProvider";
+import { DashboardPage } from "./features/dashboard/DashboardPage";
+import { AppLayout } from "./features/layout/AppLayout";
+import { ACCESO } from "./lib/roles";
+import { CargandoSeccion } from "./pages/CargandoSeccion";
+import { NoEncontradoPage } from "./pages/NoEncontradoPage";
+import { ApiError } from "./services/httpClient";
+
+const UsuariosPage = lazy(() => import("./features/usuarios/UsuariosPage"));
+const AuditoriaPage = lazy(() => import("./features/auditoria/AuditoriaPage"));
+const RiegoPage = lazy(() => import("./features/riego/RiegoPage"));
+const CargaNuevaPage = lazy(() => import("./features/riego/CargaNuevaPage"));
+const CargaDetallePage = lazy(() => import("./features/riego/CargaDetallePage"));
+const GenerarPage = lazy(() => import("./features/cronogramas/GenerarPage"));
+const DatosCampoPage = lazy(() => import("./features/datos/DatosCampoPage"));
+const CronogramasPage = lazy(() => import("./features/cronogramas/CronogramasPage"));
+const CronogramaDetallePage = lazy(() => import("./features/cronogramas/CronogramaDetallePage"));
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      // Sin reintentos para errores del cliente (4xx): solo red o servidor.
+      retry: (intentos, error) =>
+        !(error instanceof ApiError && error.status >= 400 && error.status < 500) && intentos < 2,
+    },
+    mutations: { retry: false },
+  },
+});
+
+/** Zona autenticada: guard de sesión + selección de fundo y módulo compartida. */
+function ZonaPrivada() {
+  return (
+    <RutaProtegida>
+      <SeleccionProvider>
+        <Outlet />
+      </SeleccionProvider>
+    </RutaProtegida>
+  );
+}
 
 export default function App() {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/v1/health")
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        return response.json() as Promise<HealthResponse>;
-      })
-      .then(setHealth)
-      .catch((reason: unknown) => {
-        setError(reason instanceof Error ? reason.message : "Error desconocido");
-      });
-  }, []);
-
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        margin: 0,
-        display: "grid",
-        placeItems: "center",
-        background: "#f3f7f1",
-        color: "#1f2d1f",
-        fontFamily: "system-ui, sans-serif",
-      }}
-    >
-      <section
-        style={{
-          width: "min(560px, 90vw)",
-          padding: "2rem",
-          borderRadius: "16px",
-          background: "#ffffff",
-          boxShadow: "0 18px 50px rgba(31, 45, 31, 0.12)",
-        }}
-      >
-        <p style={{ margin: 0, color: "#4d7c4d", fontWeight: 700 }}>
-          El Rocio
-        </p>
-        <h1 style={{ margin: "0.5rem 0 1rem", fontSize: "1.75rem" }}>
-          Sistema de prediccion de riego
-        </h1>
-        <p style={{ margin: 0, lineHeight: 1.6 }}>
-          Base del panel web para consultar predicciones de riego a partir de
-          datos historicos de sensores y APIs.
-        </p>
-        <div
-          style={{
-            marginTop: "1.5rem",
-            padding: "1rem",
-            borderRadius: "12px",
-            background: "#eef5ec",
-          }}
-        >
-          <strong>API: </strong>
-          {health
-            ? `${health.status} (${health.environment})`
-            : error
-              ? `sin conexion (${error})`
-              : "consultando..."}
-        </div>
-      </section>
-    </main>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <AuthProvider>
+          <TooltipProvider delayDuration={300}>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/recuperar" element={<RecuperarPage />} />
+              <Route path="/restablecer" element={<RestablecerPage />} />
+
+              <Route element={<ZonaPrivada />}>
+                <Route path="/cambiar-password" element={<CambiarPasswordPage />} />
+                <Route element={<AppLayout />}>
+                  <Route index element={<DashboardPage />} />
+                  <Route
+                    path="generar"
+                    element={
+                      <RutaProtegida roles={ACCESO.generar}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <GenerarPage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route
+                    path="cronogramas"
+                    element={
+                      <RutaProtegida roles={ACCESO.cronogramas}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <CronogramasPage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route
+                    path="cronogramas/:id"
+                    element={
+                      <RutaProtegida roles={ACCESO.cronogramas}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <CronogramaDetallePage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route
+                    path="riego"
+                    element={
+                      <RutaProtegida roles={ACCESO.riego}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <RiegoPage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route
+                    path="riego/cargas/nueva"
+                    element={
+                      <RutaProtegida roles={ACCESO.cargaRiego}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <CargaNuevaPage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route
+                    path="riego/cargas/:id"
+                    element={
+                      <RutaProtegida roles={ACCESO.cargaRiego}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <CargaDetallePage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route
+                    path="datos"
+                    element={
+                      <RutaProtegida roles={ACCESO.datos}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <DatosCampoPage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route
+                    path="auditoria"
+                    element={
+                      <RutaProtegida roles={ACCESO.auditoria}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <AuditoriaPage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route
+                    path="usuarios"
+                    element={
+                      <RutaProtegida roles={ACCESO.usuarios}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <UsuariosPage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route path="*" element={<NoEncontradoPage />} />
+                </Route>
+              </Route>
+            </Routes>
+          </TooltipProvider>
+        </AuthProvider>
+        <Toaster />
+      </BrowserRouter>
+    </QueryClientProvider>
   );
 }

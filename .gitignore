@@ -30,3 +30,6 @@ ml/src/riego_ml/data_extraction/**
 !ml/src/riego_ml/data_extraction/**/.gitkeep
 
 ml/_antiguo/
+
+# Metadatos de instalación editable (pip install -e ml)
+*.egg-info/

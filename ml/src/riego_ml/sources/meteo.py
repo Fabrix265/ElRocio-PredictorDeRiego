@@ -11,6 +11,10 @@ la ETo y la lluvia del día:
 4. El DPV se anula si la temperatura o la humedad de esa lectura son inválidas.
 5. Agregado diario: con menos de ``MIN_LECTURAS_DIA`` lecturas válidas la
    variable del día queda vacía; la ETo diaria se reescala a 48 lecturas.
+
+Lectura y saneamiento están separados: :func:`leer_meteo` lee el Excel y
+:func:`sanear_meteo` aplica las reglas 1-4 a cualquier DataFrame con el mismo
+formato (lecturas guardadas en la BD o convertidas desde la API de WeatherLink).
 """
 
 from __future__ import annotations
@@ -65,18 +69,32 @@ UMBRAL_CALOR = 30.0  # °C
 
 
 def leer_meteo(path: str | Path, header: int = 2) -> tuple[pd.DataFrame, dict]:
-    """Lecturas de 30 min saneadas (1 fila por Fundo y bloque de 30 min)."""
+    """Lecturas de 30 min saneadas (1 fila por Fundo y bloque de 30 min).
+
+    Solo lee el archivo (columnas de ``COLUMNAS_ORIGEN`` y ``fecha_hora`` desde Fecha + Hora);
+    el saneamiento es :func:`sanear_meteo`, que también se aplica a lecturas de la BD o la API.
+    """
     raw = pd.read_excel(path, header=header)
     faltantes = [c for c in COLUMNAS_ORIGEN if c not in raw.columns]
     if faltantes:
         raise ValueError(f"Faltan columnas en {path}: {faltantes}")
     df = raw[list(COLUMNAS_ORIGEN)].rename(columns=COLUMNAS_ORIGEN)
-    diag: dict = {"Meteo: lecturas originales": len(df)}
-
-    df["Fundo"] = norm_text(df["Fundo"])
     fecha = pd.to_datetime(df["Fecha"], errors="coerce").dt.normalize()
     minutos = df["Hora"].map(to_minutes)
     df["fecha_hora"] = fecha + pd.to_timedelta(minutos, unit="min")
+    return sanear_meteo(df)
+
+
+def sanear_meteo(lecturas: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Aplica las reglas 1-4 a lecturas con ``Fundo``, ``fecha_hora`` y las ``VARIABLES``.
+
+    Devuelve 1 fila por Fundo y bloque de 30 min con ``Fundo``, ``fecha_hora`` y ``VARIABLES``.
+    """
+    df = lecturas.copy()
+    diag: dict = {"Meteo: lecturas originales": len(df)}
+
+    df["Fundo"] = norm_text(df["Fundo"])
+    df["fecha_hora"] = pd.to_datetime(df["fecha_hora"], errors="coerce")
     df = df.dropna(subset=["Fundo", "fecha_hora"]).copy()
     for columna in VARIABLES:
         df[columna] = pd.to_numeric(df[columna], errors="coerce")
