@@ -1,0 +1,94 @@
+/*
+ * Tokens de diseño del Sistema de Plan de Riego (único lugar donde se definen colores,
+ * radios, sombras y tipografía). Tema claro único, verde y blanco (propuesta §6).
+ * Tailwind los referencia desde src/index.css (@theme inline); el resto del código
+ * usa las clases de Tailwind o estas variables, nunca valores hex sueltos.
+ */
+:root {
+  color-scheme: light;
+
+  /* Verdes de marca */
+  --green-50: #eef6ef;
+  --green-100: #d9ecdd;
+  --green-200: #b9dbc0;
+  --green-300: #8ec39a;
+  --green-400: #5fa672;
+  --green-500: #3b8a52;
+  --green-600: #2a7042; /* marca: botón principal, ítem activo, serie "propuesto" */
+  --green-700: #215a36;
+  --green-800: #1b482c;
+  --green-900: #143823;
+
+  /* Neutros cálidos (arena) */
+  --sand-0: #ffffff;
+  --sand-25: #fbfaf7;
+  --sand-50: #f6f4ee;
+  --sand-100: #ede9df;
+  --sand-200: #ddd7c9;
+  --sand-300: #b5ad9b;
+  --sand-400: #948b78;
+  --sand-500: #7a7262;
+  --sand-600: #5f5849;
+  --sand-700: #474236;
+  --sand-900: #1f1c17;
+
+  /* Estados: fondo / color / texto */
+  --ok-bg: #e5f4ea;
+  --ok: #1e7b4f;
+  --ok-tx: #17663f;
+  --warn-bg: #fdf2dd;
+  --warn: #e29a12;
+  --warn-tx: #8a4b00;
+  --err-bg: #fdecea;
+  --err: #c8291f;
+  --err-tx: #a8201a;
+  --info-bg: #e7f0fa;
+  --info: #2569ae;
+  --info-tx: #1b5a96;
+
+  /* Gráficos: turnos y series */
+  --te1: #1f63b0;
+  --te2: #d17400;
+  --te3: #2ba37a;
+  --te4: #8f2a5c;
+  --te5: #8a7fd0;
+  --s-prop: #2a7042;
+  --s-apl: #5b6b7a;
+  --s-corr: #d07a00;
+
+  /* Semánticos */
+  --sidebar: #ffffff; /* barra lateral blanca */
+  --fondo: var(--sand-25); /* detrás de las tarjetas */
+  --superficie: var(--sand-0); /* tarjetas, cabecera, barra lateral */
+  --hundido: var(--sand-50); /* cabecera de tabla, segmentos */
+  --deshabilitado: var(--sand-100);
+  --borde: var(--sand-200);
+  --borde-input: var(--sand-400);
+  --texto: var(--sand-900);
+  --texto-2: var(--sand-600);
+  --texto-3: var(--sand-500);
+  --marca: var(--green-600);
+  --marca-hover: var(--green-700);
+  --marca-texto: #ffffff;
+  --activo-bg: var(--green-50); /* hover de menú, fila seleccionada */
+  --activo-tx: var(--green-700);
+  --foco: var(--green-700);
+  --foco-anillo: var(--green-200);
+
+  /* Forma */
+  --radio-sm: 4px;
+  --radio-md: 8px;
+  --radio-lg: 12px;
+  --radio-xl: 16px;
+  --sombra: 0 1px 3px rgb(18 48 31 / 0.08), 0 1px 2px rgb(18 48 31 / 0.04);
+  --sombra-lg: 0 16px 40px rgb(18 48 31 / 0.14);
+
+  /* Tipografía */
+  --fuente: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --fuente-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  /* Layout */
+  --sidebar-ancho: 248px;
+  --sidebar-ancho-colapsado: 72px;
+  --cabecera-alto: 60px;
+}

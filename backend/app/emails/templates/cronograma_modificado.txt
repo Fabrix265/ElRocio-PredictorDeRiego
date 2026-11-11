@@ -1,0 +1,23 @@
+Cronograma modificado
+
+Se publicaron cambios en el cronograma.
+Módulo: {{ modulo }}
+Fecha: {{ fecha }}
+Versión: {{ version }}
+Usuario: {{ usuario }}
+{% if retrospectiva %}
+Corrección retrospectiva: no requiere un nuevo Visto del programador.
+{% endif %}
+{% if motivo %}
+Motivo: {{ motivo }}
+{% endif %}
+{% if comentario %}
+Comentario: {{ comentario }}
+{% endif %}
+{% for cambio in resumen %}
+- {{ cambio }}
+{% endfor %}
+
+Ver cronograma: {{ enlace }}
+
+Sistema de Plan de Riego · Grupo El Rocío

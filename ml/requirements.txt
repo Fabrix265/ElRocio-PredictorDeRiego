@@ -1,5 +1,21 @@
-requests
-pandas
-xlsxwriter
-openpyxl
-tzdata
+# Versiones fijas: el modelo guardado (joblib) debe cargarse con las mismas
+# versiones con las que se entrenó. Si se actualiza alguna, reentrenar.
+
+# Pipeline de datos y modelos
+pandas==3.1.0
+numpy==2.4.6
+scipy==1.17.1
+scikit-learn==1.9.1
+xgboost==3.2.0
+lightgbm==4.7.0
+catboost==1.2.10
+holidays==0.108
+matplotlib==3.11.2
+joblib==1.6.0
+PyYAML==6.0.3
+openpyxl==3.1.5
+# Scripts de extracción (data_extraction/)
+requests==2.34.2
+tzdata==2026.6
+# Tests
+pytest==9.2.0
