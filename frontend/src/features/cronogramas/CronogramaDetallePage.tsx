@@ -28,6 +28,7 @@ import { ETIQUETA_ESTADO, ETIQUETA_ORIGEN_VERSION, MarcasVersion, TONO_ESTADO, f
 import { BotonesExportar } from "./BotonesExportar";
 import { Gantt } from "./Gantt";
 import { EditorPlan } from "./EditorPlan";
+import { ContextoDiaAnterior } from "./ContextoDiaAnterior";
 import { AccionesCronograma } from "./AccionesCronograma";
 import { Comparador, DatosCronograma, Diferencias, LineaTiempo } from "./ConsultasCronograma";
 
@@ -248,6 +249,7 @@ function Detalle({ id }: { id: number }) {
               </div>
             }
           />
+          <ContextoDiaAnterior fecha={c!.fecha} moduloId={c!.modulo_id} />
           {regenerar.isError && !confirmar && (
             <Alert tono="error" titulo="No se pudo regenerar">
               {mensajeDeError(regenerar.error)}

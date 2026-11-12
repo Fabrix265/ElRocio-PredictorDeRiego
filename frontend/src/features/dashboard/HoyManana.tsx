@@ -64,7 +64,7 @@ export function HoyManana({ fechas, consultas }: ReturnType<typeof useCronograma
               ) : q.isError ? (
                 <Alert tono="error">{mensajeDeError(q.error)}</Alert>
               ) : !c || !c.version ? (
-                <div className="flex flex-col items-start gap-2 rounded-lg border border-dashed border-borde p-4 text-sm text-texto-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-borde px-3 py-2 text-xs text-texto-2">
                   <span className="flex items-center gap-1.5">
                     <CalendarDays className="size-4" aria-hidden="true" />
                     {usuario.rol === "programador" ? "Aún no hay cronograma publicado." : "Aún no hay cronograma."}

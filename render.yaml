@@ -1,0 +1,66 @@
+# Blueprint de Render para la API (plan Free). Guía: deploy/README.md.
+# Las variables con `sync: false` se piden en el panel de Render al crear el Blueprint;
+# sus valores nunca van en este archivo ni en git.
+services:
+  - type: web
+    name: riego-el-rocio-api
+    runtime: python
+    plan: free
+    region: oregon
+    branch: main
+    autoDeploy: true
+    buildCommand: >-
+      pip install --upgrade pip &&
+      pip install -r backend/requirements.txt &&
+      pip install -e ml &&
+      python deploy/render/descargar_modelo.py
+    startCommand: cd backend && python -m app
+    healthCheckPath: /api/v1/health
+    envVars:
+      # Fijas (no secretas)
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: RIEGO_SIN_ENV_FILE
+        value: "1"
+      - key: TIMEZONE
+        value: America/Lima
+      # Render solo acepta tráfico a través de su proxy; la IP real llega en X-Forwarded-For.
+      - key: TRUSTED_PROXIES
+        value: "*"
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: INGESTA_HORA
+        value: "05:00"
+      - key: ML_MODEL_PATH
+        value: ml/models/plan_riego/actual/modelo_plan_riego.joblib
+      # Se completan en el panel (sync: false)
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ML_MODEL_SHA256
+        sync: false
+      - key: MODELO_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: PHYTECH_API_KEY
+        sync: false
+      - key: PHYTECH_API_SECRET
+        sync: false
+      - key: WEATHERLINK_API_KEY
+        sync: false
+      - key: WEATHERLINK_API_SECRET
+        sync: false

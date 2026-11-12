@@ -160,6 +160,11 @@ export default function DatosCampoPage() {
             opciones={[{ value: "todos", label: "Todos los turnos" }, ...turnos.map((t) => ({ value: String(t.turno_id), label: t.turno_codigo }))]} />
         </div>
         {opciones.agua && <Grafico opcion={opciones.agua} etiqueta="Agua aplicada y propuesta por día" />}
+        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-texto-2" aria-label="Cómo leer el gráfico de agua">
+          <li><strong>Aplicado:</strong> lo que se regó.</li>
+          <li><strong>Propuesto:</strong> la versión publicada que recibió el programador.</li>
+          {agua.data?.con_modelo && <li><strong>Modelo:</strong> lo que propuso el modelo antes de las correcciones.</li>}
+        </ul>
       </Seccion>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">

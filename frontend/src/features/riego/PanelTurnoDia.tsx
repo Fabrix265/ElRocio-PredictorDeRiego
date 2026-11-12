@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { History, Moon } from "lucide-react";
 
 import { Alert } from "../../components/ui/Alert";
+import { EstadoRiego } from "./EstadoRiego";
 import { Badge } from "../../components/ui/Badge";
 import { DialogContent } from "../../components/ui/Dialog";
 import { Skeleton } from "../../components/ui/Skeleton";
@@ -16,7 +17,6 @@ import { claveRiego, riegoApi, type CicloRiego, type RegistroRiego, type Version
 import type { Turno } from "../catalogo/api";
 import {
   ETIQUETA_ESTADO_CELDA,
-  TONO_ESTADO_CELDA,
   estadoCelda,
   etiquetaOrigen,
   formatearDuracion,
@@ -95,7 +95,7 @@ function Version({ v }: { v: VersionRiego }) {
         <span className="text-[13px] font-semibold text-texto">Versión {v.version}</span>
         {v.version === 1 && <Badge tono="neutro" icono={false}>Original</Badge>}
         {v.vigente && <Badge tono="marca">Vigente</Badge>}
-        <Badge tono={TONO_ESTADO_CELDA[estado]}>{ETIQUETA_ESTADO_CELDA[estado]}</Badge>
+        <EstadoRiego estado={estado} />
       </div>
       <p className="text-xs text-texto-2">
         {etiquetaOrigen(v.origen)}
@@ -176,7 +176,8 @@ export function PanelTurnoDia({
     queryFn: ({ signal }) => riegoApi.versiones(turno.id, fecha, signal),
     enabled: puedeEditar,
   });
-  const registro = actual.data?.find((v) => v.vigente) ?? recibido;
+  // Con las versiones cargadas manda el servidor: si se eliminó, ya no hay vigente.
+  const registro = actual.data ? (actual.data.find((v) => v.vigente) ?? null) : recibido;
   const estado = estadoCelda(registro ?? undefined);
   return (
     <DialogContent
@@ -191,7 +192,7 @@ export function PanelTurnoDia({
             Riego vigente
           </h3>
           <div className="flex flex-wrap items-center gap-1.5">
-            <Badge tono={TONO_ESTADO_CELDA[estado]}>{ETIQUETA_ESTADO_CELDA[estado]}</Badge>
+            <EstadoRiego estado={estado} />
             <Badge tono="neutro" icono={false}>
               Origen: {etiquetaOrigen(registro.origen)}
             </Badge>
@@ -203,7 +204,7 @@ export function PanelTurnoDia({
             </p>
           )}
           {registro.sin_riego ? (
-            <Alert tono="info" titulo="No se regó">
+            <Alert tono="info" titulo="0 m³ · No se regó">
               {[registro.motivo, registro.comentario].filter(Boolean).join(" · ") || "El turno quedó registrado sin riego ese día."}
             </Alert>
           ) : (
@@ -211,9 +212,11 @@ export function PanelTurnoDia({
           )}
         </section>
         ) : (
-          <p className="text-[13px] text-texto-2">
-            Este turno-día no tiene riego registrado. Puedes cargarlo con «Editar riego» o indicar que no se regó.
-          </p>
+          <div className="flex flex-col items-start gap-2 rounded-md border border-dashed border-borde p-3 text-texto-3">
+            <EstadoRiego estado="sin_registro" />
+            <span className="cifras text-lg">—</span>
+            <p className="text-[13px]">Falta registrar el dato. Puedes cargarlo con «Editar riego» o indicar que no se regó.</p>
+          </div>
         )}
         {puedeEditar && actual.isError && <Alert tono="error">{mensajeDeError(actual.error)} <Button variante="fantasma" disabled={actual.isFetching} onClick={() => void actual.refetch()}>Recargar</Button></Alert>}
         {puedeEditar && (actual.isPending ? (

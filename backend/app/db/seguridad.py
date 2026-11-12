@@ -253,6 +253,7 @@ def verificar_seguridad(conexion: Connection) -> list[str]:
     esperados = [(t, f"tg_{t}_inmutable") for t in (*SOLO_INSERCION, *COLUMNAS_ACTUALIZABLES)]
     esperados += [(t, f"tg_{t}_sin_truncate") for t in SIN_TRUNCATE]
     esperados += [(t, f"tg_{t}_updated_at") for t in TABLAS_UPDATED_AT]
+    esperados.append(("cronograma", "tg_cronograma_validar_borrado"))
     for tabla, trigger in esperados:
         if tabla in nombres and (tabla, trigger) not in triggers:
             problemas.append(f"Falta o está deshabilitado el trigger {trigger} en {tabla}")

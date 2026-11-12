@@ -4,6 +4,7 @@
 |---|---|
 | ``GET /riego?modulo_id&desde&hasta`` | todos |
 | ``GET /riego/{turno_id}/{fecha}/versiones`` | A E S |
+| ``POST /riego/registros``, ``DELETE /riego/registros/{id}`` (body ``motivo``) | A E S |
 | ``POST /riego/cargas`` (multipart: ``archivo``, ``modulo_id``) | A E |
 | ``GET/PATCH /riego/cargas/{id}``, ``POST …/confirmar``, ``POST …/descartar`` | A E |
 """
@@ -23,7 +24,7 @@ from app.core.errores import DatosInvalidos
 from app.models import Usuario
 from app.models.enums import RolUsuario
 from app.schemas.riego import CargaMarcadaSalida, CargaMarcar, CargaRiegoSalida, RiegoListado, VersionRiegoSalida
-from app.schemas.riego import RegistroRiegoEntrada, RegistroRiegoSalida
+from app.schemas.riego import EliminarRiegoEntrada, EliminarRiegoSalida, RegistroRiegoEntrada, RegistroRiegoSalida
 from app.services import archivo_excel, carga_riego_service, riego_service
 
 router = APIRouter(prefix="/riego")
@@ -81,6 +82,13 @@ def versiones(
 def guardar_registro(datos: RegistroRiegoEntrada, usuario: AdminEncargadoSubgerente,
                      db: DbSesion, contexto: Contexto) -> dict[str, Any]:
     return riego_service.guardar_manual(db, datos, usuario, contexto)
+
+
+@router.delete("/registros/{registro_id}", response_model=EliminarRiegoSalida)
+def eliminar_registro(registro_id: IdPath, datos: EliminarRiegoEntrada, usuario: AdminEncargadoSubgerente,
+                      db: DbSesion, contexto: Contexto) -> dict[str, Any]:
+    """Quita el riego vigente del turno-día (queda sin registro; la versión sigue en el historial)."""
+    return riego_service.eliminar(db, registro_id, datos.motivo, usuario, contexto)
 
 
 def _modulo_id(valor: Any) -> int:

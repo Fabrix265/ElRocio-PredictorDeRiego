@@ -20,12 +20,14 @@ from app.models import (
 def cronogramas_rango(db: Session, modulo_id: int, desde: dt.date, hasta: dt.date) -> list[Cronograma]:
     return list(db.scalars(
         select(Cronograma)
-        .where(Cronograma.modulo_id == modulo_id, Cronograma.fecha >= desde, Cronograma.fecha <= hasta)
+        .where(Cronograma.modulo_id == modulo_id, Cronograma.fecha >= desde, Cronograma.fecha <= hasta,
+               Cronograma.anulado_at.is_(None))
         .order_by(Cronograma.fecha)
     ))
 
 
 def cronogramas_todos_modulos(db: Session, desde: dt.date, hasta: dt.date) -> list[Cronograma]:
+    """Refinamiento: incluye anulados y activos, aun si comparten módulo y fecha."""
     return list(db.scalars(
         select(Cronograma).where(Cronograma.fecha >= desde, Cronograma.fecha <= hasta)
         .order_by(Cronograma.modulo_id, Cronograma.fecha)

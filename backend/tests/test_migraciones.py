@@ -26,7 +26,7 @@ def _version(engine: Engine) -> str | None:
 
 
 def test_esquema_en_head_con_todas_las_tablas(engine: Engine):
-    assert _version(engine) == "0004"
+    assert _version(engine) == "0005"
     esperadas = {t.name for t in Base.metadata.sorted_tables}
     assert len(esperadas) == 32
     assert _tablas(engine) == esperadas | {"alembic_version"}
@@ -74,7 +74,7 @@ def test_downgrade_base_y_upgrade_head(engine: Engine):
         assert funciones == 0
     finally:
         command.upgrade(cfg, "head")
-    assert _version(engine) == "0004"
+    assert _version(engine) == "0005"
     assert len(_tablas(engine)) == 33
 
 
@@ -105,8 +105,8 @@ def test_sql_offline_lleva_los_valores_de_la_semilla():
     sql = _sql_offline("head")
     assert "VALUES (NULL" not in sql and "= NULL" not in sql
     assert "'AVO PERÚ S.A.C.'" in sql and "'ENSUEÑO 1'" in sql
-    bajada = _sql_offline("0004:0001", bajar=True)
-    assert "NULL" not in bajada
+    bajada = _sql_offline("0005:0001", bajar=True)
+    assert "= NULL" not in bajada
     assert "IN ('AVOPERU', 'TALSA')" in bajada
 
 
@@ -116,7 +116,7 @@ def test_sql_offline_corre_en_una_base_vacia_como_dueno_no_superusuario(conexion
     from app.db.seguridad import verificar_seguridad
 
     subida = _sql_offline("head")
-    bajada = _sql_offline("0004:0001", bajar=True)
+    bajada = _sql_offline("0005:0001", bajar=True)
     crudo = conexion.connection.driver_connection  # psycopg: varias sentencias sin parámetros
 
     conexion.exec_driver_sql(f"DROP SCHEMA {ESQUEMA} CASCADE")
@@ -125,7 +125,7 @@ def test_sql_offline_corre_en_una_base_vacia_como_dueno_no_superusuario(conexion
     conexion.exec_driver_sql("SET LOCAL ROLE zz_dueno_offline")
     crudo.execute(subida)
 
-    assert conexion.execute(text(f"SELECT version_num FROM {ESQUEMA}.alembic_version")).scalar() == "0004"
+    assert conexion.execute(text(f"SELECT version_num FROM {ESQUEMA}.alembic_version")).scalar() == "0005"
     assert conexion.execute(text(f"SELECT count(*) FROM {ESQUEMA}.lote")).scalar() == 22
     assert conexion.execute(
         text(f"SELECT nombre FROM {ESQUEMA}.fundo WHERE codigo = 'EN01'")
@@ -137,3 +137,23 @@ def test_sql_offline_corre_en_una_base_vacia_como_dueno_no_superusuario(conexion
     crudo.execute(bajada)
     assert conexion.execute(text(f"SELECT count(*) FROM {ESQUEMA}.empresa")).scalar() == 0
     assert conexion.execute(text(f"SELECT count(*) FROM {ESQUEMA}.motivo_correccion")).scalar() == 0
+
+
+def test_0005_libera_fecha_y_downgrade_no_borra_historial(conexion):
+    import pytest
+    from sqlalchemy.exc import DBAPIError, IntegrityError
+
+    sentencia = "INSERT INTO riego.cronograma (modulo_id, fecha) VALUES (1, '2026-11-10') RETURNING id"
+    primero = conexion.execute(text(sentencia)).scalar_one()
+    with pytest.raises(IntegrityError), conexion.begin_nested():
+        conexion.execute(text(sentencia))
+    conexion.execute(text("UPDATE riego.cronograma SET anulado_at = now(), anulado_motivo = 'Prueba' WHERE id = :id"),
+                     {"id": primero})
+    segundo = conexion.execute(text(sentencia)).scalar_one()
+    assert primero != segundo
+    with pytest.raises(DBAPIError, match="módulo y fecha repetidos"), conexion.begin_nested():
+        conexion.exec_driver_sql(_sql_offline("0005:0004", bajar=True))
+    assert conexion.execute(text("SELECT count(*) FROM riego.cronograma WHERE id IN (:a, :b)"),
+                            {"a": primero, "b": segundo}).scalar_one() == 2
+    assert conexion.execute(text("SELECT anulado_motivo FROM riego.cronograma WHERE id = :id"),
+                            {"id": primero}).scalar_one() == "Prueba"

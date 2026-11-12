@@ -105,6 +105,7 @@ export const ingestasApi = {
 };
 
 export const claveDatos = {
+  todo: ["datos"] as const,
   frescura: (moduloId: number, fecha: string, dias: number) => ["datos", "frescura", moduloId, fecha, dias] as const,
   frescuraTodo: ["datos", "frescura"] as const,
   ingestas: ["ingestas"] as const,

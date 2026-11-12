@@ -43,6 +43,7 @@ const fmtPartes = new Intl.DateTimeFormat("en-CA", {
   month: "2-digit",
   day: "2-digit",
   hour: "2-digit",
+  minute: "2-digit",
   hourCycle: "h23",
 });
 
@@ -83,7 +84,7 @@ export function formatearFechaCorta(valor: string | Date = new Date()): string {
 
 function partesLima(ahora: Date) {
   const p = Object.fromEntries(fmtPartes.formatToParts(ahora).map((x) => [x.type, x.value]));
-  return { anio: p.year, mes: p.month, dia: p.day, hora: Number(p.hour) };
+  return { anio: p.year, mes: p.month, dia: p.day, hora: Number(p.hour), minuto: Number(p.minute) };
 }
 
 /** Fecha de hoy en Lima como "AAAA-MM-DD". */
@@ -95,6 +96,12 @@ export function hoyLima(ahora: Date = new Date()): string {
 /** Hora (0–23) actual en Lima. */
 export function horaLima(ahora: Date = new Date()): number {
   return partesLima(ahora).hora;
+}
+
+/** Minutos transcurridos desde las 00:00 de hoy en Lima (0–1439). */
+export function minutoDelDiaLima(ahora: Date = new Date()): number {
+  const { hora, minuto } = partesLima(ahora);
+  return hora * 60 + minuto;
 }
 
 /** Saludo según la hora de Lima. */

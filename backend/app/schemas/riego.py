@@ -78,6 +78,18 @@ class RegistroRiegoEntrada(BaseModel):
     ciclos: list[CicloRiegoEntrada] = Field(max_length=5)
 
 
+class EliminarRiegoEntrada(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    motivo: str = Field(min_length=1, max_length=255)
+
+
+class EliminarRiegoSalida(BaseModel):
+    turno_id: int
+    fecha: dt.date
+    version: int  # la versión que dejó de estar vigente
+
+
 class RiegoListado(BaseModel):
     modulo_id: int
     desde: dt.date

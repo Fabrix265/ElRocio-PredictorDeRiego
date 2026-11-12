@@ -295,3 +295,32 @@ describe("cálculos de frescura e ingestas", () => {
     ).toEqual(["TE03: hasta mié 04/11 · falta lun 02/11", "TE04: sin datos"]);
   });
 });
+
+describe("PanelFrescura: ingestas plegables", () => {
+  beforeEach(() => {
+    rol = "admin";
+  });
+
+  it("con todo correcto las ingestas empiezan plegadas y se despliegan con «Ver ingestas»", async () => {
+    vi.mocked(ingestasApi.listar).mockResolvedValue([corrida(1, "ok"), corrida(2, "ok", { fuente: "phytech_planta" })]);
+    montar();
+    const boton = await screen.findByRole("button", { name: /Ver ingestas/ });
+    expect(screen.queryByRole("list", { name: "Últimas corridas de ingesta" })).not.toBeInTheDocument();
+    await userEvent.click(boton);
+    expect(await screen.findByRole("list", { name: "Últimas corridas de ingesta" })).toBeInTheDocument();
+  });
+
+  it("si la última corrida de una fuente falló, se despliegan solas y se pueden plegar", async () => {
+    vi.mocked(ingestasApi.listar).mockResolvedValue([corrida(2, "error"), corrida(1, "ok")]);
+    montar();
+    expect(await screen.findByRole("list", { name: "Últimas corridas de ingesta" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Ocultar ingestas/ }));
+    expect(screen.queryByRole("list", { name: "Últimas corridas de ingesta" })).not.toBeInTheDocument();
+  });
+
+  it("un error ya superado por una corrida correcta de la misma fuente no las despliega", async () => {
+    vi.mocked(ingestasApi.listar).mockResolvedValue([corrida(2, "ok"), corrida(1, "error")]);
+    montar();
+    expect(await screen.findByRole("button", { name: /Ver ingestas/ })).toBeInTheDocument();
+  });
+});

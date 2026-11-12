@@ -173,8 +173,14 @@ el primer ingreso. Queda auditado como `usuario_creado` con actor `sistema`.
   `X-Forwarded-For` por su cuenta; esa IP es la que se audita y la que cuentan los límites. En
   producción avisa si `TRUSTED_PROXIES` quedó en `127.0.0.1` (detrás de un PaaS todos los clientes
   tendrían la IP del proxy y el límite por IP sería global).
-- `GET /api/v1/health` → `{status, app, entorno, bd, rol_bd, modelo}` (503 si la BD no responde;
-  `status: "degradado"` si el rol de la conexión no es `riego_app` o tiene privilegios de más).
+- `GET /api/v1/health` → `{status, app, entorno, bd, rol_bd, migraciones, modelo}` (503 si la BD no
+  responde; `status: "degradado"` si el rol de la conexión no es `riego_app` o tiene privilegios de
+  más, o si `migraciones` es `"pendientes"`).
+- **Migraciones pendientes:** si el código es más nuevo que la BD (p. ej. tras actualizar el repo sin
+  `alembic upgrade head`), el arranque lo avisa con un ERROR en el log que dice qué migración falta,
+  y las consultas que tocan una columna o tabla inexistente responden 503 «La base de datos no está
+  actualizada…» en vez de un 500 genérico. Solución: desde `backend/`, `.venv/Scripts/python -m alembic upgrade head`
+  contra la BD que usa la API (usa `DATABASE_URL_MIGRACIONES`).
 - `DEBUG=true` solo cambia el nivel de log: los errores no controlados nunca devuelven el
   traceback al cliente.
 - Documentación interactiva en `http://localhost:8000/docs` (deshabilitada en producción).
@@ -401,6 +407,8 @@ Código: `api/v1/endpoints/riego.py`, `services/riego_service.py` (consulta y ve
 |---|---|---|
 | `GET /riego?modulo_id&desde&hasta` | todos | `{modulo_id, desde, hasta, registros}`: vigentes por turno-día con estado, origen, `sin_riego` y ciclos. Por defecto los últimos 14 días; rango máx. 366 |
 | `GET /riego/{turno_id}/{fecha}/versiones` | A E S | Todas las versiones (la 1 es el original), con `vigente` y `basado_en_id` |
+| `POST /riego/registros` | A E S | 201 con la versión nueva (edición manual, «no se regó» o marcar aplicado). Aplicado solo para días pasados, u **hoy cuando terminó el último ciclo** (hora de Lima); nunca a futuro |
+| `DELETE /riego/registros/{id}` `{motivo}` | A E S | Quita el riego vigente: el turno-día queda sin registro, la versión sigue en el historial (`vigente=false`) y el motivo va a la auditoría (`riego_eliminado`). 409 si ya no es el vigente |
 | `POST /riego/cargas` (multipart `archivo`, `modulo_id`) | A E | 201 con la vista previa (`CargaRiegoSalida`: `resumen.contadores` por resultado y `grupos` por turno-día) |
 | `GET /riego/cargas/{id}` · `PATCH …` `{grupos: [{id, aplicar}]}` | A E | La carga; PATCH marca/desmarca grupos aplicables |
 | `POST /riego/cargas/{id}/confirmar` · `POST …/descartar` | A E | La carga confirmada / descartada (409 si venció) |
@@ -491,10 +499,10 @@ local, entra como admin y usa **Generar** (3 días tarda unos 10 s), o
 
 | Ruta | Quién | Qué hace |
 |---|---|---|
-| `GET /dashboard?modulo_id` | todos | KPIs de ayer (agua aplicada m³/ha y m³, aplicado vs modelo %, MDS, ETo), estado de mañana y pronóstico de 5 días. El programador no recibe «aplicado vs modelo» |
+| `GET /dashboard?modulo_id` | todos | KPIs de ayer (agua aplicada m³/ha y m³, aplicado vs modelo %, MDS, ETo), estado de mañana, pronóstico de 5 días y `ultimo_riego_fecha` (`date \| null`): última fecha hasta ayer (Lima) con riego vigente del módulo, aplicado o provisional, incluido «sin riego». El programador no recibe «aplicado vs modelo» |
 | `GET /datos/agua?modulo_id&desde&hasta` | todos | Por día y turno: aplicado (riego vigente), propuesto (versión publicada; A E S: si no hay, el borrador) y `modelo_*` (última versión del modelo, nunca para el programador). Por defecto 14 días hasta ayer, máximo 92 |
 | `GET /cronogramas/{id}/exportar?formato=pdf\|xlsx` | según visibilidad | PDF (ReportLab) o Excel (openpyxl) de la versión visible; el programador exporta siempre la publicada. Audita `exportar_pdf`/`exportar_xlsx` y deja el evento `exportado` |
-| `GET /exportaciones/refinamiento.csv?desde&hasta` | A | §2.4: una fila por cronograma × turno × ciclo con claves, la foto de entradas (features turno-día y de ciclo), bloques `modelo_v1_*`, `modelo_base_*`, `final_*` y `aplicado_*` (n° de ciclos, m³/ha, inicio, duración), `estado_riego`, `motivos`, `ultimo_motivo`, `n_correcciones`, marcas, `num_versiones` y `modelo_version`. Textos escapados contra inyección de fórmulas; UTF-8 con BOM. Por defecto 90 días, máximo 366. Audita `exportar_refinamiento` |
+| `GET /exportaciones/refinamiento.csv?desde&hasta` | A | §2.4: una fila por cronograma × turno × ciclo con claves, la foto de entradas (features turno-día y de ciclo), bloques `modelo_v1_*`, `modelo_base_*`, `final_*` y `aplicado_*` (n° de ciclos, m³/ha, inicio, duración), `estado_riego`, `motivos`, `ultimo_motivo`, `n_correcciones`, marcas, `num_versiones`, `modelo_version` y al final `anulado` (True/False, como las demás marcas), `anulado_motivo`. Incluye los cronogramas anulados para reentrenamiento. Textos escapados contra inyección de fórmulas; UTF-8 con BOM. Por defecto 90 días, máximo 366. Audita `exportar_refinamiento` |
 
 Las series de clima, suelo, planta y pronóstico de la pantalla Datos de campo son las de F2
 (`/datos/clima|suelo|planta|pronostico`). Dependencia nueva: `reportlab==4.5.1` (en
@@ -536,6 +544,7 @@ en la transacción de `DbSesion`; los servicios solo hacen `flush`.
 | `POST /cronogramas/{id}/recalcular` | A E | `EdicionEntrada` → `VersionPrevia` (sin id ni número, con avisos de solape); no guarda |
 | `GET /cronogramas/{id}/alternativas` | A E | Alternativas 1–5 por turno; sigue `basada_en_id` hasta la generación de la base vigente |
 | `POST /cronogramas/{id}/versiones` | A E | `GuardarVersionEntrada` → `CronogramaDetalle`; nueva corrección/edición inmutable con motivo activo |
+| `DELETE /cronogramas/{id}` | A E | `{motivo, lock_version}` → `{accion: eliminado\|anulado, cronograma_id, fecha, avisos}`; motivo recortado de 3–500 caracteres, 409 si la versión cambió |
 | `DELETE /cronogramas/{id}/borrador` | A E | Descarta el borrador de cambios, conserva versiones y publicación; devuelve `CronogramaDetalle` |
 | `POST /cronogramas/{id}/publicar` | A E | `PublicarEntrada` → `CronogramaConAvisos`; publica, notifica y actualiza los provisionales existentes del cronograma |
 | `POST /cronogramas/{id}/visto` | P A | `VistoEntrada` → `CronogramaConAvisos`; confirma la publicada y crea/actualiza provisionales |
@@ -561,6 +570,27 @@ inmediata. Un cambio de `duracion_manual` también cuenta como edición. Si falt
 de duración, se exige duración manual. Los valores editados se redondean a 2 decimales
 en m³/ha y a 1 en minutos y m³; se validan también después de redondear. Las horas HH:MM
 truncan los segundos y usan minuto módulo 1440. El solape avisa sin impedir guardar.
+
+Eliminar/anular (`DELETE /cronogramas/{id}`) exige admin o encargado y `lock_version` vigente:
+
+- Nunca publicado (`version_publicada_id IS NULL`, `num_publicaciones = 0`): borra el cronograma,
+  versiones, turnos, ciclos y eventos. Primero bloquea las versiones e inspecciona todas las FK
+  reales hacia cronograma y versión, incluidas referencias ajenas entre cronogramas. Si hay
+  riego histórico, correos u otra referencia externa, anula en lugar de borrar.
+- Publicado alguna vez: conserva el historial y fija `anulado_at`, `anulado_por`, `anulado_motivo`.
+  El evento `anulado` conserva el motivo. Solo retira los riegos **vigentes provisionales** de
+  origen cronograma cuya versión pertenezca al anulado: marca `vigente=false`, sin cambiar
+  versión, hash ni ciclos y sin crear un registro «sin riego». Aplicados, manuales y otros
+  orígenes/cronogramas se conservan con un aviso por turno.
+- Auditoría independiente `eliminar_cronograma` / `anular_cronograma`, con módulo, fecha,
+  motivo y números de versión; sobrevive al borrado físico.
+- Los anulados quedan fuera del listado, consulta por fecha (`null` si no hay otro), detalle y
+  acciones por ID (404), Dashboard, agua y respaldo del historial del modelo. Frescura solo
+  considera riego vigente. El índice único parcial libera la fecha para generar otro borrador.
+  Las consultas históricas por versión se conservan para el CSV, que incluye los anulados.
+- Migración `0005`: las cascadas internas permiten borrar únicamente cronogramas nunca publicados;
+  mantiene RLS, permisos de solo inserción y triggers de inmutabilidad. El downgrade conserva el
+  valor del enum y rechaza módulos/fechas duplicados antes de modificar el esquema, sin borrar datos.
 
 Las mutaciones bloquean el cronograma con `FOR UPDATE`. Riego bloquea el vigente y usa
 además un candado transaccional por turno-día, para serializar primeras inserciones de

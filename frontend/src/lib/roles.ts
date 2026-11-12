@@ -30,6 +30,7 @@ export function puedeVer(rol: Rol | undefined | null, pantalla: Pantalla): boole
 export const PERMISOS = {
   corregirCronogramas: ["admin", "encargado"],
   publicarCronogramas: ["admin", "encargado"],
+  eliminarCronogramas: ["admin", "encargado"],
   confirmarVisto: ["admin", "programador"],
   solicitarCorreccion: ["admin", "subgerente"],
   mantenerCronograma: ["admin", "encargado"],

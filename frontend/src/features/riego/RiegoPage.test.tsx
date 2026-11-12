@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hoyLima, sumarDias } from "../../lib/fechas";
 import type { Rol } from "../../lib/roles";
+import { reportesApi, type Serie } from "../../services/reportes";
 import { riegoApi, type RegistroRiego, type VersionRiego } from "../../services/riego";
 import { ciclo, MODULO, prepararRadix, seleccionCon, usuarioConRol } from "../../test/fabricas";
 import RiegoPage, { validarRango } from "./RiegoPage";
@@ -48,11 +49,17 @@ const VERSIONES: VersionRiego[] = [
   { ...registro({ id: 9, version: 1, estado: "provisional", origen: "cronograma", ciclos: [ciclo("06:00", "07:00", 12)] }), vigente: false, basado_en_id: null },
 ];
 
+const CLIMA: Serie = {
+  fuente: "clima", resolucion: "diaria", desde: null, hasta: null, capturado_fecha: null, unidades: {},
+  puntos: [{ fecha: AYER, eto_mm: 4.2 }],
+};
+
 beforeEach(() => {
   prepararRadix();
   rol = "admin";
   vi.spyOn(riegoApi, "listar").mockResolvedValue(REGISTROS);
   vi.spyOn(riegoApi, "versiones").mockResolvedValue(VERSIONES);
+  vi.spyOn(reportesApi, "serie").mockResolvedValue(CLIMA);
 });
 
 function montar() {
@@ -78,8 +85,24 @@ describe("RiegoPage", () => {
     expect(await screen.findByRole("button", { name: /TE01, .*: Aplicado, 2 ciclos, 25\.2 m³\/ha/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /TE02, .*: Provisional, 1 ciclo/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /TE01, .*: Sin riego/ })).toBeInTheDocument();
-    // TE02 de anteayer no tiene registro: se muestra pero no abre detalle.
-    expect(screen.getAllByRole("group", { name: /TE02, .*: Sin registro/ }).length).toBeGreaterThan(0);
+    // TE02 de anteayer no tiene registro: el admin puede abrirlo para cargarlo a mano.
+    expect(screen.getAllByRole("button", { name: /TE02, .*: Sin registro/ }).length).toBeGreaterThan(0);
+    // «Sin riego» (dato declarado) y «Sin registro» (falta el dato) se distinguen: 0 frente a —.
+    expect(screen.getByRole("button", { name: /TE01, .*: Sin riego/ })).toHaveTextContent("0");
+    expect(screen.getAllByRole("button", { name: /TE02, .*: Sin registro/ })[0]).toHaveTextContent("—");
+  });
+
+  it("muestra la ETo de cada día con una sola consulta de clima del rango", async () => {
+    montar();
+    expect((await screen.findAllByText(/^4[.,]2$/)).length).toBeGreaterThan(0);
+    expect(reportesApi.serie).toHaveBeenCalledTimes(1);
+    expect(reportesApi.serie).toHaveBeenCalledWith("clima", sumarDias(hoyLima(), -13), hoyLima(), MODULO.id, expect.anything());
+  });
+
+  it("el programador ve los turno-días sin registro como grupo, sin abrirlos", async () => {
+    rol = "programador";
+    montar();
+    expect((await screen.findAllByRole("group", { name: /TE02, .*: Sin registro/ })).length).toBeGreaterThan(0);
   });
 
   it("al tocar un turno-día abre el panel con sus ciclos y el historial de versiones (A, E, S)", async () => {
@@ -93,6 +116,22 @@ describe("RiegoPage", () => {
     expect(within(panel).getByText("Original")).toBeInTheDocument();
     expect(within(panel).getByText("Vigente")).toBeInTheDocument();
     expect(riegoApi.versiones).toHaveBeenCalledWith(11, AYER, expect.anything());
+  });
+
+  it("eliminar un riego pide motivo y deja el turno-día sin registro", async () => {
+    rol = "encargado";
+    const eliminar = vi.spyOn(riegoApi, "eliminarRegistro").mockResolvedValue({ turno_id: 11, fecha: AYER, version: 2 });
+    montar();
+    await userEvent.click(await screen.findByRole("button", { name: /TE01, .*: Aplicado/ }));
+    const panel = await screen.findByRole("dialog");
+    await userEvent.click(await within(panel).findByRole("button", { name: "Eliminar" }));
+    const confirmar = within(panel).getByRole("button", { name: "Eliminar riego" });
+    expect(confirmar).toBeDisabled();
+    await userEvent.type(within(panel).getByRole("textbox", { name: /Motivo/ }), "Turno equivocado");
+    vi.mocked(riegoApi.versiones).mockResolvedValue(VERSIONES.map((v) => ({ ...v, vigente: false })));
+    await userEvent.click(confirmar);
+    expect(eliminar).toHaveBeenCalledWith(1, "Turno equivocado");
+    expect(await within(panel).findByText(/Falta registrar el dato/)).toBeInTheDocument();
   });
 
   it("el programador ve el detalle en lectura, sin historial de versiones ni carga de Excel", async () => {

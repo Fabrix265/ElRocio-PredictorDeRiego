@@ -56,6 +56,7 @@ export interface Dashboard {
   agua_aplicada_m3ha: number | null;
   agua_aplicada_m3: number | null;
   turnos_con_riego: number;
+  ultimo_riego_fecha: string | null;
   turnos_total: number;
   aplicado_vs_modelo_pct: number | null;
   mds_um: number | null;
@@ -66,6 +67,7 @@ export interface Dashboard {
 }
 
 export const claveReportes = {
+  todo: ["reportes"] as const,
   dashboard: (moduloId: number) => ["reportes", "dashboard", moduloId] as const,
   agua: (moduloId: number, desde: string, hasta: string) => ["reportes", "agua", moduloId, desde, hasta] as const,
   serie: (fuente: string, desde: string, hasta: string, moduloId: number) => ["reportes", "serie", fuente, desde, hasta, moduloId] as const,
@@ -81,6 +83,9 @@ export const reportesApi = {
   serie(fuente: "clima" | "suelo" | "planta", desde: string, hasta: string, moduloId: number, signal?: AbortSignal): Promise<Serie> {
     const query = fuente === "planta" ? { desde, hasta } : { desde, hasta, modulo_id: moduloId };
     return api.get<Serie>(`/datos/${fuente}`, query, signal);
+  },
+  pronostico(desde: string, hasta: string, signal?: AbortSignal): Promise<Serie> {
+    return api.get<Serie>("/datos/pronostico", { desde, hasta }, signal);
   },
   exportarCronograma(id: number, formato: "pdf" | "xlsx"): Promise<string> {
     return descargar(`/cronogramas/${id}/exportar`, { formato }, `cronograma.${formato}`);

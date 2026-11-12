@@ -36,6 +36,7 @@ def verificar_rol_bd(config: Settings) -> list[str]:
         try:
             with motor.connect() as conexion:
                 problemas = problemas_rol_conexion(conexion)
+                verificar_migraciones(conexion)
         finally:
             motor.dispose()
     except Exception as error:  # noqa: BLE001 - sin BD el health lo informa
@@ -48,6 +49,17 @@ def verificar_rol_bd(config: Settings) -> list[str]:
             raise RuntimeError(mensaje + ". DATABASE_URL debe usar el rol riego_app.")
         logger.warning("%s (en producción no arrancaría)", mensaje)
     return problemas
+
+
+def verificar_migraciones(conexion) -> None:
+    """Avisa fuerte en el log si la BD no tiene las migraciones del código (no aborta)."""
+    from app.db.version_esquema import comprobar
+
+    version = comprobar(conexion)
+    if version.estado == "pendientes":
+        logger.error(version.mensaje)
+    elif version.estado == "desconocido":
+        logger.warning("No se pudo leer la migración de la base de datos (riego.alembic_version)")
 
 
 def create_app(config: Settings | None = None) -> FastAPI:

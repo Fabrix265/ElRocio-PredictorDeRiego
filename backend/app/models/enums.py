@@ -109,6 +109,7 @@ class OrigenRiegoD1(str, enum.Enum):
 
 
 class TipoEventoCronograma(str, enum.Enum):
+    anulado = "anulado"
     generado = "generado"
     regenerado = "regenerado"
     corregido = "corregido"

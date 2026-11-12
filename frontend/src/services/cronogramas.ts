@@ -152,6 +152,12 @@ export interface GuardarVersionEntrada extends EdicionEntrada {
 export interface AvisoSolape { turno_id: number; ciclo: number; tipo: "solape"; mensaje: string }
 export interface VersionPrevia extends Omit<VersionDetalle, "id" | "numero"> { avisos: AvisoSolape[] }
 export interface CronogramaConAvisos extends CronogramaDetalle { avisos: string[] }
+export interface EliminarCronogramaSalida {
+  accion: "eliminado" | "anulado";
+  cronograma_id: number;
+  fecha: string;
+  avisos: string[];
+}
 /** La foto del modelo no incluye los metadatos de edición de CicloSalida. */
 export type CicloAlternativa = Omit<CicloCronograma, "ciclo_modelo" | "duracion_manual" | "campos_editados"> & {
   duracion_p10: number | null; duracion_p90: number | null;
@@ -184,6 +190,7 @@ export const claveCronogramas = {
 };
 
 export const cronogramasApi = {
+  eliminar: (id: number, datos: { motivo: string; lock_version: number }) => api.delete<EliminarCronogramaSalida>(`/cronogramas/${id}`, datos),
   recalcular: (id: number, datos: EdicionEntrada) => api.post<VersionPrevia>(`/cronogramas/${id}/recalcular`, datos),
   alternativas: (id: number, signal?: AbortSignal) => api.get<Alternativas>(`/cronogramas/${id}/alternativas`, undefined, signal),
   guardarVersion: (id: number, datos: GuardarVersionEntrada) => api.post<CronogramaDetalle>(`/cronogramas/${id}/versiones`, datos),

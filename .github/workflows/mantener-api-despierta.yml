@@ -1,0 +1,19 @@
+# Render Free duerme la API tras 15 min sin tráfico. Este ping la mantiene despierta
+# (y con ella la ingesta programada). GitHub puede retrasar los cron unos minutos.
+# Para desactivarlo: Actions → este workflow → Disable workflow.
+name: Mantener API despierta
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping a /api/v1/health
+        run: curl -fsS -o /dev/null -w "%{http_code}\n" --max-time 120 https://riego-el-rocio-api.onrender.com/api/v1/health || true

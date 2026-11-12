@@ -1,5 +1,6 @@
 import { Activity, CalendarClock, Droplet, Gauge, ThermometerSun, type LucideIcon } from "lucide-react";
 
+import { formatearDiaCorto } from "../../lib/fechas";
 import type { Rol } from "../../lib/roles";
 
 /** Campo de `Dashboard` que muestra el KPI (el estado de mañana se arma aparte). */
@@ -30,4 +31,9 @@ export const KPIS: Kpi[] = [
 /** KPIs visibles para un rol. */
 export function kpisParaRol(rol: Rol): Kpi[] {
   return KPIS.filter((k) => !k.roles || k.roles.includes(rol));
+}
+
+/** Pie del KPI de agua cuando ayer no tiene riego registrado: falta el dato, no «no se regó». */
+export function pieSinRiegoAyer(ultimoRiego: string | null | undefined): string {
+  return `Sin datos de riego de ayer${ultimoRiego ? ` · último registro: ${formatearDiaCorto(ultimoRiego)}` : ""}`;
 }

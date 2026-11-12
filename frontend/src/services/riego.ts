@@ -4,6 +4,8 @@
  * Contrato real del backend (prefijo /api/v1; esquemas en backend/app/schemas/riego.py):
  * - GET   /riego?modulo_id&desde&hasta                  → 200 RiegoListado (todos los roles)
  * - GET   /riego/{turno_id}/{fecha}/versiones           → 200 VersionRiego[] (A E S)
+ * - POST  /riego/registros  RegistroRiegoEntrada         → 201 RegistroRiego (A E S)
+ * - DELETE /riego/registros/{id}  {motivo}               → 200 EliminarRiegoSalida (A E S); 409 si ya no es el vigente
  * - POST  /riego/cargas  multipart {archivo, modulo_id}  → 201 CargaRiego (A E)
  *         413 archivo grande · 422 archivo inválido (detail en texto) · 503 sin defusedxml
  * - GET   /riego/cargas/{id}                             → 200 CargaRiego (A E)
@@ -145,6 +147,13 @@ export function normalizarCarga(c: CargaRiego): CargaRiego {
   return { ...c, grupos };
 }
 
+/** `EliminarRiegoSalida`: la versión que dejó de estar vigente. */
+export interface EliminarRiegoSalida {
+  turno_id: number;
+  fecha: string;
+  version: number;
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -152,6 +161,10 @@ export function normalizarCarga(c: CargaRiego): CargaRiego {
 export const riegoApi = {
   async guardarRegistro(datos: RegistroRiegoEntrada): Promise<RegistroRiego> {
     return normalizarRegistro(await api.post<RegistroRiego>("/riego/registros", datos));
+  },
+  /** Quita el riego vigente del turno-día (queda sin registro; la versión sigue en el historial). */
+  async eliminarRegistro(id: number, motivo: string): Promise<EliminarRiegoSalida> {
+    return api.delete<EliminarRiegoSalida>(`/riego/registros/${id}`, { motivo });
   },
   async listar(moduloId: number, desde: string, hasta: string, signal?: AbortSignal): Promise<RegistroRiego[]> {
     const resp = await api.get<RespuestaRiego>("/riego", { modulo_id: moduloId, desde, hasta }, signal);
