@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Iterable, Sequence
 from typing import Any
 
-from sqlalchemy import exists, func, or_, select, text
+from sqlalchemy import delete, exists, func, or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
@@ -37,21 +37,24 @@ def tomar_candado_generacion(db: Session, modulo_id: int) -> bool:
 def bloquear_rango(db: Session, modulo_id: int, fechas: Sequence[dt.date]) -> dict[dt.date, Cronograma]:
     filas = db.scalars(
         select(Cronograma)
-        .where(Cronograma.modulo_id == modulo_id, Cronograma.fecha.in_(list(fechas)))
+        .where(Cronograma.modulo_id == modulo_id, Cronograma.fecha.in_(list(fechas)),
+               Cronograma.anulado_at.is_(None))
         .with_for_update()
     )
     return {c.fecha: c for c in filas}
 
 
 def obtener(db: Session, cronograma_id: int, *, bloquear: bool = False) -> Cronograma | None:
-    consulta = select(Cronograma).where(Cronograma.id == cronograma_id)
+    consulta = select(Cronograma).where(Cronograma.id == cronograma_id, Cronograma.anulado_at.is_(None))
     if bloquear:
         consulta = consulta.with_for_update().execution_options(populate_existing=True)
     return db.scalars(consulta).first()
 
 
 def por_fecha(db: Session, modulo_id: int, fecha: dt.date) -> Cronograma | None:
-    return db.scalars(select(Cronograma).where(Cronograma.modulo_id == modulo_id, Cronograma.fecha == fecha)).first()
+    return db.scalars(select(Cronograma).where(
+        Cronograma.modulo_id == modulo_id, Cronograma.fecha == fecha, Cronograma.anulado_at.is_(None)
+    )).first()
 
 
 def listar(
@@ -59,7 +62,8 @@ def listar(
     estado: EstadoCronograma | None = None,
 ) -> list[Cronograma]:
     consulta = select(Cronograma).where(
-        Cronograma.modulo_id == modulo_id, Cronograma.fecha >= desde, Cronograma.fecha <= hasta
+        Cronograma.modulo_id == modulo_id, Cronograma.fecha >= desde, Cronograma.fecha <= hasta,
+        Cronograma.anulado_at.is_(None),
     )
     if solo_publicados:
         consulta = consulta.where(Cronograma.version_publicada_id.is_not(None))
@@ -209,3 +213,59 @@ def numero_ultimo_visto(db: Session, cronograma_id: int, usuario_id: int) -> int
                CronogramaEvento.tipo == TipoEventoCronograma.visto_programador)
         .order_by(CronogramaEvento.ocurrido_at.desc(), CronogramaEvento.id.desc()).limit(1)
     )
+
+
+def bloquear_versiones(db: Session, cronograma_id: int) -> list[CronogramaVersion]:
+    """Impide nuevas referencias FK mientras se decide y ejecuta el borrado."""
+    return list(db.scalars(select(CronogramaVersion).where(
+        CronogramaVersion.cronograma_id == cronograma_id,
+    ).order_by(CronogramaVersion.id).with_for_update()))
+
+
+def tiene_referencias_externas(db: Session, cronograma_id: int) -> bool:
+    """Inspecciona TODAS las FK reales, incluidas las que aún no tienen modelo ORM.
+
+    Solo son internas las filas que pertenecen al árbol que se va a borrar. Una
+    versión basada en esta desde otro cronograma, un evento ajeno, riego (incluso
+    no vigente), correo y cualquier futura FK obligan a conservar el historial.
+    Los identificadores del SQL provienen de pg_catalog y se escapan con %I.
+    """
+    claves = db.execute(text("""
+        SELECT ns.nspname AS esquema, src.relname AS tabla, dst.relname AS destino,
+               format('%I.%I', ns.nspname, src.relname) AS origen_sql,
+               format('%I.%I', nd.nspname, dst.relname) AS destino_sql,
+               string_agg(format('s.%I = d.%I', a.attname, b.attname), ' AND ' ORDER BY k.orden) AS enlace
+        FROM pg_constraint fk
+        JOIN pg_class src ON src.oid = fk.conrelid
+        JOIN pg_namespace ns ON ns.oid = src.relnamespace
+        JOIN pg_class dst ON dst.oid = fk.confrelid
+        JOIN pg_namespace nd ON nd.oid = dst.relnamespace
+        CROSS JOIN LATERAL unnest(fk.conkey, fk.confkey) WITH ORDINALITY AS k(origen, destino, orden)
+        JOIN pg_attribute a ON a.attrelid = src.oid AND a.attnum = k.origen
+        JOIN pg_attribute b ON b.attrelid = dst.oid AND b.attnum = k.destino
+        WHERE fk.contype = 'f' AND nd.nspname = 'riego'
+          AND dst.relname IN ('cronograma', 'cronograma_version')
+        GROUP BY fk.oid, ns.nspname, src.relname, nd.nspname, dst.relname
+        ORDER BY ns.nspname, src.relname, fk.oid
+    """)).all()
+    propias = {
+        "cronograma": "s.id = :id",
+        "cronograma_version": "s.cronograma_id = :id",
+        "cronograma_evento": "s.cronograma_id = :id",
+        "cronograma_turno": "s.version_id IN (SELECT id FROM riego.cronograma_version WHERE cronograma_id = :id)",
+        "cronograma_ciclo": "s.version_id IN (SELECT id FROM riego.cronograma_version WHERE cronograma_id = :id)",
+    }
+    for fk in claves:
+        filtro = "d.id = :id" if fk.destino == "cronograma" else "d.cronograma_id = :id"
+        if fk.esquema == "riego" and fk.tabla in propias:
+            filtro += f" AND NOT ({propias[fk.tabla]})"
+        consulta = (f"SELECT EXISTS (SELECT 1 FROM {fk.origen_sql} s JOIN {fk.destino_sql} d "
+                    f"ON {fk.enlace} WHERE {filtro})")
+        if db.scalar(text(consulta), {"id": cronograma_id}):
+            return True
+    return False
+
+
+def borrar(db: Session, cronograma_id: int) -> None:
+    """La BD valida el borrado y retira solo sus dependencias mediante cascada."""
+    db.execute(delete(Cronograma).where(Cronograma.id == cronograma_id))

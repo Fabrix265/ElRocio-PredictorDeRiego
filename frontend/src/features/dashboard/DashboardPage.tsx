@@ -15,7 +15,7 @@ import { formatearDiaCorto, formatearFechaLarga, saludoLima } from "../../lib/fe
 import { claveReportes, reportesApi, type Dashboard } from "../../services/reportes";
 import { useUsuario } from "../auth/AuthProvider";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
-import { kpisParaRol, type Kpi } from "./kpis";
+import { kpisParaRol, pieSinRiegoAyer, type Kpi } from "./kpis";
 import { HoyManana, useCronogramasHoyManana } from "./HoyManana";
 import { PanelFrescura } from "./PanelFrescura";
 
@@ -25,7 +25,7 @@ function TarjetaKpi({ kpi, estado, dashboard }: { kpi: Kpi; estado?: ReactNode; 
   const pie = kpi.campo === "agua_aplicada_m3ha" && dashboard.data
     ? dashboard.data.turnos_con_riego
       ? `${dashboard.data.turnos_con_riego} de ${dashboard.data.turnos_total} turnos · ${formatearNumero(dashboard.data.agua_aplicada_m3, 0)} m³`
-      : "Sin riego registrado ayer"
+      : pieSinRiegoAyer(dashboard.data.ultimo_riego_fecha)
     : kpi.campo === "aplicado_vs_modelo_pct"
       ? "Aplicado ayer frente a la propuesta del modelo"
       : dashboard.data ? `Ayer, ${formatearDiaCorto(dashboard.data.ayer)}` : "";
@@ -76,7 +76,7 @@ function Pronostico({ dashboard }: { dashboard: UseQueryResult<Dashboard> }) {
         ) : !serie?.puntos.length ? (
           <EmptyState compacto icono={<CloudSun />} titulo="Sin pronóstico" descripcion="Llega con la ingesta diaria de Phytech." />
         ) : (
-          <ul className="grid grid-cols-2 gap-2 min-[520px]:grid-cols-3 lg:grid-cols-5" aria-label="Pronóstico por día">
+          <ul className="grid grid-cols-2 gap-2 @min-[480px]:grid-cols-3 @min-[760px]:grid-cols-5" aria-label="Pronóstico por día">
             {serie.puntos.map((p) => (
               <li key={String(p.fecha)} className="flex flex-col gap-1 rounded-lg border border-borde bg-superficie px-3 py-2.5">
                 <span className="text-xs font-semibold text-texto capitalize">{formatearDiaCorto(String(p.fecha))}</span>
@@ -131,12 +131,13 @@ export function DashboardPage() {
         ))}
       </section>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
-        <HoyManana {...cronogramas} />
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="@container flex min-w-0 flex-col gap-4">
+          <HoyManana {...cronogramas} />
+          <Pronostico dashboard={dashboard} />
+        </div>
         <PanelFrescura />
       </div>
-
-      <Pronostico dashboard={dashboard} />
     </div>
   );
 }

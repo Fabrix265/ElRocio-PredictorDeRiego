@@ -142,12 +142,19 @@ def ciclos_cronograma_referencia(db: Session, modulo_id: int, hasta: dt.date) ->
                CronogramaCiclo.riego_m3ha, CronogramaCiclo.hora_inicio, CronogramaCiclo.hora_fin,
                CronogramaCiclo.fin_dia_siguiente)
         .join(CronogramaCiclo, CronogramaCiclo.version_id == version)
-        .where(Cronograma.modulo_id == modulo_id, Cronograma.fecha < hasta)
+        .where(Cronograma.modulo_id == modulo_id, Cronograma.fecha < hasta, Cronograma.anulado_at.is_(None))
         .order_by(Cronograma.fecha, CronogramaCiclo.turno_id, CronogramaCiclo.inicio_min)
     ))
 
 
 # --- Riego aplicado: listado y versiones (§4 "Riego aplicado") ------------------
+
+
+def ultima_fecha_vigente(db: Session, modulo_id: int, hasta: dt.date) -> dt.date | None:
+    """Último dato hasta la fecha inclusiva; también cuenta provisional y «sin riego»."""
+    return db.scalar(select(func.max(RiegoRegistro.fecha)).where(
+        RiegoRegistro.modulo_id == modulo_id, RiegoRegistro.vigente.is_(True), RiegoRegistro.fecha <= hasta,
+    ))
 
 def versiones_turno_dia(db: Session, turno_id: int, fecha: dt.date) -> list[RiegoRegistro]:
     """Todas las versiones de un turno-día (vigente o no), de la 1 (original) en adelante."""

@@ -21,8 +21,15 @@ export const ETIQUETA_ESTADO_CELDA: Record<EstadoCelda, string> = {
 export const TONO_ESTADO_CELDA: Record<EstadoCelda, TonoBadge> = {
   aplicado: "exito",
   provisional: "aviso",
-  sin_riego: "neutro",
+  sin_riego: "info",
   sin_registro: "neutro",
+};
+
+export const DESCRIPCION_ESTADO_CELDA: Record<EstadoCelda, string> = {
+  aplicado: "Riego confirmado",
+  provisional: "Pendiente de confirmar",
+  sin_riego: "Se declaró que no se regó",
+  sin_registro: "Falta registrar el dato",
 };
 
 export const ETIQUETA_ORIGEN: Record<OrigenRiego, string> = {

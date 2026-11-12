@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router";
 
 import { Alert } from "../../components/ui/Alert";
-import { Badge } from "../../components/ui/Badge";
+import { EstadoRiego } from "./EstadoRiego";
 import { Button, clasesBoton } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Dialog } from "../../components/ui/Dialog";
@@ -17,11 +17,12 @@ import { diasEntre, esDiaValido, formatearDia, hoyLima, listaDias, sumarDias } f
 import { puede } from "../../lib/roles";
 import { useAhora } from "../../lib/useAhora";
 import { mensajeDeError } from "../../services/httpClient";
+import { claveReportes, reportesApi } from "../../services/reportes";
 import { claveRiego, riegoApi, type RegistroRiego } from "../../services/riego";
 import { useUsuario } from "../auth/AuthProvider";
 import type { Turno } from "../catalogo/api";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
-import { ETIQUETA_ESTADO_CELDA, TONO_ESTADO_CELDA, type EstadoCelda } from "./etiquetas";
+import { DESCRIPCION_ESTADO_CELDA, type EstadoCelda } from "./etiquetas";
 import { PanelTurnoDia } from "./PanelTurnoDia";
 import { TablaRiego, claveTurnoDia, indexarRegistros } from "./TablaRiego";
 
@@ -62,6 +63,13 @@ export default function RiegoPage() {
     placeholderData: keepPreviousData,
   });
 
+  const clima = useQuery({
+    queryKey: claveReportes.serie("clima", rango.desde, rango.hasta, modulo?.id ?? 0),
+    queryFn: ({ signal }) => reportesApi.serie("clima", rango.desde, rango.hasta, modulo!.id, signal),
+    enabled: !!modulo && !errorRango, staleTime: 60_000,
+  });
+  const etoPorDia = useMemo(() => new Map((clima.data?.puntos ?? []).map((p) => [p.fecha!, typeof p.eto_mm === "number" ? p.eto_mm : null])), [clima.data]);
+
   const registros = useMemo(() => indexarRegistros(consulta.data ?? []), [consulta.data]);
   const dias = useMemo(() => (errorRango ? [] : listaDias(rango.desde, rango.hasta).reverse()), [rango, errorRango]);
   const puedeSubir = puede(usuario.rol, "subirExcelRiego");
@@ -89,7 +97,7 @@ export default function RiegoPage() {
       />
 
       <Card>
-        <div className="flex flex-col gap-3 border-b border-borde p-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-3 border-b border-borde p-4">
           <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end">
             <Field label="Desde" className="sm:w-44">
               <Input
@@ -109,16 +117,17 @@ export default function RiegoPage() {
             </Field>
             <div className="col-span-2 flex gap-2 sm:col-span-1">
               {ATAJOS.map((n) => (
-                <Button key={n} variante="secundario" tamano="sm" className="h-10" onClick={() => aplicarAtajo(n)}>
+                <Button key={n} variante="secundario" tamano="sm" className="h-10 flex-1 sm:flex-none" onClick={() => aplicarAtajo(n)}>
                   {n} días
                 </Button>
               ))}
             </div>
           </div>
-          <ul className="flex flex-wrap gap-1.5" aria-label="Leyenda de estados">
+          <ul className="grid gap-x-5 gap-y-2 sm:grid-cols-2 xl:flex xl:flex-wrap" aria-label="Leyenda de estados">
             {LEYENDA.map((e) => (
-              <li key={e}>
-                <Badge tono={TONO_ESTADO_CELDA[e]}>{ETIQUETA_ESTADO_CELDA[e]}</Badge>
+              <li key={e} className="flex items-center gap-1.5 text-xs whitespace-nowrap text-texto-3">
+                <EstadoRiego estado={e} />
+                <span>{DESCRIPCION_ESTADO_CELDA[e]}</span>
               </li>
             ))}
           </ul>
@@ -169,8 +178,11 @@ export default function RiegoPage() {
           />
         ) : (
           <div aria-busy={consulta.isFetching || undefined} className={consulta.isPlaceholderData ? "opacity-60" : undefined}>
+            {clima.isError && <p className="px-4 pt-3 text-xs text-err-tx">No se pudo cargar la ETo: {mensajeDeError(clima.error)}</p>}
+            {clima.isPending && <p className="px-4 pt-3 text-xs text-texto-3" role="status">Cargando ETo…</p>}
             <TablaRiego
               dias={dias}
+              etoPorDia={etoPorDia}
               turnos={turnos}
               registros={registros}
               seleccionado={seleccion ? claveTurnoDia(seleccion.turno.id, seleccion.fecha) : null}

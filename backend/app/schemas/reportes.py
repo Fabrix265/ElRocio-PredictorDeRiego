@@ -41,6 +41,7 @@ class DashboardSalida(BaseModel):
     modulo_id: int
     fecha: dt.date
     ayer: dt.date
+    ultimo_riego_fecha: dt.date | None = None
     agua_aplicada_m3ha: float | None = None
     agua_aplicada_m3: float | None = None
     turnos_con_riego: int

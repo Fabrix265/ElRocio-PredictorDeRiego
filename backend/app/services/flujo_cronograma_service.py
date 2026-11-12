@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.core.errores import Conflicto, DatosInvalidos, NoEncontrado, SinPermiso
 from app.core.tiempo import ahora_utc, hoy_lima
 from app.models import Cronograma, CronogramaEvento, CronogramaVersion, Modulo, Usuario
-from app.models.enums import EstadoCronograma, OrigenVersion, RolUsuario, TipoEventoCronograma
+from app.models.enums import EstadoCronograma, EstadoRiego, OrigenRiego, OrigenVersion, RolUsuario, TipoEventoCronograma
 from app.repositories import cronogramas as repo
 from app.repositories import riego as repo_riego
 from app.schemas.cronograma import EdicionEntrada, GuardarVersionEntrada
@@ -447,3 +447,54 @@ def datos_campo(db: Session, cronograma_id: int, dias: int, actor: Usuario) -> l
         raise DatosInvalidos("Los días deben estar entre 1 y 14")
     modulo = db.get(Modulo, crono.modulo_id)
     return repo.datos_campo(db, modulo.fundo_id, crono.fecha - dt.timedelta(days=dias), crono.fecha)
+
+
+def eliminar(db: Session, cronograma_id: int, motivo: str, lock_version: int, actor: Usuario,
+             contexto: ContextoPeticion | None = None) -> dict:
+    """Retira un cronograma de la operación; la transacción la confirma DbSesion."""
+    crono = obtener(db, cronograma_id, actor, EDITORES, bloquear=True)
+    _lock(crono, lock_version)
+    motivo = motivo.strip()
+    if not 3 <= len(motivo) <= 500:
+        raise DatosInvalidos("El motivo debe tener entre 3 y 500 caracteres")
+    versiones = repo.bloquear_versiones(db, crono.id)
+    detalle = {
+        "modulo_id": crono.modulo_id, "modulo": db.get(Modulo, crono.modulo_id).codigo,
+        "fecha": crono.fecha.isoformat(), "motivo": motivo,
+        "versiones": sorted(v.numero for v in versiones),
+    }
+    salida = {"accion": "eliminado", "cronograma_id": crono.id, "fecha": crono.fecha, "avisos": []}
+    nunca_publicado = (crono.version_publicada_id is None and crono.num_publicaciones == 0
+                       and all(v.publicada_at is None for v in versiones))
+    if nunca_publicado and not repo.tiene_referencias_externas(db, crono.id):
+        _auditar(db, crono, actor, "eliminar_cronograma", contexto, detalle)
+        db.flush()  # La auditoría no tiene FK al cronograma y sobrevive al borrado.
+        repo.borrar(db, crono.id)
+    else:
+        ids = {v.id for v in versiones}
+        retirados = []
+        # Mismo orden de candados que visto/publicar y edición manual: cronograma, turno-día.
+        for turno in sorted(repo_riego.turnos_de_modulo(db, crono.modulo_id), key=lambda t: t.id):
+            vigente = repo_riego.bloquear_turno_dia(db, turno.id, crono.fecha)
+            if vigente is None:
+                continue
+            if (vigente.estado == EstadoRiego.provisional and vigente.origen == OrigenRiego.cronograma
+                    and vigente.cronograma_version_id in ids):
+                retirados.append(vigente.id)
+            else:
+                causa = ("riego aplicado" if vigente.estado == EstadoRiego.aplicado else
+                         "riego provisional manual" if vigente.origen == OrigenRiego.manual else
+                         "riego provisional de otro cronograma" if vigente.origen == OrigenRiego.cronograma else
+                         "riego provisional de otro origen")
+                salida["avisos"].append(f"{turno.codigo}: {causa}; se conservó")
+        # No se crea una versión «sin riego»: debe quedar sin registro vigente.
+        repo_riego.dejar_de_ser_vigentes(db, retirados)
+        crono.anulado_at, crono.anulado_por, crono.anulado_motivo = ahora_utc(), actor.id, motivo
+        crono.lock_version += 1
+        detalle |= {"registros_retirados": retirados, "avisos": salida["avisos"]}
+        _evento(db, crono, crono.version_publicada_id or crono.borrador_version_id, actor,
+                TipoEventoCronograma.anulado, comentario=motivo, detalle=detalle)
+        _auditar(db, crono, actor, "anular_cronograma", contexto, detalle)
+        salida["accion"] = "anulado"
+    db.flush()
+    return salida

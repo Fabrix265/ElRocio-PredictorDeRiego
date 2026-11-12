@@ -33,6 +33,7 @@ const ACCIONES: Record<string, string> = {
   riego_editado: "Riego editado",
   riego_marcado_aplicado: "Riego marcado como aplicado",
   riego_sin_riego: "Turno marcado sin riego",
+  riego_eliminado: "Riego eliminado",
   excel_subido: "Excel de riego subido",
   excel_confirmado: "Excel de riego confirmado",
   excel_descartado: "Excel de riego descartado",

@@ -182,6 +182,20 @@ class PublicarEntrada(BaseModel):
     lock_version: int = Field(ge=1, le=2**31 - 1)
 
 
+class EliminarCronogramaEntrada(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    motivo: str = Field(min_length=3, max_length=500)
+    lock_version: int = Field(ge=1, le=2**31 - 1, strict=True)
+
+
+class EliminarCronogramaSalida(BaseModel):
+    accion: Literal["eliminado", "anulado"]
+    cronograma_id: int
+    fecha: dt.date
+    avisos: list[str]
+
+
 class VistoEntrada(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version_id: int = Field(ge=1, le=2**63 - 1)

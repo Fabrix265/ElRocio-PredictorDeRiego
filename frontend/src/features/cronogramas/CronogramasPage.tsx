@@ -11,6 +11,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { Field } from "../../components/ui/Field";
 import { Input } from "../../components/ui/Input";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { Tooltip } from "../../components/ui/Tooltip";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { formatearDiaCorto, formatearFechaHora, hoyLima, sumarDias } from "../../lib/fechas";
 import { puede } from "../../lib/roles";
@@ -68,10 +69,12 @@ export default function CronogramasPage() {
         acciones={
           <div className="flex flex-wrap gap-2">
             {puede(usuario.rol, "exportarRefinamiento") && (
+              <Tooltip lado="bottom" texto={<span className="block max-w-[min(18rem,80vw)]">Dataset para reentrenar el modelo: por fecha, turno y ciclo, los datos de entrada del modelo, lo que propuso, lo que se publicó tras las correcciones y lo que se aplicó. Incluye todos los módulos del rango.</span>}>
               <Button variante="secundario" disabled={!!errorRango || refinamiento.isPending} onClick={() => refinamiento.mutate()}>
                 <FileDown aria-hidden="true" />
                 {refinamiento.isPending ? "Preparando…" : "CSV de refinamiento"}
               </Button>
+              </Tooltip>
             )}
             {botonGenerar}
           </div>

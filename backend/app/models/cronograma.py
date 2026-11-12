@@ -82,13 +82,20 @@ class Generacion(IdMixin, CreadoMixin, Base):
 
 
 class Cronograma(IdMixin, CreadoMixin, ActualizadoMixin, Base):
-    """Un cronograma por módulo y fecha."""
+    """Un cronograma activo por módulo y fecha; los anulados conservan su historial."""
 
     __tablename__ = "cronograma"
-    __table_args__ = (UniqueConstraint("modulo_id", "fecha"), Index("ix_cronograma_estado", "estado"))
+    __table_args__ = (
+        Index("uq_cronograma_modulo_id_fecha_activo", "modulo_id", "fecha", unique=True,
+              postgresql_where=text("anulado_at IS NULL")),
+        Index("ix_cronograma_estado", "estado"),
+    )
 
     modulo_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("modulo.id"))
     fecha: Mapped[dt.date] = mapped_column(Date)
+    anulado_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    anulado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"), index=True)
+    anulado_motivo: Mapped[str | None] = mapped_column(Text)
     estado: Mapped[EstadoCronograma] = mapped_column(
         ESTADO_CRONOGRAMA, server_default=EstadoCronograma.borrador.value, default=EstadoCronograma.borrador
     )
@@ -122,7 +129,7 @@ class CronogramaVersion(IdMixin, CreadoMixin, Base):
     __tablename__ = "cronograma_version"
     __table_args__ = (UniqueConstraint("cronograma_id", "numero"),)
 
-    cronograma_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cronograma.id"))
+    cronograma_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cronograma.id", ondelete="CASCADE"))
     numero: Mapped[int] = mapped_column(Integer)
     origen: Mapped[OrigenVersion] = mapped_column(ORIGEN_VERSION)
     generacion_id: Mapped[int | None] = mapped_column(
@@ -154,7 +161,7 @@ class CronogramaTurno(IdMixin, CreadoMixin, Base):
     __tablename__ = "cronograma_turno"
     __table_args__ = (UniqueConstraint("version_id", "turno_id"),)
 
-    version_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cronograma_version.id"))
+    version_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cronograma_version.id", ondelete="CASCADE"))
     turno_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("turno.id"), index=True)
     n_ciclos: Mapped[int] = mapped_column(SmallInteger)
     n_ciclos_modelo: Mapped[int | None] = mapped_column(SmallInteger)
@@ -172,7 +179,7 @@ class CronogramaCiclo(IdMixin, CreadoMixin, Base):
     __tablename__ = "cronograma_ciclo"
     __table_args__ = (UniqueConstraint("version_id", "turno_id", "ciclo"),)
 
-    version_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cronograma_version.id"))
+    version_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cronograma_version.id", ondelete="CASCADE"))
     turno_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("turno.id"), index=True)
     ciclo: Mapped[int] = mapped_column(SmallInteger)
     riego_m3ha: Mapped[float] = mapped_column(Double)
@@ -225,7 +232,7 @@ class CronogramaEvento(IdMixin, Base):
     __tablename__ = "cronograma_evento"
     __table_args__ = (Index("ix_cronograma_evento_cronograma_id_ocurrido_at", "cronograma_id", "ocurrido_at"),)
 
-    cronograma_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cronograma.id"))
+    cronograma_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cronograma.id", ondelete="CASCADE"))
     version_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("cronograma_version.id"), index=True
     )

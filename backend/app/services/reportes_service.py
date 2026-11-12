@@ -138,6 +138,7 @@ def dashboard(db: Session, modulo_id: int, usuario: Usuario) -> dict[str, Any]:
     pronostico = datos_service.serie_pronostico(db, desde=hoy, hasta=hoy + dt.timedelta(days=4), capturado=None)
     return {
         "modulo_id": modulo.id, "fecha": hoy, "ayer": ayer,
+        "ultimo_riego_fecha": repo_riego.ultima_fecha_vigente(db, modulo.id, ayer),
         "agua_aplicada_m3ha": round(aplicado_m3 / area, 1) if aplicado_m3 is not None and area else None,
         "agua_aplicada_m3": round(aplicado_m3, 0) if aplicado_m3 is not None else None,
         "turnos_con_riego": sum(1 for t in dia["turnos"] if t["aplicado_m3"] is not None),
@@ -353,6 +354,8 @@ def refinamiento_csv(db: Session, desde: dt.date | None, hasta: dt.date | None, 
                 "regenerado": any(v.origen == OrigenVersion.regenerado for v in lista),
                 "num_versiones": len(lista),
                 "modelo_version": modelos.get(base.modelo_version_id) if base else None,
+                "anulado": crono.anulado_at is not None,
+                "anulado_motivo": crono.anulado_motivo,
             }
             filas.append(fila)
 
@@ -360,7 +363,7 @@ def refinamiento_csv(db: Session, desde: dt.date | None, hasta: dt.date | None, 
     bloques_cols = [f"{b}_{c}" for b in ("modelo_v1", "modelo_base", "final", "aplicado")
                     for c in ("n_ciclos", "riego_m3ha", "inicio_min", "duracion_min")]
     resto = ["estado_riego", "motivos", "ultimo_motivo", "n_correcciones", "preliminar", "datos_incompletos",
-             "regenerado", "num_versiones", "modelo_version"]
+             "regenerado", "num_versiones", "modelo_version", "anulado", "anulado_motivo"]
     columnas = fijas + columnas_foto + bloques_cols + resto
     salida = io.StringIO()
     escritor = csv.DictWriter(salida, fieldnames=columnas, extrasaction="ignore", lineterminator="\n")

@@ -20,7 +20,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Query, Response
 
-from app.api.deps import MAX_ID_BD, Contexto, DbSesion, IdPath, UsuarioHabilitado, requiere_rol
+from app.api.deps import AdminEncargado, MAX_ID_BD, Contexto, DbSesion, IdPath, UsuarioHabilitado, requiere_rol
 from app.core.tiempo import hoy_lima
 from app.models import Usuario
 from app.models.enums import RolUsuario
@@ -30,6 +30,8 @@ from app.schemas.cronograma import (
     CronogramaConAvisos,
     DiferenciasSalida,
     EdicionEntrada,
+    EliminarCronogramaEntrada,
+    EliminarCronogramaSalida,
     EventoSalida,
     GenerarEntrada,
     GenerarSalida,
@@ -48,7 +50,6 @@ from app.services import flujo_cronograma_service as flujo
 
 router = APIRouter(prefix="/cronogramas")
 
-AdminEncargado = Annotated[Usuario, Depends(requiere_rol(RolUsuario.admin, RolUsuario.encargado))]
 AdminProgramador = Annotated[Usuario, Depends(requiere_rol(RolUsuario.admin, RolUsuario.programador))]
 AdminSubgerente = Annotated[Usuario, Depends(requiere_rol(RolUsuario.admin, RolUsuario.subgerente))]
 ProgramadorSubgerente = Annotated[Usuario, Depends(requiere_rol(RolUsuario.programador, RolUsuario.subgerente))]
@@ -84,6 +85,12 @@ def por_fecha(usuario: UsuarioHabilitado, db: DbSesion, modulo_id: ModuloQuery, 
 @router.get("/{cronograma_id}", response_model=CronogramaDetalle)
 def detalle(cronograma_id: IdPath, usuario: UsuarioHabilitado, db: DbSesion) -> dict[str, Any]:
     return cronograma_service.detalle(db, cronograma_id, usuario)
+
+
+@router.delete("/{cronograma_id}", response_model=EliminarCronogramaSalida)
+def eliminar(cronograma_id: IdPath, datos: EliminarCronogramaEntrada, usuario: AdminEncargado,
+             db: DbSesion, contexto: Contexto) -> dict:
+    return flujo.eliminar(db, cronograma_id, datos.motivo, datos.lock_version, usuario, contexto)
 
 
 @router.get("/{cronograma_id}/versiones", response_model=list[VersionResumen])

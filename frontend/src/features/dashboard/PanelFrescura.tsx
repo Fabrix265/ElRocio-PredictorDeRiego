@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Info, Loader2, RefreshCcw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Info, Loader2, RefreshCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Alert } from "../../components/ui/Alert";
@@ -153,6 +153,8 @@ export function PanelFrescura() {
   const hoy = hoyLima(ahora);
   const puedeEjecutar = puede(usuario.rol, "ejecutarIngesta");
   const verCorridas = puede(usuario.rol, "verIngestas");
+  // null = automático: desplegadas solo si algo requiere atención; el usuario puede plegar o desplegar.
+  const [ingestasAbiertas, setIngestasAbiertas] = useState<boolean | null>(null);
   const [lanzadas, setLanzadas] = useState<number[]>([]);
 
   const frescura = useQuery({
@@ -201,9 +203,17 @@ export function PanelFrescura() {
   const fuentes = useMemo(() => ordenarFuentes(frescura.data?.fuentes ?? []), [frescura.data]);
   const referencia = frescura.data ? referenciaFrescura(frescura.data) : null;
   const resumen = resumirFrescura(fuentes);
+  const recientes = corridasVisibles(corridas.data ?? [], CORRIDAS_VISIBLES);
+  // Solo cuenta la última corrida de cada fuente: un error ya superado no mantiene el panel abierto.
+  const ultimaPorFuente = new Map<string, IngestaCorrida>();
+  for (const c of corridas.data ?? []) if (!ultimaPorFuente.has(c.fuente)) ultimaPorFuente.set(c.fuente, c);
+  const requierenAtencion = corridas.isError
+    || [...ultimaPorFuente.values()].some((c) => c.estado === "error" || c.estado === "parcial")
+    || (corridas.data ?? []).some((c) => corridaColgada(c, ahora));
+  const mostrarIngestas = enCurso || (ingestasAbiertas ?? requierenAtencion);
 
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardHeader
         titulo="Frescura de datos"
         descripcion={referencia ? `Última fecha completa por fuente respecto de ayer (${formatearDiaCorto(referencia)}).` : "Última fecha completa por fuente respecto de ayer."}
@@ -284,10 +294,15 @@ export function PanelFrescura() {
         )}
 
         {verCorridas && (
-          <section aria-labelledby="titulo-corridas" className="flex flex-col gap-1 border-t border-borde pt-3">
-            <h4 id="titulo-corridas" className="text-[13px] font-semibold">
-              Últimas corridas
-            </h4>
+          <section aria-label="Ingestas recientes" className="flex flex-col gap-1 border-t border-borde pt-3">
+            <Button variante="fantasma" tamano="sm" className="self-start" aria-expanded={mostrarIngestas}
+              aria-controls="detalle-ingestas" onClick={() => setIngestasAbiertas(!mostrarIngestas)}
+              disabled={enCurso}>
+              <ChevronDown className={cn("size-4", mostrarIngestas && "rotate-180")} aria-hidden="true" />
+              {mostrarIngestas ? "Ocultar ingestas" : "Ver ingestas"}
+            </Button>
+            {mostrarIngestas && <div id="detalle-ingestas">
+            <h4 id="titulo-corridas" className="text-[13px] font-semibold">Últimas corridas</h4>
             {corridas.isPending ? (
               <Skeleton className="h-12" />
             ) : corridas.isError ? (
@@ -296,11 +311,12 @@ export function PanelFrescura() {
               <p className="text-xs text-texto-2">Todavía no hay corridas de ingesta.</p>
             ) : (
               <ul aria-label="Últimas corridas de ingesta">
-                {corridasVisibles(corridas.data, CORRIDAS_VISIBLES).map((c) => (
+                {recientes.map((c) => (
                   <FilaCorrida key={c.id} c={c} ahora={ahora} />
                 ))}
               </ul>
             )}
+            </div>}
           </section>
         )}
       </CardBody>

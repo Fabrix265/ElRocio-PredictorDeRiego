@@ -401,7 +401,7 @@ export const api = {
   /** POST multipart (subida de archivos). */
   postFormulario: <T>(ruta: string, formulario: FormData, signal?: AbortSignal) =>
     solicitar<T>(ruta, { method: "POST", body: formulario, signal }),
-  delete: <T>(ruta: string) => solicitar<T>(ruta, { method: "DELETE" }),
+  delete: <T>(ruta: string, body?: unknown) => solicitar<T>(ruta, { method: "DELETE", body }),
 };
 
 /** Solo para pruebas: reinicia el estado del módulo. */

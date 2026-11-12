@@ -16,6 +16,7 @@ import { esDiaValido, formatearDiaCorto, hoyLima, sumarDias } from "../../lib/fe
 import { mensajeDeError } from "../../services/httpClient";
 import { claveCronogramas, cronogramasApi, type GenerarSalida } from "../../services/cronogramas";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
+import { ContextoDiaAnterior, RangoContextoDiaAnterior } from "./ContextoDiaAnterior";
 import { ETIQUETA_ACCION, MarcasVersion, TONO_ACCION } from "./etiquetas";
 
 export const DIAS_MAX = 7;
@@ -75,7 +76,7 @@ export default function GenerarPage() {
         <Card>
           <form onSubmit={enviar} className="flex flex-col gap-4 p-4" noValidate>
             <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end">
-              <Field label="Fecha inicial" className="sm:w-44">
+              <Field label="Fecha inicial" className="sm:w-44" ayuda="Primer día: desde 7 días atrás hasta mañana.">
                 <Input
                   type="date"
                   value={fecha}
@@ -84,7 +85,7 @@ export default function GenerarPage() {
                   onChange={(e) => setFecha(e.target.value)}
                 />
               </Field>
-              <Field label="Días" className="sm:w-28">
+              <Field label="Días" className="sm:w-44" ayuda="De 1 a 7 días seguidos.">
                 <Input
                   type="number"
                   inputMode="numeric"
@@ -95,6 +96,11 @@ export default function GenerarPage() {
                 />
               </Field>
             </div>
+            <ul className="list-disc space-y-1 pl-4 text-xs text-texto-2">
+              <li>Un solo cronograma por día: un borrador sin correcciones recibe una versión nueva.</li>
+              <li>Los días con correcciones o publicados se omiten, salvo que marques la casilla.</li>
+              <li>Desde el segundo día, el plan es preliminar: usa el riego que el modelo predijo para el día anterior.</li>
+            </ul>
             <label className="flex items-start gap-2 text-sm text-texto">
               <Checkbox
                 className="mt-0.5"
@@ -139,9 +145,11 @@ export default function GenerarPage() {
               </Alert>
             </div>
           )}
+          <RangoContextoDiaAnterior fechas={resultado.dias_resultado.map((d) => d.fecha)} moduloId={resultado.modulo_id}>
           <ul className="divide-y divide-borde">
             {resultado.dias_resultado.map((d) => (
-              <li key={d.fecha} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <li key={d.fecha} className="flex min-w-0 flex-col gap-2 px-4 py-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="w-24 text-sm font-semibold text-texto">{formatearDiaCorto(d.fecha)}</span>
                   <Badge tono={TONO_ACCION[d.accion]}>{ETIQUETA_ACCION[d.accion]}</Badge>
@@ -157,9 +165,12 @@ export default function GenerarPage() {
                     Ver detalle <ArrowRight className="size-4" aria-hidden="true" />
                   </Link>
                 )}
+                </div>
+                <ContextoDiaAnterior fecha={d.fecha} />
               </li>
             ))}
           </ul>
+          </RangoContextoDiaAnterior>
         </Card>
       )}
     </div>

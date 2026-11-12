@@ -3,6 +3,7 @@
 - :class:`~app.core.errores.ErrorApp` → su código y mensaje.
 - Errores HTTP de Starlette (ruta inexistente, método no permitido) → mensaje en español.
 - Validación (422) → lista ``[{loc, msg, type}]`` como FastAPI, con ``msg`` en español.
+- Columna o tabla inexistente en la BD (migraciones sin aplicar) → 503 con un mensaje que lo dice.
 - Cualquier otra excepción → 500 genérico (el detalle queda solo en el log, ya redactado).
 """
 
@@ -97,7 +98,25 @@ async def _error_validacion(_request: Request, error: RequestValidationError) ->
     return JSONResponse({"detail": jsonable_encoder(errores)}, status_code=422)
 
 
+MENSAJE_ESQUEMA_DESACTUALIZADO = (
+    "La base de datos no está actualizada con esta versión del sistema (faltan migraciones). "
+    "Avisa al administrador."
+)
+
+
+def _esquema_desactualizado(error: Exception) -> bool:
+    """Columna o tabla inexistente: el código es más nuevo que la BD (SQLSTATE 42703 / 42P01)."""
+    from sqlalchemy.exc import DBAPIError
+
+    original = getattr(error, "orig", None) if isinstance(error, DBAPIError) else None
+    return getattr(original, "sqlstate", None) in ("42703", "42P01")
+
+
 async def _error_inesperado(request: Request, error: Exception) -> JSONResponse:
+    if _esquema_desactualizado(error):
+        logger.error("Esquema de BD desactualizado en %s %s: aplica las migraciones (alembic upgrade head)",
+                     request.method, request.url.path)
+        return JSONResponse({"detail": MENSAJE_ESQUEMA_DESACTUALIZADO}, status_code=503)
     logger.exception("Error no controlado en %s %s", request.method, request.url.path)
     return JSONResponse({"detail": MENSAJES_HTTP[500]}, status_code=500)
 

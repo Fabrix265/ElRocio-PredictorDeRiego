@@ -114,6 +114,9 @@ def requiere_rol(*roles: RolUsuario) -> Callable[[Usuario], Usuario]:
     return _verificar
 
 
+AdminEncargado = Annotated[Usuario, Depends(requiere_rol(RolUsuario.admin, RolUsuario.encargado))]
+
+
 def _origenes_permitidos() -> set[str]:
     return {o.rstrip("/") for o in settings.cors_origin_list} | {settings.frontend_url.rstrip("/")}
 

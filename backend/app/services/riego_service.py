@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.errores import Conflicto, DatosInvalidos, NoEncontrado, SinPermiso
-from app.core.tiempo import ahora_utc, fuera_de_limites, hoy_lima, mensaje_fuera_de_limites
+from app.core.tiempo import ahora_lima, ahora_utc, fuera_de_limites, hoy_lima, mensaje_fuera_de_limites
 from app.models import Cronograma, CronogramaEvento, CronogramaVersion, Modulo, RiegoRegistro, Turno, Usuario
 from app.models.enums import EstadoRiego, OrigenRiego, RolUsuario, TipoEventoCronograma
 from app.repositories import cronogramas as repo_cronogramas
@@ -98,6 +98,52 @@ def validar_ciclo(inicio: float, duracion: float, m3ha: float) -> None:
         raise DatosInvalidos("La duración debe ser mayor que 0 y como máximo 1440 minutos")
 
 
+def validar_aplicable(fecha: dt.date, fines_min: list[float]) -> None:
+    """Aplicado = riego ya ocurrido: días pasados, u hoy si terminó el último ciclo (hora de Lima)."""
+    hoy = hoy_lima()
+    if fecha > hoy:
+        raise DatosInvalidos("Un riego de un día futuro no se puede marcar aplicado")
+    if fecha == hoy and fines_min:
+        ahora = ahora_lima()
+        ultimo = max(fines_min)
+        if ultimo > ahora.hour * 60 + ahora.minute:
+            raise DatosInvalidos(
+                "El riego de hoy se puede marcar aplicado cuando termine su último ciclo "
+                f"({hora_minuto(ultimo)}{' del día siguiente' if ultimo >= 1440 else ''})"
+            )
+
+
+def eliminar(db: Session, registro_id: int, motivo: str, actor: Usuario,
+             contexto: ContextoPeticion | None = None) -> dict[str, Any]:
+    """Quita el riego vigente del turno-día (queda «sin registro»).
+
+    Las versiones no se borran: la vigente deja de serlo y sigue en el historial; el motivo
+    queda en la auditoría. Para corregir datos se usa «Editar riego»; esto es para un registro
+    que no debió existir.
+    """
+    if actor.rol not in (RolUsuario.admin, RolUsuario.encargado, RolUsuario.subgerente):
+        raise SinPermiso()
+    motivo = motivo.strip()
+    if not 1 <= len(motivo) <= 255:
+        raise DatosInvalidos("El motivo debe tener entre 1 y 255 caracteres")
+    registro = db.get(RiegoRegistro, registro_id)
+    if registro is None:
+        raise NoEncontrado("No existe el registro de riego indicado.")
+    # Mismo orden de candados que la edición manual: cronograma del día y luego turno-día.
+    crono = repo_cronogramas.por_fecha(db, registro.modulo_id, registro.fecha)
+    if crono is not None:
+        repo_cronogramas.obtener(db, crono.id, bloquear=True)
+    vigente = repo.bloquear_turno_dia(db, registro.turno_id, registro.fecha)
+    if vigente is None or vigente.id != registro.id:
+        raise Conflicto("Otro usuario cambió este riego; recarga")
+    repo.dejar_de_ser_vigentes(db, [vigente.id])
+    detalle = {"turno_id": vigente.turno_id, "fecha": vigente.fecha, "version": vigente.version,
+               "estado": vigente.estado.value, "origen": vigente.origen.value, "motivo": motivo}
+    auditoria_service.registrar(db, accion="riego_eliminado", entidad="riego", entidad_id=vigente.id,
+                                actor=actor, contexto=contexto, detalle=detalle)
+    return {"turno_id": vigente.turno_id, "fecha": vigente.fecha, "version": vigente.version}
+
+
 def _crear_registro(db: Session, *, turno: Turno, fecha: dt.date, vigente: RiegoRegistro | None,
                     ciclos: list[dict], estado: EstadoRiego, origen: OrigenRiego, actor: Usuario,
                     sin_riego: bool = False, cronograma_version_id: int | None = None,
@@ -173,8 +219,8 @@ def guardar_manual(db: Session, datos: RegistroRiegoEntrada, actor: Usuario,
         raise NoEncontrado("No existe el turno indicado.")
     if fuera_de_limites(datos.fecha) is not None:
         raise DatosInvalidos(mensaje_fuera_de_limites())
-    if datos.estado == EstadoRiego.aplicado and datos.fecha >= hoy_lima():
-        raise DatosInvalidos("El riego solo se puede marcar aplicado para días anteriores a hoy")
+    if datos.estado == EstadoRiego.aplicado:
+        validar_aplicable(datos.fecha, [c.inicio_min + c.duracion_min for c in datos.ciclos])
     if (datos.sin_riego and datos.ciclos) or (not datos.sin_riego and not 1 <= len(datos.ciclos) <= 5):
         raise DatosInvalidos("Indica de 1 a 5 ciclos, o una lista vacía si no se regó")
     motivo = datos.motivo.strip()
