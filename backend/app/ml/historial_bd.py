@@ -8,6 +8,10 @@
    *preliminar*).
 2. DataFrame con ``COLUMNAS_RIEGO``: ``Fecha`` datetime64, textos con ``norm_text`` (el ``Fundo``
    debe ser idéntico al de ``ambiente`` o las variables de clima quedan vacías sin aviso).
+   Riego por pulsos: si lo planificado salió del cálculo por pulsos (cronograma con
+   ``calculo_pulsos`` o provisional copiado de esa versión), se usan los ciclos que predijo el
+   modelo (``prediccion_entrada.plan_modelo``): el modelo no se entrenó con riegos por pulsos. El
+   riego **aplicado** entra siempre tal cual.
 3. ``limpiar_ciclos(ciclos, 5.0, 2.0)`` → ``tabla_turno_dia`` → ``ambiente_diario`` (nombres de
    riego_ml) → ``Historial``.
 
@@ -28,6 +32,8 @@ from sqlalchemy.orm import Session
 
 from app.core.errores import NoEncontrado
 from app.models import Fundo, Modulo
+from app.models.enums import EstadoRiego, OrigenRiego
+from app.repositories import pulsos as repo_pulsos
 from app.repositories import riego as repo_riego
 from app.services import ambiente_service
 
@@ -94,9 +100,37 @@ def construir_historial(
 
     filas: list[dict] = []
     con_registro: set[tuple[int, dt.date]] = set()
-    for registro in repo_riego.vigentes(db, modulo_id, hasta=hasta):
+    registros = repo_riego.vigentes(db, modulo_id, hasta=hasta)
+    # Riego por pulsos: lo planificado por pulsos (provisional copiado del cronograma o, sin
+    # registro, el cronograma) entra con los ciclos que predijo el modelo, como en el entrenamiento.
+    versiones_pulsos = repo_pulsos.versiones_con_pulsos(db, (
+        r.cronograma_version_id for r in registros
+        if r.estado == EstadoRiego.provisional and r.origen == OrigenRiego.cronograma))
+    fechas_pulsos = repo_pulsos.fechas_cronograma_pulsos(db, modulo_id, hasta) if hasta is not None else set()
+    planes = repo_pulsos.planes_modelo(db, modulo_id, fechas_pulsos | {
+        r.fecha for r in registros if r.cronograma_version_id in versiones_pulsos})
+
+    def del_modelo(fecha: dt.date, turno_id: int) -> bool:
+        ciclos = planes.get((fecha, turno_id))
+        if not ciclos:
+            return False
+        turno = turnos[turno_id]
+        for c in ciclos:
+            area = (c["riego_m3"] / c["riego_m3ha"]) if c.get("riego_m3ha") else turno.area_ha
+            filas.append({
+                "fecha": fecha, "turno": turno.codigo, "valvula": turno.valvula_controlador,
+                "inicio_min": c["inicio_min"], "fin_min": c["fin_min"], "hora_inicio": c["hora_inicio"],
+                "hora_fin": c["hora_fin"], "fin_dia_siguiente": c["fin_dia_siguiente"],
+                "duracion_min": c["duracion_min"], "riego_m3": c["riego_m3"], "riego_m3ha": c["riego_m3ha"],
+                "area_ha": area,
+            })
+        return True
+
+    for registro in registros:
         con_registro.add((registro.turno_id, registro.fecha))
         if registro.sin_riego:
+            continue
+        if registro.cronograma_version_id in versiones_pulsos and del_modelo(registro.fecha, registro.turno_id):
             continue
         codigo = turnos[registro.turno_id].codigo
         for ciclo in registro.ciclos:
@@ -109,12 +143,18 @@ def construir_historial(
             })
 
     desde_cronograma: set[tuple[dt.date, str]] = set()
+    del_plan: set[tuple[dt.date, int]] = set()
     if hasta is not None:
         for ciclo in repo_riego.ciclos_cronograma_referencia(db, modulo_id, hasta):
             turno = turnos.get(ciclo.turno_id)
             if turno is None or (ciclo.turno_id, ciclo.fecha) in con_registro:
                 continue
             desde_cronograma.add((ciclo.fecha, turno.codigo))
+            if ciclo.fecha in fechas_pulsos and (ciclo.fecha, ciclo.turno_id) in planes:
+                if (ciclo.fecha, ciclo.turno_id) not in del_plan:
+                    del_plan.add((ciclo.fecha, ciclo.turno_id))
+                    del_modelo(ciclo.fecha, ciclo.turno_id)
+                continue
             area = (ciclo.riego_m3 / ciclo.riego_m3ha) if ciclo.riego_m3ha else turno.area_ha
             filas.append({
                 "fecha": ciclo.fecha, "turno": turno.codigo, "valvula": turno.valvula_controlador,

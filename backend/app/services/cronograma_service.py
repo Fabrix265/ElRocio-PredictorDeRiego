@@ -46,7 +46,7 @@ from app.models.enums import (
 )
 from app.repositories import cronogramas as repo
 from app.repositories import riego as repo_riego
-from app.services import auditoria_service, datos_service
+from app.services import auditoria_service, datos_service, parametros_pulsos_service
 from app.services.contexto import ContextoPeticion
 
 logger = logging.getLogger(__name__)
@@ -175,6 +175,11 @@ def generar(
         desde_cronograma = set(hb.turno_dias_cronograma)
         modelo_id = registrar_version(db, modelo)
         turnos = {norm_text(pd.Series([t.codigo])).iloc[0]: t for t in repo_riego.turnos_de_modulo(db, modulo_id)}
+        # Riego por pulsos: el modelo da los m³/ha de cada turno y los parámetros del módulo los
+        # reparten en pulsos (None = se guarda el plan del modelo tal cual).
+        pulsos = parametros_pulsos_service.activos(db, modulo_id)
+        orden_turnos = [c for c, _ in sorted(turnos.items(), key=lambda kv: (kv[1].orden, kv[0]))]
+        areas = {c: t.area_ha for c, t in turnos.items()}
         estados_d1 = repo.estado_registros(db, modulo_id, [f - dt.timedelta(days=1) for f in fechas])
 
         generacion = Generacion(
@@ -195,7 +200,9 @@ def generar(
             fecha = accion.fecha
             d1 = fecha - dt.timedelta(days=1)
             prediccion = generador.predecir_dia(modelo.plan, historial, fecha, config)
-            historial = generador.agregar(historial, prediccion)
+            historial = generador.agregar(historial, prediccion)  # el historial lleva lo del modelo
+            if pulsos is not None:
+                prediccion = generador.aplicar_pulsos(prediccion, pulsos, orden_turnos, areas)
 
             origen_d1: dict[int, OrigenRiegoD1] = {}
             for codigo, turno in turnos.items():
@@ -223,6 +230,7 @@ def generar(
                     features_turno=prediccion.features_turno[codigo],
                     features_ciclo=prediccion.features_ciclo.get(codigo, []),
                     alternativas_n={str(n): c for n, c in prediccion.alternativas.get(codigo, {}).items()},
+                    plan_modelo=prediccion.plan_modelo.get(codigo),
                     origen_riego_d1=origen_d1[turno.id], fuentes_hasta=_fuentes_hasta(frescura),
                 ))
             generados.add(fecha)
@@ -275,6 +283,7 @@ def _guardar(
         cronograma_id=crono.id, numero=numero, origen=origen, generacion_id=generacion.id,
         modelo_version_id=modelo_id, basada_en_id=base, preliminar=preliminar,
         datos_incompletos=datos_incompletos, creado_por=actor.id,
+        calculo_pulsos=generador.json_seguro(prediccion.calculo) if prediccion.calculo else None,
     )
     db.add(version)
     db.flush()
@@ -360,6 +369,7 @@ def _version_salida(db: Session, version: CronogramaVersion, crono: Cronograma, 
     }
     if not con_detalle:
         return salida
+    salida["calculo_pulsos"] = version.calculo_pulsos
     salida["desactualizado"] = repo.desactualizado(db, modulo, crono.fecha, version.created_at)
     turnos = {t.id: t for t in repo_riego.turnos_de_modulo(db, modulo.id)}
     ciclos: dict[int, list] = {}

@@ -61,6 +61,12 @@ ENTIDAD_INGESTA_CORRIDA = "ingesta_corrida"
 ACCIONES += (METEO_EXCEL_PISADO,)
 ENTIDADES += (ENTIDAD_INGESTA_CORRIDA,)
 
+# Riego por pulsos: edición de los parámetros del módulo. Entidad ``modulo`` con el id del módulo.
+PARAMETROS_PULSOS_ACTUALIZADOS = "actualizar_parametros_pulsos"
+ENTIDAD_MODULO = "modulo"
+ACCIONES += (PARAMETROS_PULSOS_ACTUALIZADOS,)
+ENTIDADES += (ENTIDAD_MODULO,)
+
 ACTOR_SISTEMA = "sistema"
 
 # Lista blanca de campos por entidad para las instantáneas antes/después.

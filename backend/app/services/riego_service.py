@@ -19,7 +19,7 @@ from app.models.enums import EstadoRiego, OrigenRiego, RolUsuario, TipoEventoCro
 from app.repositories import cronogramas as repo_cronogramas
 from app.repositories import riego as repo
 from app.schemas.riego import RegistroRiegoEntrada
-from app.services import auditoria_service
+from app.services import auditoria_service, calculo_pulsos
 from app.services.contexto import ContextoPeticion
 from app.services.riego_contenido import hash_contenido
 
@@ -221,8 +221,10 @@ def guardar_manual(db: Session, datos: RegistroRiegoEntrada, actor: Usuario,
         raise DatosInvalidos(mensaje_fuera_de_limites())
     if datos.estado == EstadoRiego.aplicado:
         validar_aplicable(datos.fecha, [c.inicio_min + c.duracion_min for c in datos.ciclos])
-    if (datos.sin_riego and datos.ciclos) or (not datos.sin_riego and not 1 <= len(datos.ciclos) <= 5):
-        raise DatosInvalidos("Indica de 1 a 5 ciclos, o una lista vacía si no se regó")
+    if (datos.sin_riego and datos.ciclos) or (
+            not datos.sin_riego and not 1 <= len(datos.ciclos) <= calculo_pulsos.MAX_PULSOS_TURNO):
+        raise DatosInvalidos(
+            f"Indica de 1 a {calculo_pulsos.MAX_PULSOS_TURNO} ciclos, o una lista vacía si no se regó")
     motivo = datos.motivo.strip()
     if not 1 <= len(motivo) <= 255:
         raise DatosInvalidos("El motivo debe tener entre 1 y 255 caracteres")

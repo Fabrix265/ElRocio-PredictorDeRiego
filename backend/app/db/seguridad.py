@@ -28,10 +28,10 @@ COLUMNAS_ACTUALIZABLES = {
     "riego_registro": {"vigente"},  # migración 0003
 }
 COLUMNAS_PUBLICACION = COLUMNAS_ACTUALIZABLES["cronograma_version"]
-# updated_at mantenido por trigger (tg_<tabla>_updated_at, migración 0003).
+# updated_at mantenido por trigger (tg_<tabla>_updated_at, migraciones 0003 y 0006).
 TABLAS_UPDATED_AT = (
     "usuario", "cronograma", "meteo_lectura", "phytech_suelo_horario", "phytech_planta_diario",
-    "ambiente_diario",
+    "ambiente_diario", "parametros_pulsos",
 )
 TABLAS_SIN_INSERT = ("alembic_version",)
 PRIVILEGIOS_TABLA = "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"

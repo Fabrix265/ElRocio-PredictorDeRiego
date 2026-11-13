@@ -11,6 +11,7 @@ import datetime as dt
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import EstadoCarga, EstadoRiego, OrigenRiego, ResultadoCarga
+from app.services.calculo_pulsos import MAX_PULSOS_TURNO
 
 MAX_GRUPOS_PATCH = 100_000
 MAX_ID_BD = 2**63 - 1  # bigint (igual que app.api.deps)
@@ -75,7 +76,7 @@ class RegistroRiegoEntrada(BaseModel):
     sin_riego: bool
     motivo: str = Field(min_length=1, max_length=255)
     comentario: str | None = Field(default=None, max_length=1000)
-    ciclos: list[CicloRiegoEntrada] = Field(max_length=5)
+    ciclos: list[CicloRiegoEntrada] = Field(max_length=MAX_PULSOS_TURNO)
 
 
 class EliminarRiegoEntrada(BaseModel):
