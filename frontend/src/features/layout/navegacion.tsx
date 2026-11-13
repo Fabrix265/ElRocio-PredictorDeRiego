@@ -1,4 +1,4 @@
-import { CalendarDays, ChartLine, Droplet, LayoutDashboard, ShieldCheck, Sparkles, Users, type LucideIcon } from "lucide-react";
+import { CalendarDays, ChartLine, Droplet, LayoutDashboard, ShieldCheck, SlidersHorizontal, Sparkles, Users, type LucideIcon } from "lucide-react";
 
 import { puedeVer, type Pantalla, type Rol } from "../../lib/roles";
 
@@ -19,6 +19,7 @@ export const ITEMS_NAV: ItemNav[] = [
   { pantalla: "cronogramas", ruta: "/cronogramas", etiqueta: "Cronogramas", corta: "Cronogramas", icono: CalendarDays, grupo: "operacion" },
   { pantalla: "riego", ruta: "/riego", etiqueta: "Riego aplicado", corta: "Riego", icono: Droplet, grupo: "operacion" },
   { pantalla: "datos", ruta: "/datos", etiqueta: "Datos de campo", corta: "Datos", icono: ChartLine, grupo: "operacion" },
+  { pantalla: "parametros", ruta: "/parametros-riego", etiqueta: "Parámetros de riego", corta: "Parámetros", icono: SlidersHorizontal, grupo: "gestion" },
   { pantalla: "auditoria", ruta: "/auditoria", etiqueta: "Auditoría", corta: "Auditoría", icono: ShieldCheck, grupo: "gestion" },
   { pantalla: "usuarios", ruta: "/usuarios", etiqueta: "Usuarios", corta: "Usuarios", icono: Users, grupo: "gestion" },
 ];

@@ -14,6 +14,9 @@ import { ApiError, mensajeDeError } from "../../services/httpClient";
 import { claveRiego, riegoApi, type CicloRiegoEntrada, type RegistroRiego, type VersionRiego } from "../../services/riego";
 import { minutosAHora } from "../cronogramas/etiquetas";
 
+/** Con riego por pulsos un turno puede regar más de 5 veces al día (backend: MAX_PULSOS_TURNO). */
+export const MAX_CICLOS_RIEGO = 12;
+
 type Modo = "editar" | "sin_riego" | "aplicado";
 
 /**
@@ -119,7 +122,7 @@ function EditorRiego({ modo, base, turnoId, fecha, alCerrar, alRecargar }: {
         </table>
       </div>
       <p className="text-xs text-texto-3">Marca «Día siguiente» cuando el ciclo empieza pasada la medianoche, en la madrugada siguiente a la fecha de este riego (p. ej., un ciclo nocturno que arranca a la 01:00).</p>
-      <Button variante="secundario" className="self-start" disabled={guardar.isPending || ciclos.length >= 5} onClick={() => setCiclos((cs) => [...cs, { inicio_min: Math.min(2879, (cs.at(-1)?.inicio_min ?? 300) + (cs.at(-1)?.duracion_min ?? 60)), duracion_min: 60, riego_m3ha: 0 }])}>Agregar ciclo</Button>
+      <Button variante="secundario" className="self-start" disabled={guardar.isPending || ciclos.length >= MAX_CICLOS_RIEGO} onClick={() => setCiclos((cs) => [...cs, { inicio_min: Math.min(2879, (cs.at(-1)?.inicio_min ?? 300) + (cs.at(-1)?.duracion_min ?? 60)), duracion_min: 60, riego_m3ha: 0 }])}>Agregar ciclo</Button>
     </>}
     <Field label="Motivo" requerido ayuda={`${motivo.trim().length}/255 caracteres`}><Input maxLength={255} value={motivo} disabled={guardar.isPending} onChange={(e) => setMotivo(e.target.value)} /></Field>
     <Field label="Comentario (opcional)"><Input maxLength={1000} value={comentario} disabled={guardar.isPending} onChange={(e) => setComentario(e.target.value)} /></Field>

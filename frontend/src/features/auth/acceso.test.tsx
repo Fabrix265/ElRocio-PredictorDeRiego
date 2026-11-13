@@ -88,9 +88,9 @@ describe("decidirAcceso", () => {
 
   it("el menú muestra a cada rol solo sus pantallas", () => {
     const rutas = (rol: Rol) => itemsParaRol(rol).map((i) => i.ruta);
-    expect(rutas("admin")).toEqual(["/", "/generar", "/cronogramas", "/riego", "/datos", "/auditoria", "/usuarios"]);
-    expect(rutas("encargado")).toEqual(["/", "/generar", "/cronogramas", "/riego", "/datos"]);
-    expect(rutas("subgerente")).toEqual(["/", "/cronogramas", "/riego", "/datos", "/auditoria"]);
+    expect(rutas("admin")).toEqual(["/", "/generar", "/cronogramas", "/riego", "/datos", "/parametros-riego", "/auditoria", "/usuarios"]);
+    expect(rutas("encargado")).toEqual(["/", "/generar", "/cronogramas", "/riego", "/datos", "/parametros-riego"]);
+    expect(rutas("subgerente")).toEqual(["/", "/cronogramas", "/riego", "/datos", "/parametros-riego", "/auditoria"]);
     expect(rutas("programador")).toEqual(["/", "/cronogramas", "/riego", "/datos"]);
   });
 });

@@ -97,10 +97,45 @@ export interface VersionResumen {
   motivo_comentario: string | null;
 }
 
+/** Riego por pulsos: resumen del cálculo (backend/app/services/calculo_pulsos.py → detalle). */
+export interface CalculoPulsos {
+  metodo: "pulsos";
+  curva: string;
+  curva_propuesta: string;
+  motivo: string;
+  etr_equivalente_mm: number;
+  ventana: [string, string] | null;
+  converge: boolean;
+  fase_fenologica: string;
+  derivados: {
+    volumen_explorado_m3ha: number;
+    agua_disponible_m3ha: number;
+    capacidad_riego_m3hah: number;
+    agotamiento_fase: number;
+    agotamiento_max_bloque: number;
+    agotamiento_operativo: number;
+    volumen_pulso_m3ha: number;
+    minutos_pulso: number;
+    intensidad_mmh: number;
+  };
+  bloques: {
+    inicio: string; fin: string; horas: number; porcentaje: number;
+    minutos_utiles: number; minutos_riego: number; reposo_min: number; converge: boolean;
+  }[];
+  turnos: {
+    turno: string; m3ha_modelo: number; pulsos_teoricos: number[]; pulsos_por_bloque: number[];
+    n_ciclos: number; m3ha_pulso: number; minutos_pulso: number; m3ha_programado: number;
+  }[];
+  avisos: string[];
+  reglas: { ajustar_pulso_al_total: boolean; orden_turnos: string };
+}
+
 export interface VersionDetalle extends VersionResumen {
   desactualizado: boolean;
   turnos: TurnoCronograma[];
   total_m3: number;
+  /** null = plan directo del modelo (módulo sin riego por pulsos). */
+  calculo_pulsos?: CalculoPulsos | null;
 }
 
 interface CronogramaCabecera {

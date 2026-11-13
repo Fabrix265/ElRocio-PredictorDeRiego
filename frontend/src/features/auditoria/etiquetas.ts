@@ -37,6 +37,7 @@ const ACCIONES: Record<string, string> = {
   excel_subido: "Excel de riego subido",
   excel_confirmado: "Excel de riego confirmado",
   excel_descartado: "Excel de riego descartado",
+  actualizar_parametros_pulsos: "Parámetros de riego por pulsos actualizados",
   ingesta_manual: "Ingesta manual",
   meteo_excel_pisado: "Lecturas del Excel histórico reemplazadas por WeatherLink",
   exportar_refinamiento: "Exportación para refinamiento",
