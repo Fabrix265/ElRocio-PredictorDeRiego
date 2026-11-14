@@ -532,8 +532,13 @@ Para volver al plan directo del modelo basta desmarcar «Repartir los m³/ha del
 |---|---|---|
 | `GET /dashboard?modulo_id` | todos | KPIs de ayer (agua aplicada m³/ha y m³, aplicado vs modelo %, MDS, ETo), estado de mañana, pronóstico de 5 días y `ultimo_riego_fecha` (`date \| null`): última fecha hasta ayer (Lima) con riego vigente del módulo, aplicado o provisional, incluido «sin riego». El programador no recibe «aplicado vs modelo» |
 | `GET /datos/agua?modulo_id&desde&hasta` | todos | Por día y turno: aplicado (riego vigente), propuesto (versión publicada; A E S: si no hay, el borrador) y `modelo_*` (última versión del modelo, nunca para el programador). Por defecto 14 días hasta ayer, máximo 92 |
-| `GET /cronogramas/{id}/exportar?formato=pdf\|xlsx` | según visibilidad | PDF (ReportLab) o Excel (openpyxl) de la versión visible; el programador exporta siempre la publicada. Audita `exportar_pdf`/`exportar_xlsx` y deja el evento `exportado` |
+| `GET /cronogramas/{id}/exportar?formato=pdf\|xlsx&orden=turno\|hora` | según visibilidad | PDF (ReportLab) o Excel (openpyxl) de la versión visible; el programador exporta siempre la publicada. Audita `exportar_pdf`/`exportar_xlsx` y deja el evento `exportado` |
 | `GET /exportaciones/refinamiento.csv?desde&hasta` | A | §2.4: una fila por cronograma × turno × ciclo con claves, la foto de entradas (features turno-día y de ciclo), bloques `modelo_v1_*`, `modelo_base_*`, `final_*` y `aplicado_*` (n° de ciclos, m³/ha, inicio, duración), `estado_riego`, `motivos`, `ultimo_motivo`, `n_correcciones`, marcas, `num_versiones`, `modelo_version` y al final `anulado` (True/False, como las demás marcas), `anulado_motivo`. Incluye los cronogramas anulados para reentrenamiento. Textos escapados contra inyección de fórmulas; UTF-8 con BOM. Por defecto 90 días, máximo 366. Audita `exportar_refinamiento` |
+
+`orden` es opcional: `turno` conserva el orden de turno y ciclo; `hora` ordena por `inicio_min`
+(minutos absolutos, incluido el día siguiente), luego por orden de turno y ciclo si empatan.
+Ambos formatos indican «Orden: por turno» o «Orden: por hora» en la cabecera. Un valor distinto
+responde 422. El evento `exportado` registra el formato y el orden; los permisos no cambian.
 
 Las series de clima, suelo, planta y pronóstico de la pantalla Datos de campo son las de F2
 (`/datos/clima|suelo|planta|pronostico`). Dependencia nueva: `reportlab==4.5.1` (en

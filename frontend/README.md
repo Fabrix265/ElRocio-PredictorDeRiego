@@ -133,6 +133,7 @@ src/
 | ↳ Carga de Excel (`/riego/cargas/…`) | ✔ | ✔ | — | — | F2 |
 | ↳ Editar riego / No se regó / Marcar aplicado | ✔ | ✔ | ✔ | — | F4 disponible |
 | Datos de campo | ✔ | ✔ | ✔ | ✔ | F5 (`/datos`): gráficos ECharts 6 cargados aparte (`features/datos/Grafico.tsx`) |
+| Parámetros de riego | ✔ edita | ✔ edita | ✔ consulta | — | `/parametros-riego`: suelo, sistema, fenología, curvas y cálculo de pulsos por módulo |
 | Auditoría | ✔ | — | ✔ | — | F1 |
 | Usuarios | ✔ | — | — | — | F1 |
 
@@ -239,12 +240,20 @@ y recalcula los totales seleccionados. No repite el `GET` ni descarga la carga c
 
 - **Detalle**: pestañas Plan, Gantt (ancho completo), Datos, Versiones y Línea de tiempo.
   El programador solo ve Plan y Gantt. Se navega con Tab, flechas, Inicio y Fin.
+- **Plan en lectura**: selector Por turno (por defecto) / Por hora, conservado al navegar entre
+  pestañas y versiones. Por hora ordena por inicio absoluto, luego por turno y ciclo, e indica
+  el día siguiente. La tabla se desplaza dentro de su contenedor en móvil. PDF y Excel reciben
+  el mismo `orden=turno|hora` y lo indican en su cabecera.
 - **Corregir** (A/E): parte del borrador abierto o de la publicada si no hay borrador.
   Edita m³/ha, inicio HH:MM y Día siguiente, duración calculada o Duración manual; cambiar
-  el número de ciclos usa las alternativas guardadas del modelo (1–5). Recálculo local de
+  el número de ciclos usa las alternativas disponibles (1–12 con pulsos, 1–5 sin pulsos). Recálculo local de
   los ciclos editados, celdas en verde y aviso de solapes sin bloquear, con Ajustar solapes.
   Cancelar pide confirmación si hay cambios. Guardar corrección exige un motivo del catálogo
   y permite comentario; envía solo los turnos editados, la base y el lock de apertura.
+  Con `calculo_pulsos`, cambiar ciclos, volumen o duración ordena todos los turnos en fila por
+  vueltas, desde el menor inicio de la versión base. Inicio manual se respeta; se avisan los
+  cruces entre turnos y «Ordenar en fila» permite recomponerlos. Los turnos desplazados también
+  se envían al guardar. Sin pulsos se conserva el comportamiento anterior.
 - **Acciones**: Publicar, Publicar cambios, Descartar cambios, Confirmar Visto, Solicitar
   corrección y Mantener versión se ofrecen según rol, estado y fecha, con confirmación.
   Motivo/comentario de solicitud y mantenimiento: 5–1000 caracteres. Los avisos del backend
@@ -258,7 +267,7 @@ y recalcula los totales seleccionados. No repite el `GET` ni descarga la carga c
   muestra evento, fecha Lima, usuario, versión, motivo/comentario.
 - **Listado**: filtros locales Todos, Borrador (incluye cambios sin publicar), Publicado,
   Visto, Corrección solicitada y Modificado; chip «Modificado · pendiente de visto».
-- **Riego aplicado**: A/E/S pueden Editar riego (1–5 ciclos), registrar No se regó o Marcar
+- **Riego aplicado**: A/E/S pueden Editar riego (1–12 ciclos), registrar No se regó o Marcar
   aplicado un provisional de una fecha anterior a hoy. Siempre exige motivo de 1–255
   caracteres; comentario opcional. Un 409 muestra «Otro usuario cambió este riego. Recarga.».
   Se obtiene el vigente al abrir el panel y se conserva su ID durante la edición.

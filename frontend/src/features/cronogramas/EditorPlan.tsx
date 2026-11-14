@@ -14,18 +14,10 @@ import { cn } from "../../lib/cn";
 import { claveCronogramas, cronogramasApi, type CicloCronograma, type CronogramaDetalle, type TurnoCronograma } from "../../services/cronogramas";
 import { ApiError, mensajeDeError } from "../../services/httpClient";
 import { minutosAHora } from "./etiquetas";
+import { calcular, ordenarEnFila, solapesEntreTurnos } from "./fila";
 
-const redondear = (n: number, decimales: number) => Number(n.toFixed(decimales));
 const entradaCiclo = (c: CicloCronograma) => ({ ciclo: c.ciclo, riego_m3ha: c.riego_m3ha, inicio_min: c.inicio_min, duracion_min: c.duracion_min, duracion_manual: c.duracion_manual });
 const entradaTurno = (t: TurnoCronograma) => ({ turno_id: t.turno_id, n_ciclos: t.n_ciclos, ciclos: t.ciclos.map(entradaCiclo) });
-
-function calcular(c: CicloCronograma, t: TurnoCronograma): CicloCronograma {
-  const m3ha = redondear(c.riego_m3ha, 2);
-  const duracion = redondear(c.duracion_manual || !t.factor_min_por_m3ha ? c.duracion_min : m3ha * t.factor_min_por_m3ha, 1);
-  const inicio = redondear(c.inicio_min, 1);
-  const fin = redondear(inicio + duracion, 1);
-  return { ...c, riego_m3ha: m3ha, riego_m3: redondear(m3ha * t.area_ha, 1), duracion_min: duracion, inicio_min: inicio, fin_min: fin, hora_inicio: minutosAHora(inicio), hora_fin: minutosAHora(fin), fin_dia_siguiente: fin >= 1440 };
-}
 
 /** N.º de ciclos que se pueden elegir: los que trae el backend (1–5 del modelo o 1–12 con riego
  * por pulsos) con la lista completa, más el actual. */
@@ -44,6 +36,8 @@ function tieneSolapes(t: TurnoCronograma) {
 /** Se monta con una foto de la base y del lock: los refetch no reemplazan una edición en curso. */
 export function EditorPlan({ cronograma, alCerrar, alRecargar }: { cronograma: CronogramaDetalle; alCerrar: () => void; alRecargar: () => Promise<unknown> }) {
   const [base] = useState(cronograma);
+  const porPulsos = !!base.version!.calculo_pulsos;
+  const inicioMin = Math.min(...base.version!.turnos.flatMap((t) => t.ciclos.map((c) => c.inicio_min)));
   const [turnos, setTurnos] = useState(() => structuredClone(base.version!.turnos));
   const [dialogo, setDialogo] = useState<"guardar" | "cancelar" | null>(null);
   const [motivo, setMotivo] = useState("");
@@ -75,8 +69,16 @@ export function EditorPlan({ cronograma, alCerrar, alRecargar }: { cronograma: C
     },
   });
   const conflicto = guardar.error instanceof ApiError && guardar.error.status === 409;
+  function ordenarSiPulsos(ts: TurnoCronograma[]) {
+    // Mientras se vacía un campo numérico, no propagar NaN a los horarios de otros turnos.
+    return porPulsos && ts.every((t) => t.ciclos.every((c) => Number.isFinite(c.duracion_min) && c.duracion_min > 0))
+      ? ordenarEnFila(ts, inicioMin) : ts;
+  }
   function cambiar(turnoId: number, ciclo: number, valores: Partial<CicloCronograma>) {
-    setTurnos((ts) => ts.map((t) => t.turno_id !== turnoId ? t : { ...t, ciclos: t.ciclos.map((c) => c.ciclo === ciclo ? calcular({ ...c, ...valores }, t) : c) }));
+    setTurnos((ts) => {
+      const nuevos = ts.map((t) => t.turno_id !== turnoId ? t : { ...t, ciclos: t.ciclos.map((c) => c.ciclo === ciclo ? calcular({ ...c, ...valores }, t) : c) });
+      return "inicio_min" in valores ? nuevos : ordenarSiPulsos(nuevos);
+    });
   }
   function ajustar() {
     setTurnos((ts) => ts.map((t) => {
@@ -90,12 +92,15 @@ export function EditorPlan({ cronograma, alCerrar, alRecargar }: { cronograma: C
     }));
   }
   const solapes = turnos.some(tieneSolapes);
+  const solapesTurnos = porPulsos ? solapesEntreTurnos(turnos) : [];
   return (
     <div className="flex min-w-0 flex-col gap-4 p-4">
       <p className="text-sm text-texto-2">Corrigiendo v{base.version!.numero}. Las celdas modificadas se resaltan en verde.</p>
       {alternativas.isPending ? <Skeleton className="h-10" /> : alternativas.isError ? <Alert tono="error">No se pudieron cargar las alternativas: {mensajeDeError(alternativas.error)} <Button variante="fantasma" onClick={() => void alternativas.refetch()} disabled={alternativas.isFetching}>Reintentar</Button></Alert> : Object.keys(alternativas.data).length === 0 && <Alert tono="info">Sin alternativas del modelo. Puedes corregir los ciclos existentes.</Alert>}
       {solapes && <Alert tono="aviso">Hay ciclos que se solapan en un mismo turno. Puedes guardar o usar «Ajustar solapes».</Alert>}
       {solapes && <Button className="self-start" variante="secundario" onClick={ajustar} disabled={guardar.isPending}>Ajustar solapes</Button>}
+      {solapesTurnos.length > 0 && <Alert tono="aviso">Hay turnos que riegan al mismo tiempo: {solapesTurnos.slice(0, 3).map(({ a, b }) => `${a} y ${b}`).join("; ")}{solapesTurnos.length > 3 ? "…" : "."} Usa «Ordenar en fila».</Alert>}
+      {porPulsos && <Button className="self-start" variante="secundario" onClick={() => setTurnos(ordenarSiPulsos)} disabled={guardar.isPending}>Ordenar en fila</Button>}
       {turnos.map((t) => {
         const original = base.version!.turnos.find((b) => b.turno_id === t.turno_id)!;
         return <section key={t.turno_id} className="min-w-0 rounded-lg border border-borde">
@@ -104,7 +109,7 @@ export function EditorPlan({ cronograma, alCerrar, alRecargar }: { cronograma: C
             <Field label="N.º de ciclos" className={cn("w-36 rounded-md", t.n_ciclos !== original.n_ciclos && "bg-activo-bg")}>
               <Select value={String(t.n_ciclos)} disabled={guardar.isPending || !alternativas.data?.[t.turno_id]} opciones={opcionesN(alternativas.data?.[t.turno_id], t.n_ciclos).map((n) => ({ value: String(n), label: String(n) }))} onValueChange={(n) => {
                 const ciclos = alternativas.data?.[t.turno_id]?.[n];
-                if (ciclos) setTurnos((ts) => ts.map((x) => x.turno_id !== t.turno_id ? x : { ...x, n_ciclos: Number(n), ciclos: ciclos.map((c) => calcular({ ...c, ciclo_modelo: null, duracion_manual: !(t.factor_min_por_m3ha && t.factor_min_por_m3ha > 0), campos_editados: [] }, t)) }));
+                if (ciclos) setTurnos((ts) => ordenarSiPulsos(ts.map((x) => x.turno_id !== t.turno_id ? x : { ...x, n_ciclos: Number(n), ciclos: ciclos.map((c) => calcular({ ...c, ciclo_modelo: null, duracion_manual: !(t.factor_min_por_m3ha && t.factor_min_por_m3ha > 0), campos_editados: [] }, t)) })));
               }} />
             </Field>
             <span className="text-xs text-texto-2">{t.area_ha.toFixed(2)} ha · {t.ciclos.reduce((s, c) => s + c.riego_m3, 0).toFixed(1)} m³</span>

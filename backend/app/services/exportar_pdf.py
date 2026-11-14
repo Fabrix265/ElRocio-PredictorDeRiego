@@ -47,6 +47,7 @@ def plan_pdf(meta: dict[str, Any], filas: list[dict[str, Any]]) -> bytes:
         Paragraph(f"{meta['fundo']} · {meta['modulo']} · {fecha_larga(meta['fecha']).capitalize()}", sub),
         Paragraph(f"Estado: {estado} · versión v{meta['version']}"
                   f"{'' if meta['publicada'] else ' (sin publicar)'}{marcas}", sub),
+        Paragraph(f"Orden: por {meta.get('orden', 'turno')}", sub),
         Spacer(1, 6 * mm),
     ]
 
