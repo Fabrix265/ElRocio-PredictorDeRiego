@@ -495,6 +495,37 @@ Probar en local (BD `riego_dev`, sin tocar `backend/.env`): levanta la API con `
 local, entra como admin y usa **Generar** (3 días tarda unos 10 s), o
 `POST /api/v1/cronogramas/generar {"modulo_id": 1}`.
 
+## Riego por pulsos
+
+La lógica de la planilla «MODELO RIEGO POR PULSOS – PALTO» vive en el backend
+(`app/services/calculo_pulsos.py`, sin BD). Con `parametros_pulsos.activo` del módulo, al generar:
+
+1. El modelo predice como siempre; de su plan solo se toma el **total de m³/ha de cada turno**.
+2. ETr equivalente = m³/ha × Ea / 10 → curva 1, 2 o 3 por los umbrales (modo «automático con
+   respaldo»: si los pulsos de todos los turnos no caben en un bloque de 3 h, pasa a la siguiente).
+3. Pulso = agua disponible × agotamiento ÷ Ea (con «agotamiento automático», el menor entre el de la
+   fase y el máximo que cabe en 3 h); pulsos por bloque con el redondeo acumulado de la planilla
+   («Pulso/Turno Ajustado»). Con `ajustar_pulso_al_total`, cada pulso = total ÷ n° de pulsos.
+4. Horario en fila, por vueltas: ciclo 1 de TE01, TE02, …, TE05 seguidos; al terminar, los ciclos 2
+   en el mismo orden, y así, sin pausa desde la primera hora de la curva (03:00 con la curva 3,
+   06:00 con la 1 o la 2). Los bloques de 3 h solo deciden cuántos ciclos tiene cada turno; cada
+   turno descansa mientras riegan los demás. Duración = m³/ha ÷ capacidad de riego (el factor del turno es 60 / CR, así la edición recalcula igual).
+
+Se guarda en `cronograma_version.calculo_pulsos` (curva, bloques, pulsos por turno, avisos) y en
+`prediccion_entrada.plan_modelo` los ciclos del modelo: el historial del día siguiente usa esos
+ciclos para lo planificado por pulsos (cronograma sin riego, o provisional copiado de él); el riego
+**aplicado** entra siempre tal cual. Con pulsos un turno puede tener hasta 12 ciclos (editor y
+riego aplicado). Paridad con la planilla: `tests/test_riego_pulsos.py`.
+
+| Ruta | Quién | Qué hace |
+|---|---|---|
+| `GET /modulos/{id}/parametros-pulsos` | todos | Parámetros (o los de la planilla si aún no hay fila) y lo que se calcula de ellos |
+| `PUT /modulos/{id}/parametros-pulsos` | A E | Valida (curvas que suman 100 %, PMP < CC, umbral 1 < 2, fase en la tabla) y audita `actualizar_parametros_pulsos` |
+
+La migración 0006 siembra cada módulo con los valores de la planilla (suelo arenoso, hileras de 6 m,
+4 mangueras, goteros de 1,6 L/h cada 0,5 m, Ea 0,85, crecimiento de fruta, curvas 1–3) y activo.
+Para volver al plan directo del modelo basta desmarcar «Repartir los m³/ha del modelo en pulsos».
+
 ## Reportes y exportaciones (F5)
 
 | Ruta | Quién | Qué hace |

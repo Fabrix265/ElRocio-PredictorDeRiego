@@ -18,6 +18,8 @@ export const ACCESO = {
   datos: ["admin", "encargado", "subgerente", "programador"],
   auditoria: ["admin", "subgerente"],
   usuarios: ["admin"],
+  /** Parámetros del riego por pulsos (los datos fijos de la planilla). */
+  parametros: ["admin", "encargado", "subgerente"],
 } as const satisfies Record<string, readonly Rol[]>;
 
 export type Pantalla = keyof typeof ACCESO;
@@ -49,6 +51,8 @@ export const PERMISOS = {
   ejecutarIngesta: ["admin", "encargado"],
   /** Lista de corridas de ingesta (GET /ingestas). */
   verIngestas: ["admin", "encargado", "subgerente"],
+  /** Editar los parámetros del riego por pulsos (PUT /modulos/{id}/parametros-pulsos). */
+  editarParametrosRiego: ["admin", "encargado"],
 } as const satisfies Record<string, readonly Rol[]>;
 
 export type Permiso = keyof typeof PERMISOS;

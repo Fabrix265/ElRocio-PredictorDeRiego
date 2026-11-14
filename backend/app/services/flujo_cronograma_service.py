@@ -19,7 +19,7 @@ from app.models import Cronograma, CronogramaEvento, CronogramaVersion, Modulo, 
 from app.models.enums import EstadoCronograma, EstadoRiego, OrigenRiego, OrigenVersion, RolUsuario, TipoEventoCronograma
 from app.repositories import cronogramas as repo
 from app.repositories import riego as repo_riego
-from app.schemas.cronograma import EdicionEntrada, GuardarVersionEntrada
+from app.schemas.cronograma import MAX_CICLOS_TURNO, EdicionEntrada, GuardarVersionEntrada
 from app.services import auditoria_service, correo_service, cronograma_service, riego_service
 from app.services.contexto import ContextoPeticion
 
@@ -110,8 +110,9 @@ def _calcular(db: Session, crono: Cronograma, base: CronogramaVersion,
         recibidos.add(t.turno_id)
         if t.turno_id not in turnos:
             raise DatosInvalidos("El turno no pertenece a la versión base")
-        if not 1 <= t.n_ciclos <= 5 or len(t.ciclos) != t.n_ciclos:
-            raise DatosInvalidos("El número de ciclos debe estar entre 1 y 5 y coincidir con la lista de ciclos")
+        if not 1 <= t.n_ciclos <= MAX_CICLOS_TURNO or len(t.ciclos) != t.n_ciclos:
+            raise DatosInvalidos(f"El número de ciclos debe estar entre 1 y {MAX_CICLOS_TURNO} "
+                                 "y coincidir con la lista de ciclos")
         if sorted(c.ciclo for c in t.ciclos) != list(range(1, t.n_ciclos + 1)):
             raise DatosInvalidos("Los ciclos deben numerarse de 1 a n_ciclos sin repetir")
         turno = turnos[t.turno_id]
@@ -208,6 +209,8 @@ def guardar_version(db: Session, cronograma_id: int, datos: GuardarVersionEntrad
         basada_en_id=base.id, modelo_version_id=None, generacion_id=None, creado_por=actor.id,
         preliminar=base.preliminar, datos_incompletos=base.datos_incompletos,
         motivo_codigo=datos.motivo_codigo, motivo_comentario=datos.motivo_comentario,
+        # La corrección parte del mismo cálculo por pulsos (curva, bloques); el historial lo usa.
+        calculo_pulsos=base.calculo_pulsos,
     )
     db.add(version)
     db.flush()

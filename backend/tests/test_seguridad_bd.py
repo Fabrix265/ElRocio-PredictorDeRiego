@@ -60,7 +60,7 @@ def test_todas_las_tablas_con_rls_y_politica_solo_para_riego_app(conexion: Conne
         ),
         {"e": ESQUEMA},
     ).all()
-    assert len(filas) == 33  # 32 tablas + alembic_version
+    assert len(filas) == 34  # 33 tablas + alembic_version
     for fila in filas:
         assert fila.relrowsecurity, fila.relname
         assert (fila.politicas, fila.politicas_app) == (1, 1), fila.relname

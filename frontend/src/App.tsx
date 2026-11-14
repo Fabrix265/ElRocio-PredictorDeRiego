@@ -27,6 +27,7 @@ const GenerarPage = lazy(() => import("./features/cronogramas/GenerarPage"));
 const DatosCampoPage = lazy(() => import("./features/datos/DatosCampoPage"));
 const CronogramasPage = lazy(() => import("./features/cronogramas/CronogramasPage"));
 const CronogramaDetallePage = lazy(() => import("./features/cronogramas/CronogramaDetallePage"));
+const ParametrosPulsosPage = lazy(() => import("./features/parametros/ParametrosPulsosPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -132,6 +133,16 @@ export default function App() {
                       <RutaProtegida roles={ACCESO.datos}>
                         <Suspense fallback={<CargandoSeccion />}>
                           <DatosCampoPage />
+                        </Suspense>
+                      </RutaProtegida>
+                    }
+                  />
+                  <Route
+                    path="parametros-riego"
+                    element={
+                      <RutaProtegida roles={ACCESO.parametros}>
+                        <Suspense fallback={<CargandoSeccion />}>
+                          <ParametrosPulsosPage />
                         </Suspense>
                       </RutaProtegida>
                     }

@@ -27,6 +27,15 @@ function calcular(c: CicloCronograma, t: TurnoCronograma): CicloCronograma {
   return { ...c, riego_m3ha: m3ha, riego_m3: redondear(m3ha * t.area_ha, 1), duracion_min: duracion, inicio_min: inicio, fin_min: fin, hora_inicio: minutosAHora(inicio), hora_fin: minutosAHora(fin), fin_dia_siguiente: fin >= 1440 };
 }
 
+/** N.º de ciclos que se pueden elegir: los que trae el backend (1–5 del modelo o 1–12 con riego
+ * por pulsos) con la lista completa, más el actual. */
+export function opcionesN(alternativas: Record<string, unknown[]> | undefined, actual: number): number[] {
+  const disponibles = Object.entries(alternativas ?? {})
+    .filter(([n, ciclos]) => Number.isInteger(Number(n)) && ciclos.length === Number(n))
+    .map(([n]) => Number(n));
+  return [...new Set([...disponibles, actual])].sort((a, b) => a - b);
+}
+
 function tieneSolapes(t: TurnoCronograma) {
   const orden = [...t.ciclos].sort((a, b) => a.inicio_min - b.inicio_min);
   return orden.some((c, i) => i > 0 && c.inicio_min < orden[i - 1].fin_min);
@@ -93,7 +102,7 @@ export function EditorPlan({ cronograma, alCerrar, alRecargar }: { cronograma: C
           <div className="flex flex-wrap items-center gap-3 p-3">
             <h3 className="font-semibold">{t.turno_codigo}</h3>
             <Field label="N.º de ciclos" className={cn("w-36 rounded-md", t.n_ciclos !== original.n_ciclos && "bg-activo-bg")}>
-              <Select value={String(t.n_ciclos)} disabled={guardar.isPending || !alternativas.data?.[t.turno_id]} opciones={[1, 2, 3, 4, 5].filter((n) => n === t.n_ciclos || alternativas.data?.[t.turno_id]?.[n]?.length === n).map((n) => ({ value: String(n), label: String(n) }))} onValueChange={(n) => {
+              <Select value={String(t.n_ciclos)} disabled={guardar.isPending || !alternativas.data?.[t.turno_id]} opciones={opcionesN(alternativas.data?.[t.turno_id], t.n_ciclos).map((n) => ({ value: String(n), label: String(n) }))} onValueChange={(n) => {
                 const ciclos = alternativas.data?.[t.turno_id]?.[n];
                 if (ciclos) setTurnos((ts) => ts.map((x) => x.turno_id !== t.turno_id ? x : { ...x, n_ciclos: Number(n), ciclos: ciclos.map((c) => calcular({ ...c, ciclo_modelo: null, duracion_manual: !(t.factor_min_por_m3ha && t.factor_min_por_m3ha > 0), campos_editados: [] }, t)) }));
               }} />

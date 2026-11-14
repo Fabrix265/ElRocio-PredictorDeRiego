@@ -26,6 +26,7 @@ import {
 import { useUsuario } from "../auth/AuthProvider";
 import { ETIQUETA_ESTADO, ETIQUETA_ORIGEN_VERSION, MarcasVersion, TONO_ESTADO, formato } from "./etiquetas";
 import { BotonesExportar } from "./BotonesExportar";
+import { CalculoPulsos } from "./CalculoPulsos";
 import { Gantt } from "./Gantt";
 import { EditorPlan } from "./EditorPlan";
 import { ContextoDiaAnterior } from "./ContextoDiaAnterior";
@@ -112,6 +113,7 @@ function ContenidoVersion({ version }: { version: VersionDetalle }) {
         </dl>
       </div>
       <TablaTurnos turnos={version.turnos} />
+      {version.calculo_pulsos && <CalculoPulsos calculo={version.calculo_pulsos} />}
     </div>
   );
 }

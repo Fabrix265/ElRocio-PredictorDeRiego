@@ -22,6 +22,7 @@ from app.models.datos import (
     PronosticoClima,
 )
 from app.models.organizacion import Empresa, Fundo, Lote, Modulo, Turno
+from app.models.pulsos import ParametrosPulsos
 from app.models.riego import CargaRiego, CargaRiegoTurnoDia, RiegoCiclo, RiegoRegistro
 from app.models.seguridad import (
     Auditoria,
@@ -55,6 +56,7 @@ __all__ = [
     "MotivoCorreccion",
     "NdviImagen",
     "NotificacionCorreo",
+    "ParametrosPulsos",
     "PasswordReset",
     "PhytechPlantaDiario",
     "PhytechSueloHorario",
