@@ -25,8 +25,10 @@ Diferencias deliberadas con la planilla (documentadas en ``detalle["reglas"]``):
 - Con ``ajustar_pulso_al_total`` el volumen de cada pulso es total / n° de pulsos, para que el día
   sume exactamente lo que dijo el modelo (la planilla deja el pulso fijo y reporta la «Variación»).
 - Si el redondeo deja 0 pulsos con un total > 0, se programa 1 pulso en el bloque de mayor %.
-- El horario (que la planilla no calcula): en cada bloque los turnos riegan uno tras otro
-  (TE01, TE02, …, y otra vuelta si alguno tiene más de un pulso), con el reposo repartido parejo.
+- El horario (que la planilla no calcula) va en fila, por vueltas: ciclo 1 de TE01, TE02, …, TE0n
+  seguidos, luego los ciclos 2, y así, sin pausa, desde la primera hora de la curva. Los bloques
+  de 3 h y la curva solo deciden cuántos ciclos tiene cada turno; cada turno descansa mientras
+  riegan los demás.
 
 Este módulo no toca la base de datos.
 """
@@ -312,33 +314,34 @@ def _converge(turnos: dict[str, PlanTurno], bloques: list[Bloque], p: Parametros
 
 # --- Paso 4: horario (no está en la planilla) ------------------------------------------
 
+def inicio_horario(bloques: list[Bloque]) -> int:
+    """Minuto en que empieza el riego del día: la primera hora con % > 0 de la curva elegida."""
+    con_horas = [b.inicio_min for b in bloques if b.horas]
+    return min(con_horas) if con_horas else HORA_PRIMER_BLOQUE * 60
+
+
 def _horario(turnos: dict[str, PlanTurno], bloques: list[Bloque]) -> None:
-    """En cada bloque, los turnos riegan uno tras otro en su orden, con el reposo repartido parejo
-    entre pulsos. Si no caben, siguen sin reposo y pasan al bloque siguiente (aviso aparte)."""
+    """Horario en fila, por vueltas: el ciclo 1 de TE01, TE02, …, TE0n seguidos; al terminar, los
+    ciclos 2 en el mismo orden, y así. Cada pulso empieza cuando termina el anterior, sin pausa,
+    desde la primera hora de la curva. Los bloques solo deciden cuántos ciclos tiene cada turno."""
     for t in turnos.values():
         t.ciclos = []
-    cursor = 0.0
-    for b in bloques:
-        secuencia = []
-        maximo = max((t.pulsos_por_bloque[b.indice] for t in turnos.values()), default=0)
-        for vuelta in range(maximo):
-            secuencia += [t for t in turnos.values() if t.pulsos_por_bloque[b.indice] > vuelta]
-        if not secuencia:
-            continue
-        activos = sum(t.minutos_pulso for t in secuencia)
-        reposo = max(0.0, ((b.fin_min - b.inicio_min) - activos) / len(secuencia))
-        cursor = max(cursor, float(b.inicio_min))
-        for t in secuencia:
+    cursor = float(inicio_horario(bloques))
+    vueltas = max((t.n_ciclos for t in turnos.values()), default=0)
+    for vuelta in range(vueltas):
+        for t in turnos.values():
+            if t.n_ciclos <= vuelta:
+                continue
             inicio = round(cursor, 1)
             duracion = round(t.minutos_pulso, 1)
             fin = round(inicio + duracion, 1)
             m3ha = round(t.volumen_pulso_m3ha, 2)
             t.ciclos.append(CicloPulso(
-                ciclo=len(t.ciclos) + 1, riego_m3ha=m3ha, riego_m3=round(m3ha * t.area_ha, 1),
+                ciclo=vuelta + 1, riego_m3ha=m3ha, riego_m3=round(m3ha * t.area_ha, 1),
                 duracion_min=duracion, inicio_min=inicio, fin_min=fin,
                 hora_inicio=hhmm(inicio), hora_fin=hhmm(fin), fin_dia_siguiente=fin >= 1440,
             ))
-            cursor += t.minutos_pulso + reposo
+            cursor = fin  # el siguiente arranca en la hora de fin mostrada (sin saltos de 1 min)
 
 
 # --- Plan completo ----------------------------------------------------------------------
@@ -391,7 +394,7 @@ def calcular(totales: dict[str, float], areas: dict[str, float], p: Parametros,
         if riego > util + EPS:
             plan.avisos.append(
                 f"No converge el bloque {hhmm(b.inicio_min)}–{hhmm(b.fin_min)}: faltan "
-                f"{math.ceil(riego - util)} min (los pulsos se corren al bloque siguiente)."
+                f"{math.ceil(riego - util)} min (el riego del día termina más tarde que la curva)."
             )
     if d.intensidad_mmh > p.infiltracion_basica_mmh:
         plan.avisos.append(
@@ -436,6 +439,9 @@ def detalle(plan: PlanPulsos, p: Parametros) -> dict[str, Any]:
         "ventana": [hhmm(min(b.inicio_min for b in plan.bloques if b.horas)),
                     hhmm(max(b.fin_min for b in plan.bloques if b.horas))]
         if any(b.horas for b in plan.bloques) else None,
+        # Hora real del primer y último pulso del día (horario en fila).
+        "horario": [hhmm(min(c.inicio_min for c in ciclos)), hhmm(max(c.fin_min for c in ciclos))]
+        if (ciclos := [c for t in plan.turnos.values() for c in t.ciclos]) else None,
         "converge": plan.converge,
         "fase_fenologica": p.fase_fenologica,
         "derivados": {
@@ -466,6 +472,6 @@ def detalle(plan: PlanPulsos, p: Parametros) -> dict[str, Any]:
         "avisos": plan.avisos,
         "reglas": {
             "ajustar_pulso_al_total": p.ajustar_pulso_al_total,
-            "orden_turnos": "uno tras otro en cada bloque, reposo repartido parejo",
+            "orden_turnos": "en fila por vueltas: ciclo 1 de cada turno seguidos, luego los ciclos 2, …, sin pausa",
         },
     }

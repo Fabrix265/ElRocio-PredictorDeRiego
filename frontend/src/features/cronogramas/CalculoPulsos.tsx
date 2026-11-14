@@ -24,6 +24,13 @@ export function CalculoPulsos({ calculo }: { calculo: Calculo }) {
       <p className="text-sm text-texto-2">
         El modelo da los m³/ha de cada turno; la planilla los reparte en pulsos. {calculo.motivo}.
       </p>
+      {calculo.horario && (
+        <p className="text-sm text-texto-2">
+          Horario en fila de <span className="font-semibold text-texto">{calculo.horario[0]} a {calculo.horario[1]}</span>:
+          primero el ciclo 1 de cada turno, uno tras otro; luego los ciclos 2, y así. La curva solo define cuántos ciclos
+          tiene cada turno.
+        </p>
+      )}
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-texto-2 sm:grid-cols-4">
         <div><dt>Fase</dt><dd className="font-semibold text-texto">{calculo.fase_fenologica}</dd></div>
         <div><dt>Agotamiento por pulso</dt><dd className="font-semibold text-texto">{pct(d.agotamiento_operativo)}</dd></div>

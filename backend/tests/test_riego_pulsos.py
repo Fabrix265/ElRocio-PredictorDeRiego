@@ -67,11 +67,32 @@ def test_m3ha_del_modelo_horario_y_total_exacto():
         for c in t.ciclos:  # duración = m³/ha ÷ capacidad de riego
             assert c.duracion_min == pytest.approx(c.riego_m3ha * 60 / 21.3333, abs=0.06)
     assert [(c.hora_inicio, c.hora_fin) for c in plan.turnos["TE01"].ciclos] == [
-        ("03:00", "03:29"), ("06:00", "06:29"), ("09:00", "09:29"), ("12:00", "12:29"), ("15:00", "15:29")]
-    assert plan.turnos["TE02"].ciclos[0].hora_inicio == "03:36"
-    # Ningún pulso se solapa con otro del módulo (una sola válvula a la vez).
-    todos = sorted((c.inicio_min, c.fin_min) for t in plan.turnos.values() for c in t.ciclos)
-    assert all(a[1] <= b[0] for a, b in zip(todos, todos[1:]))
+        ("03:00", "03:29"), ("05:27", "05:56"), ("07:53", "08:22"), ("10:20", "10:49"), ("12:46", "13:16")]
+    assert [(c.hora_inicio, c.hora_fin) for c in plan.turnos["TE02"].ciclos][:2] == [
+        ("03:29", "03:58"), ("05:56", "06:25")]
+    assert cp.detalle(plan, PARAMETROS)["horario"] == ["03:00", "15:13"]
+    # En fila por vueltas: ciclo 1 de TE01…TE05, luego los ciclos 2, …; cada uno empieza cuando
+    # termina el anterior (sin solaparse ni dejar huecos).
+    fila = sorted((c.inicio_min, c.fin_min, c.ciclo, turno) for turno, t in plan.turnos.items() for c in t.ciclos)
+    assert [(ciclo, turno) for _, _, ciclo, turno in fila] == [(k, t) for k in range(1, 6) for t in TURNOS]
+    assert fila[0][0] == 180
+    assert all(a[1] == b[0] for a, b in zip(fila, fila[1:]))
+
+
+def test_horario_en_fila_con_los_m3ha_del_modelo_del_13_11():
+    """El ejemplo revisado con el usuario (modelo 2026-11-07_1115, cronograma del 13/11)."""
+    totales = {"TE01": 53.29, "TE02": 53.79, "TE03": 49.57, "TE04": 50.43, "TE05": 47.91}
+    areas = {"TE01": 13.019, "TE02": 12.649, "TE03": 12.423, "TE04": 12.459, "TE05": 12.2792}
+    plan = cp.calcular(totales, areas, PARAMETROS)
+    assert plan.curva == "3" and plan.converge
+    assert [t.n_ciclos for t in plan.turnos.values()] == [5] * 5
+    primera = [(c.hora_inicio, c.hora_fin) for t in plan.turnos.values() for c in t.ciclos[:1]]
+    assert primera == [("03:00", "03:30"), ("03:30", "04:00"), ("04:00", "04:28"), ("04:28", "04:57"),
+                       ("04:57", "05:24")]
+    assert plan.turnos["TE01"].ciclos[1].hora_inicio == "05:24"
+    assert plan.turnos["TE05"].ciclos[-1].hora_fin == "14:58"
+    c = plan.turnos["TE01"].ciclos[0]
+    assert (c.riego_m3ha, c.riego_m3, c.duracion_min) == (10.66, 138.8, 30.0)
 
 
 def test_eto_baja_usa_curva_1_y_redondeo_minimo_un_pulso():
@@ -79,7 +100,9 @@ def test_eto_baja_usa_curva_1_y_redondeo_minimo_un_pulso():
     assert plan.curva == "1" and plan.curva_propuesta == "1"
     assert plan.turnos["TE01"].n_ciclos == 2
     assert plan.turnos["TE02"].n_ciclos == 1  # 4 m³/ha < medio pulso: igual se programa 1
-    assert plan.turnos["TE02"].ciclos[0].hora_inicio >= "06:00"
+    # Con la curva 1 la fila empieza a las 06:00: TE01 ciclo 1, TE02 ciclo 1, TE01 ciclo 2.
+    assert [(c.hora_inicio, c.hora_fin) for c in plan.turnos["TE01"].ciclos] == [("06:00", "06:28"), ("06:39", "07:07")]
+    assert [(c.hora_inicio, c.hora_fin) for c in plan.turnos["TE02"].ciclos] == [("06:28", "06:39")]
 
 
 def test_modo_forzado_y_aviso_si_no_converge():
@@ -200,7 +223,8 @@ def test_generar_con_pulsos_guarda_pulsos_calculo_y_plan_del_modelo(client, auth
         assert t["factor_min_por_m3ha"] == pytest.approx(60 / 21.3333, abs=1e-3)
         assert t["ciclos"][0]["m3ha_p10"] is None
     te01 = next(t for t in version["turnos"] if t["turno_codigo"] == "TE01")
-    assert [c["hora_inicio"] for c in te01["ciclos"]] == ["03:00", "06:00", "09:00", "12:00", "15:00"]
+    assert [c["hora_inicio"] for c in te01["ciclos"]] == ["03:00", "05:26", "07:52", "10:18", "12:44"]
+    assert calculo["horario"] == ["03:00", "15:10"]
 
     entradas = db.scalars(select(PrediccionEntrada)).all()
     assert len(entradas) == 5 and all(len(e.plan_modelo) == 3 for e in entradas)

@@ -506,8 +506,10 @@ La lógica de la planilla «MODELO RIEGO POR PULSOS – PALTO» vive en el backe
 3. Pulso = agua disponible × agotamiento ÷ Ea (con «agotamiento automático», el menor entre el de la
    fase y el máximo que cabe en 3 h); pulsos por bloque con el redondeo acumulado de la planilla
    («Pulso/Turno Ajustado»). Con `ajustar_pulso_al_total`, cada pulso = total ÷ n° de pulsos.
-4. Horario: en cada bloque los turnos riegan uno tras otro (TE01…TE05) con el reposo repartido.
-   Duración = m³/ha ÷ capacidad de riego (el factor del turno es 60 / CR, así la edición recalcula igual).
+4. Horario en fila, por vueltas: ciclo 1 de TE01, TE02, …, TE05 seguidos; al terminar, los ciclos 2
+   en el mismo orden, y así, sin pausa desde la primera hora de la curva (03:00 con la curva 3,
+   06:00 con la 1 o la 2). Los bloques de 3 h solo deciden cuántos ciclos tiene cada turno; cada
+   turno descansa mientras riegan los demás. Duración = m³/ha ÷ capacidad de riego (el factor del turno es 60 / CR, así la edición recalcula igual).
 
 Se guarda en `cronograma_version.calculo_pulsos` (curva, bloques, pulsos por turno, avisos) y en
 `prediccion_entrada.plan_modelo` los ciclos del modelo: el historial del día siguiente usa esos

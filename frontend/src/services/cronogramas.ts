@@ -105,6 +105,8 @@ export interface CalculoPulsos {
   motivo: string;
   etr_equivalente_mm: number;
   ventana: [string, string] | null;
+  /** Primer inicio y último fin del día (horario en fila); falta en versiones anteriores. */
+  horario?: [string, string] | null;
   converge: boolean;
   fase_fenologica: string;
   derivados: {
