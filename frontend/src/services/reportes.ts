@@ -6,10 +6,12 @@
  * - GET /datos/agua?modulo_id&desde&hasta            → AguaSalida (P: sin modelo_*)
  * - GET /datos/clima|suelo|planta?desde&hasta        → SerieSalida (diaria; por defecto 14 días hasta ayer)
  * - GET /datos/pronostico?desde&hasta                → SerieSalida (última captura)
- * - GET /cronogramas/{id}/exportar?formato=pdf|xlsx  → archivo (auditado)
+ * - GET /cronogramas/{id}/exportar?formato=pdf|xlsx&orden=turno|hora → archivo (auditado)
  * - GET /exportaciones/refinamiento.csv?desde&hasta  → CSV (solo admin)
  */
 import { api, descargar } from "./httpClient";
+
+export type OrdenPlan = "turno" | "hora";
 
 export interface Serie {
   fuente: string;
@@ -87,8 +89,8 @@ export const reportesApi = {
   pronostico(desde: string, hasta: string, signal?: AbortSignal): Promise<Serie> {
     return api.get<Serie>("/datos/pronostico", { desde, hasta }, signal);
   },
-  exportarCronograma(id: number, formato: "pdf" | "xlsx"): Promise<string> {
-    return descargar(`/cronogramas/${id}/exportar`, { formato }, `cronograma.${formato}`);
+  exportarCronograma(id: number, formato: "pdf" | "xlsx", orden: OrdenPlan = "turno"): Promise<string> {
+    return descargar(`/cronogramas/${id}/exportar`, { formato, orden }, `cronograma.${formato}`);
   },
   refinamiento(desde: string, hasta: string): Promise<string> {
     return descargar("/exportaciones/refinamiento.csv", { desde, hasta }, "refinamiento.csv");

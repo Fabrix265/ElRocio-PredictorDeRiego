@@ -9,12 +9,15 @@ import { Button } from "../../components/ui/Button";
 import { Card, CardHeader } from "../../components/ui/Card";
 import { Dialog, DialogContent } from "../../components/ui/Dialog";
 import { EmptyState } from "../../components/ui/EmptyState";
+import { Field } from "../../components/ui/Field";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { Select } from "../../components/ui/Select";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { cn } from "../../lib/cn";
 import { formatearDiaCorto, formatearFechaHora } from "../../lib/fechas";
 import { puede } from "../../lib/roles";
 import { ApiError, mensajeDeError } from "../../services/httpClient";
+import type { OrdenPlan } from "../../services/reportes";
 import {
   claveCronogramas,
   cronogramasApi,
@@ -40,6 +43,7 @@ function TablaTurnos({ turnos }: { turnos: TurnoCronograma[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[560px] border-collapse text-sm">
+        <caption className="sr-only">Plan por turno</caption>
         <thead>
           <tr>
             <th className={TH}>Turno</th>
@@ -83,7 +87,34 @@ function TablaTurnos({ turnos }: { turnos: TurnoCronograma[] }) {
   );
 }
 
-function ContenidoVersion({ version }: { version: VersionDetalle }) {
+export function TablaPorHora({ turnos }: { turnos: TurnoCronograma[] }) {
+  const filas = turnos.flatMap((t, ordenTurno) => t.ciclos.map((c) => ({ t, c, ordenTurno })))
+    .sort((a, b) => a.c.inicio_min - b.c.inicio_min || a.ordenTurno - b.ordenTurno || a.c.ciclo - b.c.ciclo);
+  return (
+    <div className="min-w-0 max-w-full overflow-x-auto">
+      <table className="w-full min-w-[560px] border-collapse text-sm">
+        <caption className="sr-only">Plan por hora</caption>
+        <thead><tr>{["Inicio", "Fin", "Turno", "Ciclo", "Duración (min)", "m³/ha", "m³"].map((s, i) =>
+          <th key={s} scope="col" className={cn(TH, i >= 4 && "text-right")}>{s}</th>,
+        )}</tr></thead>
+        <tbody>{filas.map(({ t, c }) => <tr key={`${t.turno_id}-${c.ciclo}`}>
+          <td className={TD}>{c.hora_inicio}{c.inicio_min >= 1440 && <span className="text-texto-3"> (+1 día)</span>}</td>
+          <td className={TD}>{c.hora_fin}{c.fin_dia_siguiente && <>
+            <Moon className="ml-1 inline size-3.5 text-texto-3" aria-hidden="true" />
+            <span className="text-texto-3"> (+1 día)</span>
+          </>}</td>
+          <td className={cn(TD, "font-semibold text-texto")}>{t.turno_codigo}</td>
+          <td className={TD}>{c.ciclo}</td>
+          <td className={cn(TD, "text-right tabular-nums")}>{formato.m3(c.duracion_min)}</td>
+          <td className={cn(TD, "text-right tabular-nums")}>{formato.m3ha(c.riego_m3ha)}</td>
+          <td className={cn(TD, "text-right tabular-nums")}>{formato.m3(c.riego_m3)}</td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function ContenidoVersion({ version, orden, alOrdenar }: { version: VersionDetalle; orden: OrdenPlan; alOrdenar: (orden: OrdenPlan) => void }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2 px-4 pt-3">
@@ -112,7 +143,12 @@ function ContenidoVersion({ version }: { version: VersionDetalle }) {
           </div>
         </dl>
       </div>
-      <TablaTurnos turnos={version.turnos} />
+      <div className="px-4">
+        <Field label="Orden del plan" className="w-40 max-w-full">
+          <Select value={orden} onValueChange={(v) => alOrdenar(v as OrdenPlan)} opciones={[{ value: "turno", label: "Por turno" }, { value: "hora", label: "Por hora" }]} />
+        </Field>
+      </div>
+      {orden === "hora" ? <TablaPorHora turnos={version.turnos} /> : <TablaTurnos turnos={version.turnos} />}
       {version.calculo_pulsos && <CalculoPulsos calculo={version.calculo_pulsos} />}
     </div>
   );
@@ -170,6 +206,7 @@ function Detalle({ id }: { id: number }) {
   const [numero, setNumero] = useState<number | null>(null);
   const [confirmar, setConfirmar] = useState(false);
   const [pestana, setPestana] = useState("Plan");
+  const [orden, setOrden] = useState<OrdenPlan>("turno");
   const [edicion, setEdicion] = useState<CronogramaDetalle | null>(null);
   const apertura = useRef(false);
   const tabs = puede(usuario.rol, "verRevisionCronograma") ? ["Plan", "Gantt", "Datos", "Versiones", "Línea de tiempo"] : ["Plan", "Gantt"];
@@ -241,7 +278,7 @@ function Detalle({ id }: { id: number }) {
             }
             acciones={
               <div className="flex flex-wrap gap-2">
-                <BotonesExportar cronogramaId={id} deshabilitado={!!edicion} />
+                <BotonesExportar cronogramaId={id} orden={orden} deshabilitado={!!edicion} />
                 {puedeRegenerar && (
                   <Button variante="secundario" onClick={() => regenerar.mutate(false)} disabled={regenerar.isPending || !!edicion}>
                     <RefreshCw aria-hidden="true" className={regenerar.isPending ? "animate-spin" : undefined} />
@@ -308,7 +345,7 @@ function Detalle({ id }: { id: number }) {
               ) : pestana === "Gantt" ? (
                 <div className="p-4"><Gantt turnos={version.turnos} /></div>
               ) : (
-                <div className="pb-2"><ContenidoVersion version={version} /></div>
+                <div className="pb-2"><ContenidoVersion version={version} orden={orden} alOrdenar={setOrden} /></div>
               )}
             </>}
             {pestana === "Datos" && <DatosCronograma id={id} />}

@@ -188,9 +188,10 @@ def datos_campo(cronograma_id: IdPath, usuario: AdminEncargadoSubgerente, db: Db
 def exportar(
     cronograma_id: IdPath, usuario: UsuarioHabilitado, db: DbSesion, contexto: Contexto,
     formato: Annotated[str, Query(pattern="^(pdf|xlsx)$")] = "pdf",
+    orden: Annotated[str, Query(pattern="^(turno|hora)$")] = "turno",
 ) -> Response:
     """PDF o Excel de la versión visible (el programador, siempre la publicada); audita y deja el
     evento ``exportado``."""
-    contenido, media, nombre = reportes_service.exportar(db, cronograma_id, formato, usuario, contexto)
+    contenido, media, nombre = reportes_service.exportar(db, cronograma_id, formato, usuario, contexto, orden=orden)
     return Response(contenido, media_type=media,
                     headers={"Content-Disposition": f'attachment; filename="{nombre}"'})

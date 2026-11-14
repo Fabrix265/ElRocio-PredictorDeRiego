@@ -4,12 +4,12 @@ import { FileDown, FileSpreadsheet } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { notificar } from "../../components/ui/Toast";
 import { mensajeDeError } from "../../services/httpClient";
-import { reportesApi } from "../../services/reportes";
+import { reportesApi, type OrdenPlan } from "../../services/reportes";
 
 /** PDF y Excel de la versión visible (el programador exporta siempre la publicada). */
-export function BotonesExportar({ cronogramaId, deshabilitado }: { cronogramaId: number; deshabilitado?: boolean }) {
+export function BotonesExportar({ cronogramaId, orden = "turno", deshabilitado }: { cronogramaId: number; orden?: OrdenPlan; deshabilitado?: boolean }) {
   const exportar = useMutation({
-    mutationFn: (formato: "pdf" | "xlsx") => reportesApi.exportarCronograma(cronogramaId, formato),
+    mutationFn: (formato: "pdf" | "xlsx") => reportesApi.exportarCronograma(cronogramaId, formato, orden),
     onSuccess: (nombre) => notificar.exito(`Se descargó ${nombre}`),
     onError: (e) => notificar.error(`No se pudo exportar: ${mensajeDeError(e)}`),
   });

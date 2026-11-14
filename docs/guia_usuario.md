@@ -23,9 +23,9 @@ Todas las fechas y horas del sistema están en **hora de Lima**.
 | Rol | Qué hace en el sistema |
 |---|---|
 | **Administrador** | Gestiona los usuarios y revisa la auditoría. Ve todas las pantallas y puede hacer todo lo del encargado. |
-| **Encargado** | Genera los cronogramas de riego, los corrige y los publica, y registra el riego aplicado. |
+| **Encargado** | Genera los cronogramas de riego, los corrige y los publica, registra el riego aplicado y configura los parámetros de riego. |
 | **Programador** | Ve los cronogramas publicados, los programa en campo y confirma el «Visto». |
-| **Subgerente** | Revisa los cronogramas, solicita correcciones, edita el riego aplicado y revisa la auditoría. |
+| **Subgerente** | Revisa los cronogramas, solicita correcciones, edita el riego aplicado, consulta los parámetros de riego y revisa la auditoría. |
 
 Pantallas del menú por rol:
 
@@ -36,6 +36,7 @@ Pantallas del menú por rol:
 | Cronogramas | ✔ | ✔ edita | ✔ solo publicados, confirma Visto | ✔ lectura, solicita corrección | listado, detalle, corrección, publicación, Visto y exportación |
 | Riego aplicado | ✔ | ✔ sube Excel y edita | ✔ lectura | ✔ lectura, historial y edición | consulta, Excel y edición |
 | Datos de campo | ✔ | ✔ | ✔ | ✔ | agua aplicada vs propuesta, planta, suelo y clima |
+| Parámetros de riego | ✔ edita | ✔ edita | — | ✔ consulta | suelo, sistema de riego, fase del cultivo y curvas para los pulsos |
 | Auditoría | ✔ | — | — | ✔ | registro de quién hizo qué y cuándo |
 | Usuarios | ✔ | — | — | — | altas, roles, activación y contraseñas temporales |
 
@@ -232,8 +233,8 @@ Además, un cronograma puede llevar estas marcas de calidad:
 - En **Generar**, elige la **Fecha inicial** (por defecto, hoy; puede ir de 7 días atrás hasta
   mañana) y los **Días** (por defecto, 3; máximo 7) y toca **Generar**. El modelo tarda unos
   segundos por día.
-- El modelo propone, por turno, el número de ciclos y, por ciclo, los m³/ha, la duración y el
-  horario.
+- Con riego por pulsos, el modelo propone los m³/ha de cada turno y el sistema los reparte como
+  se explica abajo. Sin pulsos, se usan los ciclos, volúmenes y horarios que propone el modelo.
 - **Resultado por día**: dice qué pasó con cada día (**Creado**, **Regenerado** u **Omitido**),
   su versión y sus marcas, con **Ver detalle**. Si alguna fuente no tenía el día anterior aparece
   «Datos atrasados al generar»: el plan se calcula igual, con menos precisión.
@@ -243,6 +244,46 @@ Además, un cronograma puede llevar estas marcas de calidad:
 - Si alguien está generando el mismo módulo en ese momento, el sistema avisa y pide intentar de
   nuevo en unos segundos.
 
+### Riego por pulsos
+
+El **modelo da los m³/ha de cada turno**. El sistema usa la lógica de la planilla de pulsos y los
+parámetros del módulo para decidir cuántos ciclos hacen falta, cuánta agua lleva cada pulso y
+cuánto dura. La duración depende del volumen y de la capacidad del sistema de riego.
+
+El horario va **en fila, por vueltas**: primero el ciclo 1 de TE01, TE02 y los demás turnos,
+uno seguido del otro; después el ciclo 2 de cada turno, y así hasta terminar. Cada pulso empieza
+cuando acaba el anterior, sin pausas. Si un turno tiene menos ciclos, se salta en las últimas
+vueltas. Se empieza a la primera hora de la curva elegida.
+
+En **Plan**, el panel **Cálculo por pulsos** explica el cálculo con el que se generó la versión:
+
+- la curva elegida, su ventana, el motivo de la elección y el horario en fila;
+- la fase del cultivo, el agua disponible en el suelo, el agotamiento por pulso y la capacidad
+  de riego;
+- los m³/ha del modelo por turno, los pulsos por bloque de tres horas, el total de ciclos y
+  los m³/ha de cada pulso;
+- si los pulsos caben en los bloques de cálculo (**Todos convergen**) y los avisos que revisar.
+
+Los bloques de la curva sirven para calcular los ciclos; el horario real se lee en la tabla del
+plan. Si corriges el plan, consulta esa tabla para ver las horas y volúmenes corregidos.
+
+### Parámetros de riego
+
+- **Quién**: el administrador y el encargado editan; el subgerente consulta.
+- Abre **Parámetros de riego** en el menú del módulo seleccionado. Los grupos son:
+
+| Grupo | Para qué sirve |
+|---|---|
+| Uso en los cronogramas | Activa el reparto en pulsos. «Ajustar el pulso para que el día sume lo que dijo el modelo» conserva el volumen diario; sin marcar, se usa el pulso base y el total puede variar por el redondeo. |
+| Lo que se calcula | Muestra los resultados de los valores guardados: agua disponible, capacidad de riego, intensidad, agotamiento y volumen y duración del pulso base. |
+| Suelo y agua disponible | Describe la textura, la humedad que retiene el suelo, su límite de marchitez, la infiltración y la zona mojada que alcanzan las raíces. Sirve para estimar cuánta agua puede aprovechar la planta. |
+| Sistema de riego | Describe las distancias entre plantas, hileras y goteros, las mangueras, el caudal y la eficiencia. El reposo/cambio de válvulas reduce el tiempo útil del cálculo por bloques; no añade pausas al horario en fila. |
+| Fenología y ventana de riego | Indica la fase del cultivo y cuánto puede agotarse el agua entre pulsos. Los umbrales de ETr (demanda de agua equivalente) eligen la curva; se puede usar selección automática, con respaldo a otra curva o forzar una curva. |
+| Curvas de aplicación por hora | Reparte la demanda entre las horas del día. Cada curva debe sumar 100 %; una celda vacía queda fuera de su ventana. |
+
+Al terminar, toca **Guardar parámetros**. Los cambios se usan en los cronogramas que se
+**generen o regeneren después**: los planes ya guardados no cambian automáticamente.
+
 ### Ver un cronograma
 
 - En **Cronogramas** están los cronogramas por fecha (por defecto, del último mes a la próxima
@@ -250,6 +291,10 @@ Además, un cronograma puede llevar estas marcas de calidad:
 - El **detalle** abre **Plan**, con inicio, fin, duración, m³/ha y m³ de cada ciclo; la luna
   indica que termina al día siguiente. **Gantt** muestra los horarios a ancho completo.
   En la pestaña **Versiones**, toca una para verla en Plan.
+- En **Plan**, **Orden del plan** permite elegir **Por turno** (la vista inicial) o **Por hora**.
+  Por hora muestra todos los ciclos en el orden en que empiezan, con turno, ciclo y volúmenes;
+  «(+1 día)» indica el día siguiente. La opción se conserva al cambiar de pestaña o de versión
+  dentro de la página. En el celular, desliza la tabla horizontalmente para ver sus columnas.
 - Filtra el listado con **Todos**, **Borrador** (incluye cambios sin publicar), **Publicado**,
   **Visto**, **Corrección solicitada** y **Modificado**.
 - **Regenerar** (encargado y administrador) recalcula el día con el modelo y crea una versión
@@ -268,9 +313,15 @@ Además, un cronograma puede llevar estas marcas de calidad:
   sobre una publicada se crea un borrador de cambios que el programador todavía no ve.
 - Por ciclo, edita **m³/ha**, **Inicio** y **Día siguiente**. La duración, el volumen y el fin se
   recalculan. Marca **Duración manual** para fijar los minutos; es obligatorio si falta el factor
-  del turno. **N.º de ciclos** reemplaza el turno por la alternativa del modelo de 1 a 5 ciclos.
+  del turno. **N.º de ciclos** reemplaza el turno por una alternativa de 1 a 12 ciclos con riego
+  por pulsos (1 a 5 sin pulsos).
 - Las celdas modificadas se ven en verde. Los solapes avisan sin impedir guardar; **Ajustar
-  solapes** retrasa los inicios que se superponen hasta el fin del ciclo anterior.
+  solapes** retrasa los inicios que se superponen dentro del mismo turno hasta el fin del ciclo anterior.
+- Con **riego por pulsos**, cambiar el número de ciclos, los m³/ha o la duración reordena todos
+  los turnos en fila desde el primer inicio de la versión que estás corrigiendo. Los demás turnos
+  que se desplacen también se guardan como editados. Si escribes **Inicio** a mano, se respeta tu
+  hora: si hay turnos regando al mismo tiempo aparece un aviso. Usa **Ordenar en fila** para
+  encadenarlos otra vez por vueltas, conservando los volúmenes y duraciones.
 - **Cancelar** sale directamente si no cambiaste nada. Si hay cambios, confirma con **Descartar
   corrección** o usa **Volver** para continuar editando.
 - **Guardar corrección** abre el diálogo: elige **Motivo**, añade **Comentario (opcional)** y
@@ -327,7 +378,8 @@ Además, un cronograma puede llevar estas marcas de calidad:
 - Toca un turno-día con registro para ver los ciclos. A/E/S ven también el **Historial de
   versiones**, con **Original**, **Vigente**, origen, fecha, usuario y motivo.
 - **Editar riego** habilita inicio HH:MM, **Día siguiente**, duración y m³/ha. **Agregar ciclo** y
-  **Quitar** mantienen entre 1 y 5 ciclos. Completa **Motivo** (1–255 caracteres) y, si quieres,
+  **Quitar** permiten de 1 a 12 ciclos. Completa
+  **Motivo** (1–255 caracteres) y, si quieres,
   **Comentario (opcional)**; toca **Guardar riego**. Verás «Se guardó el riego».
 - **No se regó** guarda el día sin ciclos y también exige motivo. Conserva el estado del vigente.
 - **Marcar aplicado** solo aparece para un provisional de una fecha anterior a hoy. Conserva los
@@ -356,7 +408,9 @@ Además, un cronograma puede llevar estas marcas de calidad:
   - **Humedad del suelo por profundidad** (15 a 90 cm) con la **línea de estrés** en discontinua;
   - **Clima**: ETo y lluvia en barras, temperaturas máxima y mínima en líneas.
 - En el detalle de un cronograma, **PDF** y **Excel** descargan la versión vigente (el programador,
-  siempre la publicada). Cada exportación queda en la auditoría y en la línea de tiempo.
+  siempre la publicada). El archivo sigue el **Orden del plan** elegido: **Por turno** o **Por hora**,
+  indicado también en su cabecera. Para llevar al campo el orden del día, elige **Por hora** antes
+  de descargar. Cada exportación queda en la auditoría y en la línea de tiempo.
 - El administrador descarga el **CSV de refinamiento** desde **Cronogramas** (botón «CSV de
   refinamiento»), con el rango de fechas del listado: una fila por cronograma, turno y ciclo,
   con lo que propuso el modelo, lo publicado y lo aplicado, para mejorar el modelo.
@@ -375,6 +429,7 @@ Además, un cronograma puede llevar estas marcas de calidad:
 | Revisar la auditoría ([ver Auditoría](#auditoría-administrador-y-subgerente)) |
 | Subir el Excel de riego, usar **Actualizar ahora**, ver las últimas corridas y el historial de versiones (pasos 1, 2 y 8) |
 | Todo lo demás del encargado (generar, corregir, publicar) |
+| Consultar y editar los [Parámetros de riego](#parámetros-de-riego) |
 | Confirmar Visto o solicitar corrección en lugar del programador o del subgerente |
 | Exportar el CSV de refinamiento del modelo |
 
@@ -388,6 +443,7 @@ El primer administrador lo crea el equipo técnico al instalar el sistema (coman
 | Ver el Dashboard con la **Frescura de datos** y las últimas corridas |
 | Ver el riego aplicado y su historial, subir el Excel y usar **Actualizar ahora** (pasos 1, 2 y 8) |
 | Generar y regenerar cronogramas; ver el detalle (paso 3) |
+| Consultar y editar los [Parámetros de riego](#parámetros-de-riego) |
 | Corregir con motivo, publicar, publicar cambios, descartar el borrador de cambios y mantener la versión ante una solicitud de corrección (pasos 4, 5 y 7) |
 | Editar el riego provisional, marcarlo aplicado y registrar «no se regó» (paso 8) |
 | Dashboard con indicadores, Datos de campo y exportaciones (paso 9) |
@@ -412,6 +468,7 @@ El primer administrador lo crea el equipo técnico al instalar el sistema (coman
 | Ver el Dashboard con la **Frescura de datos** y las últimas corridas (sin «Actualizar ahora») |
 | Consultar el riego aplicado y el historial de versiones de cada turno-día (paso 8) |
 | Ver los cronogramas (incluidos los borradores) en modo lectura |
+| Consultar los [Parámetros de riego](#parámetros-de-riego), sin editarlos |
 | Recibir los correos de publicación y de Visto; **Solicitar corrección** con motivo (paso 7) |
 | Editar el riego provisional, marcarlo aplicado y registrar «no se regó» (paso 8) |
 | Dashboard con indicadores, Datos de campo y exportaciones (paso 9) |
