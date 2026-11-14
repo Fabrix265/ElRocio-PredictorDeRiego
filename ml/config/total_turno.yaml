@@ -1,0 +1,35 @@
+# Experimento "total m3/ha por turno-día" (ml/experimentos/exp_total_turno.py).
+# Modelo aparte del plan de riego en uso: no cambia config/pipeline.yaml ni models/plan_riego/.
+# Datos, limpieza, features y split (train -> 7 días -> validación -> 7 días -> test) son los
+# de pipeline.yaml; aquí solo va lo propio del experimento.
+
+datos:
+  # Días en que el módulo entero no tiene registro: se cuentan como "sin riego" (0 m3/ha)
+  # solo si el hueco dura hasta este número de días seguidos. Un hueco más largo es falta de
+  # datos (p. ej. 2024-10-08 a 2024-10-20, 13 días en plena temporada) y se deja fuera.
+  max_dias_sin_riego: 6
+
+candidatos:
+  familias: [ridge, random_forest, lightgbm, xgboost]   # + persistencia y media 7 días siempre
+  ridge_alpha: 10.0
+  # Variantes de features (grupos de columnas de features_turno, ver exp_total_turno.grupos_features)
+  variantes:
+    riego: [calendario, riego]
+    riego_clima: [calendario, riego, clima]
+    riego_clima_suelo: [calendario, riego, clima, suelo]
+    riego_clima_planta: [calendario, riego, clima, planta]
+    completo: [calendario, riego, clima, suelo, planta]
+
+ajuste:                    # búsqueda aleatoria liviana, medida SOLO en validación
+  habilitado: true
+  n_iter: 12
+  ridge_alphas: [0.3, 1, 3, 10, 30, 100, 300]
+
+comparacion:
+  # Comparación principal: ambos modelos aprenden hasta este día y se miden en el test.
+  aprender_hasta: "2025-09-15"
+  version_actual: plan_riego/actual       # receta del modelo en uso (se reentrena, no se usa tal cual)
+
+salida:
+  reportes: ml/reports/experimentos/total_turno
+  modelos: ml/models/total_turno
