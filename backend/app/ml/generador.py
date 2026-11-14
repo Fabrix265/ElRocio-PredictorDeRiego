@@ -65,6 +65,9 @@ class PrediccionDia:
     features_ciclo: dict[str, list[dict]]   # Turno -> features por ciclo (con el n del modelo)
     alternativas: dict[str, dict[int, list[dict]]] = field(default_factory=dict)  # Turno -> n -> ciclos
     factor: dict[str, float] = field(default_factory=dict)  # Turno -> min por m3/ha
+    # Riego por pulsos (``aplicar_pulsos``): resumen del cálculo y ciclos originales del modelo.
+    calculo: dict[str, Any] | None = None
+    plan_modelo: dict[str, list[dict]] = field(default_factory=dict)  # Turno -> ciclos del modelo
 
 
 def _base(plan: Any, features: pd.DataFrame) -> pd.DataFrame:
@@ -129,5 +132,47 @@ def predecir_dia(plan: Any, historial: Historial, fecha: dt.date, config: Any) -
 
 
 def agregar(historial: Historial, prediccion: PrediccionDia) -> Historial:
-    """El plan del día pasa a ser el "riego de ayer" del día siguiente (como ``planificar``)."""
+    """El plan del día pasa a ser el "riego de ayer" del día siguiente (como ``planificar``).
+
+    Llamar **antes** de ``aplicar_pulsos``: el historial lleva lo que predijo el modelo, no los
+    pulsos (el modelo no se entrenó con riegos por pulsos)."""
     return _agregar_al_historial(historial, prediccion.plan)
+
+
+def aplicar_pulsos(prediccion: PrediccionDia, parametros: Any, orden_turnos: list[str],
+                   areas: dict[str, float]) -> PrediccionDia:
+    """Reemplaza los ciclos del modelo por el plan por pulsos (``app.services.calculo_pulsos``).
+
+    Del modelo solo se usa el total de m³/ha de cada turno. ``orden_turnos``: orden de riego
+    dentro de cada bloque. ``areas``: ha por turno (si falta, la del plan del modelo)."""
+    from app.services import calculo_pulsos
+
+    plan = prediccion.plan
+    totales: dict[str, float] = {}
+    areas_plan: dict[str, float] = {}
+    for turno in [t for t in orden_turnos if t in set(plan["Turno"])]:
+        g = plan[plan["Turno"] == turno]
+        totales[turno] = float(g["riego_m3ha"].sum())
+        m3ha = float(g["riego_m3ha"].iloc[0])
+        areas_plan[turno] = float(g["riego_m3"].iloc[0] / m3ha) if m3ha else areas.get(turno, 0.0)
+    if not totales:
+        return prediccion
+    resultado = calculo_pulsos.calcular(totales, areas_plan, parametros)
+    filas = []
+    for turno, plan_turno in resultado.turnos.items():
+        for c in plan_turno.ciclos:
+            filas.append({"Turno": turno, "n_ciclos": plan_turno.n_ciclos, "Ciclo": c.ciclo,
+                          "riego_m3ha": c.riego_m3ha, "riego_m3": c.riego_m3, "duracion_min": c.duracion_min,
+                          "inicio_min": c.inicio_min, "fin_min": c.fin_min, "hora_inicio": c.hora_inicio,
+                          "hora_fin": c.hora_fin, "fin_dia_siguiente": int(c.fin_dia_siguiente)})
+    nuevo = pd.DataFrame(filas, columns=["Turno", "n_ciclos", "Ciclo", "riego_m3ha", "riego_m3", "duracion_min",
+                                         "inicio_min", "fin_min", "hora_inicio", "hora_fin", "fin_dia_siguiente"])
+    factor = resultado.derivados.min_por_m3ha
+    return PrediccionDia(
+        fecha=prediccion.fecha, plan=nuevo, features_turno=prediccion.features_turno,
+        features_ciclo=prediccion.features_ciclo,
+        alternativas=calculo_pulsos.alternativas(resultado, totales, areas_plan, parametros),
+        factor={t: factor for t in totales},
+        calculo=calculo_pulsos.detalle(resultado, parametros),
+        plan_modelo={t: ciclos_de(g) for t, g in plan.groupby("Turno", sort=False)},
+    )

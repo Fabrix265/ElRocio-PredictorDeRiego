@@ -150,6 +150,8 @@ class CronogramaVersion(IdMixin, CreadoMixin, Base):
     creado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"), index=True)
     publicada_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     publicada_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"), index=True)
+    # Resumen del cálculo por pulsos (curva, bloques, pulsos por turno); None = plan directo del modelo.
+    calculo_pulsos: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     turnos: Mapped[list[CronogramaTurno]] = relationship(back_populates="version")
     ciclos: Mapped[list[CronogramaCiclo]] = relationship(
@@ -222,6 +224,8 @@ class PrediccionEntrada(IdMixin, CreadoMixin, Base):
     features_ciclo: Mapped[Any] = mapped_column(JSONB)
     # Salida del modelo forzando n = 1..5 (para cambiar el n° de ciclos al editar).
     alternativas_n: Mapped[Any] = mapped_column(JSONB)
+    # Ciclos tal como los predijo el modelo (con pulsos, el cronograma guarda otros ciclos).
+    plan_modelo: Mapped[Any | None] = mapped_column(JSONB)
     origen_riego_d1: Mapped[OrigenRiegoD1] = mapped_column(ORIGEN_RIEGO_D1)
     fuentes_hasta: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 

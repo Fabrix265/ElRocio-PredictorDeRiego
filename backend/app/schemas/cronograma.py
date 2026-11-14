@@ -8,6 +8,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.datos import FrescuraSalida
+from app.services.calculo_pulsos import MAX_PULSOS_TURNO
+
+# Con riego por pulsos un turno puede tener más ciclos que los 5 del modelo.
+MAX_CICLOS_TURNO = MAX_PULSOS_TURNO
 
 
 class GenerarEntrada(BaseModel):
@@ -103,6 +107,8 @@ class VersionDetalle(VersionResumen):
     desactualizado: bool
     turnos: list[TurnoCronogramaSalida]
     total_m3: float
+    # Riego por pulsos: curva, bloques y pulsos por turno (app.services.calculo_pulsos.detalle).
+    calculo_pulsos: dict[str, Any] | None = None
 
 
 class VersionListado(BaseModel):
@@ -161,7 +167,7 @@ class TurnoEdicionEntrada(BaseModel):
 
     turno_id: int = Field(ge=1, le=2**63 - 1)
     n_ciclos: int
-    ciclos: list[CicloEdicionEntrada] = Field(max_length=5)
+    ciclos: list[CicloEdicionEntrada] = Field(max_length=MAX_CICLOS_TURNO)
 
 
 class EdicionEntrada(BaseModel):
@@ -238,6 +244,7 @@ class VersionPrevia(BaseModel):
     desactualizado: bool
     turnos: list[TurnoCronogramaSalida]
     total_m3: float
+    calculo_pulsos: dict[str, Any] | None = None
     avisos: list[AvisoSolape]
 
 

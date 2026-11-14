@@ -398,6 +398,7 @@ export const api = {
   post: <T>(ruta: string, body?: unknown, opciones: Omit<OpcionesSolicitud, "method" | "body"> = {}) =>
     solicitar<T>(ruta, { ...opciones, method: "POST", body }),
   patch: <T>(ruta: string, body?: unknown) => solicitar<T>(ruta, { method: "PATCH", body }),
+  put: <T>(ruta: string, body?: unknown) => solicitar<T>(ruta, { method: "PUT", body }),
   /** POST multipart (subida de archivos). */
   postFormulario: <T>(ruta: string, formulario: FormData, signal?: AbortSignal) =>
     solicitar<T>(ruta, { method: "POST", body: formulario, signal }),

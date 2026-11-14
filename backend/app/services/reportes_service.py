@@ -167,10 +167,14 @@ def _version_exportable(db: Session, crono: Cronograma, usuario: Usuario) -> Cro
     return version
 
 
-def _filas_plan(db: Session, version: CronogramaVersion, modulo_id: int) -> list[dict[str, Any]]:
+def _filas_plan(db: Session, version: CronogramaVersion, modulo_id: int, orden: str = "turno") -> list[dict[str, Any]]:
     turnos = {t.id: t for t in repo_riego.turnos_de_modulo(db, modulo_id)}
     filas = []
-    for c in sorted(version.ciclos, key=lambda c: ((turnos[c.turno_id].orden if c.turno_id in turnos else 0), c.ciclo)):
+    def clave(c):
+        turno_ciclo = (turnos[c.turno_id].orden if c.turno_id in turnos else 0, c.ciclo)
+        return (c.inicio_min, *turno_ciclo) if orden == "hora" else turno_ciclo
+
+    for c in sorted(version.ciclos, key=clave):
         filas.append({
             "turno": turnos[c.turno_id].codigo if c.turno_id in turnos else str(c.turno_id), "ciclo": c.ciclo,
             "inicio": c.hora_inicio, "fin": c.hora_fin + (" (+1)" if c.fin_dia_siguiente else ""),
@@ -180,7 +184,7 @@ def _filas_plan(db: Session, version: CronogramaVersion, modulo_id: int) -> list
 
 
 def exportar(db: Session, cronograma_id: int, formato: str, usuario: Usuario,
-             contexto: ContextoPeticion | None = None) -> tuple[bytes, str, str]:
+             contexto: ContextoPeticion | None = None, *, orden: str = "turno") -> tuple[bytes, str, str]:
     """``(contenido, media_type, nombre_archivo)``; audita y deja el evento ``exportado``."""
     crono = repo_crono.obtener(db, cronograma_id)
     if crono is None:
@@ -189,14 +193,14 @@ def exportar(db: Session, cronograma_id: int, formato: str, usuario: Usuario,
     version = _version_exportable(db, crono, usuario)
     modulo = db.get(Modulo, crono.modulo_id)
     fundo = db.get(Fundo, modulo.fundo_id)
-    filas = _filas_plan(db, version, modulo.id)
+    filas = _filas_plan(db, version, modulo.id, orden)
     meta = {
         "fundo": fundo.nombre if fundo else "", "modulo": modulo.codigo, "fecha": crono.fecha,
         "estado": crono.estado.value, "version": version.numero, "origen": version.origen.value,
         "publicada": version.publicada_at is not None,
         "marcas": [m for m, activa in (("Preliminar", version.preliminar), ("Datos incompletos", version.datos_incompletos),
                                        ("Regenerado", version.origen == OrigenVersion.regenerado)) if activa],
-        "usuario": usuario.username,
+        "usuario": usuario.username, "orden": orden,
     }
     nombre = f"cronograma_{modulo.codigo}_{crono.fecha:%Y-%m-%d}_v{version.numero}"
     if formato == "pdf":
@@ -210,7 +214,7 @@ def exportar(db: Session, cronograma_id: int, formato: str, usuario: Usuario,
     else:
         raise DatosInvalidos("Formato desconocido: usa pdf o xlsx.")
     db.add(CronogramaEvento(cronograma_id=crono.id, version_id=version.id, usuario_id=usuario.id,
-                            tipo=TipoEventoCronograma.exportado, detalle={"formato": formato}))
+                            tipo=TipoEventoCronograma.exportado, detalle={"formato": formato, "orden": orden}))
     auditoria_service.registrar(db, accion=f"exportar_{formato}", entidad="cronograma", entidad_id=crono.id,
                                 actor=usuario, contexto=contexto, detalle={"version": version.numero})
     db.flush()
@@ -239,7 +243,7 @@ def _plan_xlsx(meta: dict[str, Any], filas: list[dict[str, Any]]) -> bytes:
     hoja.append([f"{meta['fundo']} · {meta['modulo']} · {fecha_larga(meta['fecha'])}"])
     hoja.append([f"Estado: {ETIQUETA_ESTADO.get(meta['estado'], meta['estado'])} · versión v{meta['version']}"
                  + (f" · {', '.join(meta['marcas'])}" if meta["marcas"] else "")])
-    hoja.append([])
+    hoja.append([f"Orden: por {meta.get('orden', 'turno')}"])
     cabecera = ["Turno", "Ciclo", "Inicio", "Fin", "Duración (min)", "m³/ha", "m³"]
     hoja.append(cabecera)
     for celda in hoja[5]:
