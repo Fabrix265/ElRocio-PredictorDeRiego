@@ -7,8 +7,15 @@ export const COLORES = {
   turnos: ["#1F63B0", "#D17400", "#2BA37A", "#8F2A5C", "#8A7FD0"],
   propuesto: "#2A7042",
   aplicado: "#5B6B7A",
+  provisional: "#D5DAE0",
   modelo: "#D07A00",
   estres: "#C8291F",
+  crecimiento: "#2F7D45",
+  crecimientoBarra: "#8EC39A",
+  // Clima: agua en azul; temperaturas en la gama cálida (máx. rojo, mín. ámbar) para no confundirse.
+  lluvia: "#1F63B0",
+  tMax: "#C2410C",
+  tMin: "#C99700",
   texto: "#5F5849",
   borde: "#DDD7C9",
 };

@@ -27,19 +27,33 @@ export interface AguaTurno {
   turno_id: number;
   turno_codigo: string;
   area_ha: number;
+  /** Riego vigente: el real o, mientras no llega, el provisional del cronograma. */
   aplicado_m3ha: number | null;
   aplicado_m3: number | null;
   estado_riego: "aplicado" | "provisional" | null;
+  origen_riego?: string | null;
   sin_riego: boolean;
+  /** Riego real (solo aplicado: controlador, histórico, Excel o manual). */
+  real_m3ha?: number | null;
+  real_m3?: number | null;
   propuesto_m3ha: number | null;
   propuesto_m3: number | null;
   modelo_m3ha: number | null;
   modelo_m3: number | null;
+  /** La versión propuesta cambió este turno respecto del modelo. */
+  modificado?: boolean;
 }
 
 export interface AguaDia {
   fecha: string;
   cronograma_id: number | null;
+  propuesta_version?: number | null;
+  propuesta_origen?: string | null;
+  propuesta_publicada?: boolean;
+  modelo_version?: number | null;
+  /** La propuesta es una edición o corrección distinta del modelo. */
+  modificado?: boolean;
+  motivo?: string | null;
   turnos: AguaTurno[];
 }
 

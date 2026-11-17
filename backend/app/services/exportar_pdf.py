@@ -15,6 +15,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.core.tiempo import ahora_lima
+from app.services.reportes_service import CABECERA_PLAN, ETIQUETA_ORDEN
 
 VERDE = colors.HexColor("#2A7042")
 VERDE_OSCURO = colors.HexColor("#1B482C")
@@ -47,11 +48,11 @@ def plan_pdf(meta: dict[str, Any], filas: list[dict[str, Any]]) -> bytes:
         Paragraph(f"{meta['fundo']} · {meta['modulo']} · {fecha_larga(meta['fecha']).capitalize()}", sub),
         Paragraph(f"Estado: {estado} · versión v{meta['version']}"
                   f"{'' if meta['publicada'] else ' (sin publicar)'}{marcas}", sub),
-        Paragraph(f"Orden: por {meta.get('orden', 'turno')}", sub),
+        Paragraph(f"Orden: {ETIQUETA_ORDEN.get(meta.get('orden', 'turno'), 'por turno')}", sub),
         Spacer(1, 6 * mm),
     ]
 
-    datos = [["Turno", "Ciclo", "Inicio", "Fin", "Duración (min)", "m³/ha", "m³"]]
+    datos = [list(CABECERA_PLAN)]
     estilos = [
         ("BACKGROUND", (0, 0), (-1, 0), VERDE),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),

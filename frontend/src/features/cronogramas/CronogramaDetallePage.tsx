@@ -35,26 +35,27 @@ import { EditorPlan } from "./EditorPlan";
 import { ContextoDiaAnterior } from "./ContextoDiaAnterior";
 import { AccionesCronograma } from "./AccionesCronograma";
 import { Comparador, DatosCronograma, Diferencias, LineaTiempo } from "./ConsultasCronograma";
+import { PlanVsReal } from "./PlanVsReal";
 
 const TH = "border-b border-borde bg-hundido px-2.5 py-2 text-left text-xs font-semibold text-texto-2";
 const TD = "border-b border-borde px-2.5 py-2 whitespace-nowrap";
+const NUM = "pr-4 text-right tabular-nums";
+
+/** Anchos (%) de Turno, Ciclo, Hora inicio, Hora fin, Duración, m³/ha y m³. */
+function Columnas({ anchos }: { anchos: number[] }) {
+  return <colgroup>{anchos.map((a, i) => <col key={i} style={{ width: `${a}%` }} />)}</colgroup>;
+}
+const ENCABEZADOS = ["Turno", "Ciclo", "Hora inicio", "Hora fin", "Duración (min)", "m³/ha", "m³"];
 
 function TablaTurnos({ turnos }: { turnos: TurnoCronograma[] }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[560px] border-collapse text-sm">
+      <table className="w-full min-w-[640px] table-fixed border-collapse text-sm">
         <caption className="sr-only">Plan por turno</caption>
-        <thead>
-          <tr>
-            <th className={TH}>Turno</th>
-            <th className={TH}>Ciclo</th>
-            <th className={TH}>Inicio</th>
-            <th className={TH}>Fin</th>
-            <th className={cn(TH, "text-right")}>Duración</th>
-            <th className={cn(TH, "text-right")}>m³/ha</th>
-            <th className={cn(TH, "text-right")}>m³</th>
-          </tr>
-        </thead>
+        <Columnas anchos={[26, 9, 13, 13, 13, 13, 13]} />
+        <thead><tr>{ENCABEZADOS.map((s, i) =>
+          <th key={s} scope="col" className={cn(TH, i >= 4 && "pr-4 text-right")}>{s}</th>,
+        )}</tr></thead>
         <tbody>
           {turnos.map((t) =>
             t.ciclos.map((c, i) => (
@@ -63,7 +64,7 @@ function TablaTurnos({ turnos }: { turnos: TurnoCronograma[] }) {
                   <td className={cn(TD, "align-top")} rowSpan={t.ciclos.length}>
                     <div className="font-semibold text-texto">{t.turno_codigo}</div>
                     <div className="text-xs text-texto-2">
-                      {t.n_ciclos} {t.n_ciclos === 1 ? "ciclo" : "ciclos"} · {formato.m3ha(t.total_m3ha)} m³/ha
+                      {t.n_ciclos} {t.n_ciclos === 1 ? "ciclo" : "ciclos"} · {formato.m3ha(t.total_m3ha)} m³/ha por día
                     </div>
                   </td>
                 )}
@@ -75,9 +76,9 @@ function TablaTurnos({ turnos }: { turnos: TurnoCronograma[] }) {
                     <Moon className="ml-1 inline size-3.5 text-texto-3" aria-label="termina al día siguiente" />
                   )}
                 </td>
-                <td className={cn(TD, "text-right tabular-nums")}>{formato.min(c.duracion_min)}</td>
-                <td className={cn(TD, "text-right tabular-nums")}>{formato.m3ha(c.riego_m3ha)}</td>
-                <td className={cn(TD, "text-right tabular-nums")}>{formato.m3(c.riego_m3)}</td>
+                <td className={cn(TD, NUM)}>{formato.m3(c.duracion_min)}</td>
+                <td className={cn(TD, NUM)}>{formato.m3ha(c.riego_m3ha)}</td>
+                <td className={cn(TD, NUM)}>{formato.m3(c.riego_m3)}</td>
               </tr>
             )),
           )}
@@ -92,22 +93,23 @@ export function TablaPorHora({ turnos }: { turnos: TurnoCronograma[] }) {
     .sort((a, b) => a.c.inicio_min - b.c.inicio_min || a.ordenTurno - b.ordenTurno || a.c.ciclo - b.c.ciclo);
   return (
     <div className="min-w-0 max-w-full overflow-x-auto">
-      <table className="w-full min-w-[560px] border-collapse text-sm">
-        <caption className="sr-only">Plan por hora</caption>
-        <thead><tr>{["Inicio", "Fin", "Turno", "Ciclo", "Duración (min)", "m³/ha", "m³"].map((s, i) =>
-          <th key={s} scope="col" className={cn(TH, i >= 4 && "text-right")}>{s}</th>,
+      <table className="w-full min-w-[640px] table-fixed border-collapse text-sm">
+        <caption className="sr-only">Plan por horario</caption>
+        <Columnas anchos={[11, 9, 17, 17, 16, 15, 15]} />
+        <thead><tr>{ENCABEZADOS.map((s, i) =>
+          <th key={s} scope="col" className={cn(TH, i >= 4 && "pr-4 text-right")}>{s}</th>,
         )}</tr></thead>
         <tbody>{filas.map(({ t, c }) => <tr key={`${t.turno_id}-${c.ciclo}`}>
+          <td className={cn(TD, "font-semibold text-texto")}>{t.turno_codigo}</td>
+          <td className={TD}>{c.ciclo}</td>
           <td className={TD}>{c.hora_inicio}{c.inicio_min >= 1440 && <span className="text-texto-3"> (+1 día)</span>}</td>
           <td className={TD}>{c.hora_fin}{c.fin_dia_siguiente && <>
             <Moon className="ml-1 inline size-3.5 text-texto-3" aria-hidden="true" />
             <span className="text-texto-3"> (+1 día)</span>
           </>}</td>
-          <td className={cn(TD, "font-semibold text-texto")}>{t.turno_codigo}</td>
-          <td className={TD}>{c.ciclo}</td>
-          <td className={cn(TD, "text-right tabular-nums")}>{formato.m3(c.duracion_min)}</td>
-          <td className={cn(TD, "text-right tabular-nums")}>{formato.m3ha(c.riego_m3ha)}</td>
-          <td className={cn(TD, "text-right tabular-nums")}>{formato.m3(c.riego_m3)}</td>
+          <td className={cn(TD, NUM)}>{formato.m3(c.duracion_min)}</td>
+          <td className={cn(TD, NUM)}>{formato.m3ha(c.riego_m3ha)}</td>
+          <td className={cn(TD, NUM)}>{formato.m3(c.riego_m3)}</td>
         </tr>)}</tbody>
       </table>
     </div>
@@ -145,7 +147,7 @@ function ContenidoVersion({ version, orden, alOrdenar }: { version: VersionDetal
       </div>
       <div className="px-4">
         <Field label="Orden del plan" className="w-40 max-w-full">
-          <Select value={orden} onValueChange={(v) => alOrdenar(v as OrdenPlan)} opciones={[{ value: "turno", label: "Por turno" }, { value: "hora", label: "Por hora" }]} />
+          <Select value={orden} onValueChange={(v) => alOrdenar(v as OrdenPlan)} opciones={[{ value: "hora", label: "Por horario" }, { value: "turno", label: "Por turno" }]} />
         </Field>
       </div>
       {orden === "hora" ? <TablaPorHora turnos={version.turnos} /> : <TablaTurnos turnos={version.turnos} />}
@@ -206,10 +208,10 @@ function Detalle({ id }: { id: number }) {
   const [numero, setNumero] = useState<number | null>(null);
   const [confirmar, setConfirmar] = useState(false);
   const [pestana, setPestana] = useState("Plan");
-  const [orden, setOrden] = useState<OrdenPlan>("turno");
+  const [orden, setOrden] = useState<OrdenPlan>("hora");
   const [edicion, setEdicion] = useState<CronogramaDetalle | null>(null);
   const apertura = useRef(false);
-  const tabs = puede(usuario.rol, "verRevisionCronograma") ? ["Plan", "Gantt", "Datos", "Versiones", "Línea de tiempo"] : ["Plan", "Gantt"];
+  const tabs = puede(usuario.rol, "verRevisionCronograma") ? ["Plan", "Gantt", "Plan vs real", "Datos", "Versiones", "Línea de tiempo"] : ["Plan", "Gantt", "Plan vs real"];
   useEffect(() => {
     if (!apertura.current && Number.isInteger(id) && id > 0 && puede(usuario.rol, "registrarVista")) {
       apertura.current = true;
@@ -348,6 +350,7 @@ function Detalle({ id }: { id: number }) {
                 <div className="pb-2"><ContenidoVersion version={version} orden={orden} alOrdenar={setOrden} /></div>
               )}
             </>}
+            {pestana === "Plan vs real" && <PlanVsReal moduloId={c!.modulo_id} fecha={c!.fecha} />}
             {pestana === "Datos" && <DatosCronograma id={id} />}
             {pestana === "Versiones" && <>
               <CardHeader titulo="Versiones" descripcion="Toca una para verla en Plan" />

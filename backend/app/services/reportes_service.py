@@ -11,12 +11,13 @@ import datetime as dt
 import io
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errores import DatosInvalidos, NoEncontrado
 from app.core.tiempo import hoy_lima
-from app.models import Cronograma, CronogramaEvento, CronogramaVersion, Fundo, Modulo, Usuario
-from app.models.enums import OrigenVersion, RolUsuario, TipoEventoCronograma
+from app.models import Cronograma, CronogramaEvento, CronogramaVersion, Fundo, Modulo, MotivoCorreccion, Usuario
+from app.models.enums import EstadoRiego, OrigenVersion, RolUsuario, TipoEventoCronograma
 from app.repositories import cronogramas as repo_crono
 from app.repositories import datos_series as repo_series
 from app.repositories import reportes as repo
@@ -28,6 +29,8 @@ DIAS_AGUA = 14
 MAX_DIAS_AGUA = 92
 MAX_DIAS_REFINAMIENTO = 366
 ORIGENES_MODELO = (OrigenVersion.modelo, OrigenVersion.regenerado)
+ETIQUETA_ORDEN = {"turno": "por turno", "hora": "por horario"}
+CABECERA_PLAN = ("Turno", "Ciclo", "Hora inicio", "Hora fin", "Duración (min)", "m³/ha", "m³")
 CARACTERES_FORMULA = ("=", "+", "-", "@", "\t", "\r")
 
 
@@ -45,6 +48,17 @@ def _por_cronograma(versiones: list[CronogramaVersion]) -> dict[int, list[Cronog
 def _modelo_mas_reciente(versiones: list[CronogramaVersion]) -> CronogramaVersion | None:
     del_modelo = [v for v in versiones if v.origen in ORIGENES_MODELO]
     return del_modelo[-1] if del_modelo else None
+
+
+def _firmas_por_turno(version: CronogramaVersion | None) -> dict[int, tuple]:
+    """``turno_id -> ciclos (inicio, duración, m³/ha)``: para saber si una versión cambió un turno."""
+    if version is None:
+        return {}
+    salida: dict[int, list[tuple]] = {}
+    for c in version.ciclos:
+        salida.setdefault(c.turno_id, []).append(
+            (round(c.inicio_min, 1), round(c.duracion_min, 1), round(c.riego_m3ha, 2)))
+    return {t: tuple(sorted(v)) for t, v in salida.items()}
 
 
 def _totales_por_turno(version: CronogramaVersion | None) -> dict[int, tuple[float, float]]:
@@ -78,6 +92,7 @@ def agua(db: Session, modulo_id: int, desde: dt.date | None, hasta: dt.date | No
                  repo_riego.vigentes(db, modulo.id, desde=desde, hasta=hasta + dt.timedelta(days=1))}
     cronos = {c.fecha: c for c in repo.cronogramas_rango(db, modulo.id, desde, hasta)}
     versiones = _por_cronograma(repo.versiones_de(db, [c.id for c in cronos.values()]))
+    motivos = {m.codigo: m.nombre for m in db.scalars(select(MotivoCorreccion))}
 
     dias = []
     fecha = desde
@@ -91,8 +106,14 @@ def agua(db: Session, modulo_id: int, desde: dt.date | None, hasta: dt.date | No
             propuesta = por_id.get(crono.version_publicada_id)
         else:
             propuesta = por_id.get(crono.version_publicada_id) or por_id.get(crono.borrador_version_id)
-        modelo = None if programador else _modelo_mas_reciente(lista)
+        modelo_real = _modelo_mas_reciente(lista)
+        modelo = None if programador else modelo_real
         prop, mod = _totales_por_turno(propuesta), _totales_por_turno(modelo)
+        firma_prop, firma_mod = _firmas_por_turno(propuesta), _firmas_por_turno(modelo_real)
+        # Modificada = edición o corrección cuyo contenido difiere del modelo (el programador
+        # también lo ve: no revela cuánto proponía el modelo).
+        dia_modificado = bool(propuesta is not None and propuesta.origen not in ORIGENES_MODELO
+                              and modelo_real is not None and firma_prop != firma_mod)
         filas = []
         for t in turnos:
             r = registros.get((t.id, fecha))
@@ -100,15 +121,28 @@ def agua(db: Session, modulo_id: int, desde: dt.date | None, hasta: dt.date | No
             if r is not None:
                 aplicado_m3ha = round(sum(c.riego_m3ha or 0 for c in r.ciclos), 2)
                 aplicado_m3 = round(sum(c.riego_m3 or 0 for c in r.ciclos), 1)
+            real = r is not None and r.estado == EstadoRiego.aplicado
             filas.append({
                 "turno_id": t.id, "turno_codigo": t.codigo, "area_ha": t.area_ha,
                 "aplicado_m3ha": aplicado_m3ha, "aplicado_m3": aplicado_m3,
-                "estado_riego": r.estado.value if r else None, "sin_riego": bool(r and r.sin_riego),
+                "estado_riego": r.estado.value if r else None, "origen_riego": r.origen.value if r else None,
+                "sin_riego": bool(r and r.sin_riego),
+                "real_m3ha": aplicado_m3ha if real else None, "real_m3": aplicado_m3 if real else None,
                 "propuesto_m3ha": prop.get(t.id, (None, None))[0], "propuesto_m3": prop.get(t.id, (None, None))[1],
                 "modelo_m3ha": mod.get(t.id, (None, None))[0], "modelo_m3": mod.get(t.id, (None, None))[1],
+                "modificado": dia_modificado and firma_prop.get(t.id) != firma_mod.get(t.id),
             })
+        motivo = None
+        if dia_modificado and propuesta is not None:
+            partes = [motivos.get(propuesta.motivo_codigo or "", propuesta.motivo_codigo),
+                      propuesta.motivo_comentario]
+            motivo = " · ".join(p for p in partes if p) or None
         dias.append({"fecha": fecha, "cronograma_id": crono.id if crono and (propuesta or not programador) else None,
-                     "turnos": filas})
+                     "propuesta_version": propuesta.numero if propuesta else None,
+                     "propuesta_origen": propuesta.origen.value if propuesta else None,
+                     "propuesta_publicada": bool(propuesta and crono and propuesta.id == crono.version_publicada_id),
+                     "modelo_version": modelo.numero if modelo else None,
+                     "modificado": dia_modificado, "motivo": motivo, "turnos": filas})
         fecha += dt.timedelta(days=1)
     return {"modulo_id": modulo.id, "desde": desde, "hasta": hasta, "dias": dias,
             "con_modelo": not programador}
@@ -243,8 +277,8 @@ def _plan_xlsx(meta: dict[str, Any], filas: list[dict[str, Any]]) -> bytes:
     hoja.append([f"{meta['fundo']} · {meta['modulo']} · {fecha_larga(meta['fecha'])}"])
     hoja.append([f"Estado: {ETIQUETA_ESTADO.get(meta['estado'], meta['estado'])} · versión v{meta['version']}"
                  + (f" · {', '.join(meta['marcas'])}" if meta["marcas"] else "")])
-    hoja.append([f"Orden: por {meta.get('orden', 'turno')}"])
-    cabecera = ["Turno", "Ciclo", "Inicio", "Fin", "Duración (min)", "m³/ha", "m³"]
+    hoja.append([f"Orden: {ETIQUETA_ORDEN.get(meta.get('orden', 'turno'), 'por turno')}"])
+    cabecera = list(CABECERA_PLAN)
     hoja.append(cabecera)
     for celda in hoja[5]:
         celda.font, celda.fill = Font(bold=True, color="FFFFFF"), verde

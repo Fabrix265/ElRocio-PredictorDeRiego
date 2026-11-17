@@ -33,3 +33,6 @@ ml/_antiguo/
 
 # Metadatos de instalación editable (pip install -e ml)
 *.egg-info/
+
+# Credenciales de Fabric (riego del controlador)
+backend/.env.fabric

@@ -13,10 +13,17 @@ class AguaTurno(BaseModel):
     turno_id: int
     turno_codigo: str
     area_ha: float
+    # Riego vigente del turno-día (aplicado o, si aún no llegó el dato real, el provisional).
     aplicado_m3ha: float | None = None
     aplicado_m3: float | None = None
     estado_riego: str | None = None  # aplicado · provisional · None (sin registro)
+    origen_riego: str | None = None  # controlador · historico · excel · manual · cronograma
     sin_riego: bool = False
+    # Riego real: solo si el vigente está aplicado (controlador, histórico, Excel o manual).
+    real_m3ha: float | None = None
+    real_m3: float | None = None
+    # La versión propuesta cambió el total o los ciclos del turno respecto del modelo.
+    modificado: bool = False
     propuesto_m3ha: float | None = None  # versión publicada (A E S: si no hay, el borrador)
     propuesto_m3: float | None = None
     modelo_m3ha: float | None = None  # última versión del modelo (nunca para el programador)
@@ -26,6 +33,12 @@ class AguaTurno(BaseModel):
 class AguaDia(BaseModel):
     fecha: dt.date
     cronograma_id: int | None = None
+    propuesta_version: int | None = None  # número de la versión publicada (o borrador)
+    propuesta_origen: str | None = None  # modelo · regenerado · edicion · correccion
+    propuesta_publicada: bool = False
+    modelo_version: int | None = None  # nunca para el programador
+    modificado: bool = False  # la propuesta es una edición/corrección distinta del modelo
+    motivo: str | None = None  # motivo de la corrección (y comentario)
     turnos: list[AguaTurno]
 
 

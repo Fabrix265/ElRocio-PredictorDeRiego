@@ -53,7 +53,7 @@ def test_exportar_orden_y_cabecera(client, auth, db, plan, orden, formato):
             patch.object(exportar_pdf, "Paragraph", wraps=exportar_pdf.Paragraph) as parrafo:
         r = client.get(f"{API}/cronogramas/{crono.id}/exportar", params=parametros, headers=auth())
     assert r.status_code == 200, r.text
-    etiqueta = f"Orden: por {orden or 'turno'}"
+    etiqueta = "Orden: por horario" if orden == "hora" else "Orden: por turno"
     if formato == "xlsx":
         hoja = load_workbook(io.BytesIO(r.content)).active
         assert hoja["A4"].value == etiqueta

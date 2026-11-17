@@ -15,7 +15,7 @@ export type EstadoIngesta = "en_curso" | "ok" | "parcial" | "error";
 export type DisparoIngesta = "programado" | "manual" | "script";
 
 /** Fuentes que acepta `POST /ingestas/ejecutar` (sin `fuentes` = todas). */
-export type FuenteIngesta = "weatherlink" | "phytech_suelo" | "phytech_planta" | "ndvi" | "pronostico";
+export type FuenteIngesta = "weatherlink" | "phytech_suelo" | "phytech_planta" | "ndvi" | "pronostico" | "galileo_riego";
 
 /** `TurnoFrescura`. */
 export interface TurnoFrescura {
