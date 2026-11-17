@@ -39,10 +39,67 @@ export function valorAgua(turnos: AguaTurno[], serie: SerieAgua, unidad: UnidadA
   return unidad === "m3" ? redondear(m3, 1) : area > 0 ? redondear(m3 / area, 2) : null;
 }
 
+/**
+ * Partes de la barra apilada (real + provisional) del gráfico. En m³/ha las dos se dividen por la
+ * misma superficie (turnos con riego real o provisional), así la barra suma la lámina del día; con
+ * promedios separados, un día a medias sumaría dos promedios y saldría casi el doble.
+ */
+export function valorApilado(turnos: AguaTurno[], serie: "real" | "provisional", unidad: UnidadAgua): number | null {
+  if (unidad === "m3" || turnos.length === 1) return valorAgua(turnos, serie, unidad);
+  let m3 = 0;
+  let area = 0;
+  let hay = false;
+  for (const t of turnos) {
+    const real = m3De(t, "real");
+    const provisional = m3De(t, "provisional");
+    if (real == null && provisional == null) continue;
+    area += t.area_ha;
+    const v = serie === "real" ? real : provisional;
+    if (v != null) { hay = true; m3 += v; }
+  }
+  return hay && area > 0 ? redondear(m3 / area, 2) : null;
+}
+
 function redondear(v: number | null, decimales: number): number | null {
   if (v == null || !Number.isFinite(v)) return null;
   const f = 10 ** decimales;
   return Math.round(v * f) / f;
+}
+
+/** Un punto del tooltip de ECharts (``trigger: "axis"``). */
+export interface PuntoTooltip { seriesIndex?: number; dataIndex?: number; seriesName?: string; value?: unknown; marker?: unknown; axisValueLabel?: string }
+
+const escapar = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+
+/**
+ * Tooltip del gráfico de agua: día y alcance, cada serie con su unidad (sin las vacías) y, si el día
+ * ya es todo real, cuánto se apartó lo regado del plan publicado. Series: 0 real, 1 provisional,
+ * 2 publicado, 3 modelo. ``versiones`` (serie -> número) nombra la versión del cronograma de cada línea.
+ */
+export function tooltipAgua(puntos: PuntoTooltip[], unidad: UnidadAgua, alcance: string,
+  versiones: Partial<Record<number, number | null>> = {}): string {
+  const u = unidad === "m3ha" ? "m³/ha" : "m³";
+  const d = unidad === "m3ha" ? 2 : 1;
+  const fmt = new Intl.NumberFormat("es-PE", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const valor = (i: number) => {
+    const v = puntos.find((p) => p.seriesIndex === i)?.value;
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  };
+  const filas = puntos.filter((p) => valor(p.seriesIndex ?? -1) != null).map((p) =>
+    `<div style="display:flex;justify-content:space-between;gap:16px"><span>${typeof p.marker === "string" ? p.marker : ""}` +
+    `${escapar(p.seriesName ?? "")}${versiones[p.seriesIndex ?? -1] != null ? ` · v${versiones[p.seriesIndex ?? -1]}` : ""}</span><strong>${fmt.format(p.value as number)} ${u}</strong></div>`);
+  let html = `<div style="margin-bottom:4px"><strong>${escapar(puntos[0]?.axisValueLabel ?? "")}</strong> · ${escapar(alcance)}</div>`;
+  html += filas.length ? filas.join("") : "<div>Sin riego registrado</div>";
+  const real = valor(0), provisional = valor(1);
+  if (real != null && provisional != null) {
+    html += `<div style="margin-top:4px;display:flex;justify-content:space-between;gap:16px"><span>Total del día</span>` +
+      `<strong>${fmt.format(real + provisional)} ${u}</strong></div>`;
+  }
+  const dif = provisional == null ? diferenciaPct(real, valor(2)) : null;
+  if (dif != null) {
+    html += `<div style="margin-top:4px;color:#5F5849">Real vs publicado: ${dif > 0 ? "+" : ""}${new Intl.NumberFormat("es-PE", { maximumFractionDigits: 1 }).format(dif)} %</div>`;
+  }
+  return html;
 }
 
 /** Diferencia porcentual de `valor` respecto de `base` (null si falta alguno o la base es 0). */

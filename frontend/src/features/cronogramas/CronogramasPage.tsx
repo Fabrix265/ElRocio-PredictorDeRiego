@@ -22,7 +22,7 @@ import { claveCronogramas, cronogramasApi } from "../../services/cronogramas";
 import { useUsuario } from "../auth/AuthProvider";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
 import { validarRango } from "../riego/RiegoPage";
-import { ETIQUETA_ESTADO, ETIQUETA_ORIGEN_VERSION, MarcasVersion, TONO_ESTADO } from "./etiquetas";
+import { ETIQUETA_ESTADO, ETIQUETA_ORIGEN_VERSION, MarcasVersion, TONO_ESTADO, formato, textoAgua } from "./etiquetas";
 
 export default function CronogramasPage() {
   const usuario = useUsuario();
@@ -143,6 +143,14 @@ export default function CronogramasPage() {
                       )}
                     </span>
                     {c.version && <MarcasVersion marcas={c.version} />}
+                    {(c.version?.total_m3 != null || c.eto_dia_anterior_mm != null) && (
+                      <span className="cifras flex flex-wrap gap-x-3 text-xs text-texto sm:ml-auto sm:flex-col sm:items-end">
+                        {c.version?.total_m3 != null && <span className="font-semibold whitespace-nowrap">{textoAgua(c.version.total_m3, c.version.total_m3ha)}</span>}
+                        {c.eto_dia_anterior_mm != null && <span className="whitespace-nowrap text-texto-2">
+                          ETo día anterior {formato.eto(c.eto_dia_anterior_mm)} mm{c.eto_dia_anterior_pronostico ? " (pronóstico)" : ""}
+                        </span>}
+                      </span>
+                    )}
                   </div>
                   <ChevronRight className="size-4 shrink-0 text-texto-3" aria-hidden="true" />
                 </button>

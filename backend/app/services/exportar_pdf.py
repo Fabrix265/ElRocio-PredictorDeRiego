@@ -15,7 +15,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.core.tiempo import ahora_lima
-from app.services.reportes_service import CABECERA_PLAN, ETIQUETA_ORDEN
+from app.services.reportes_service import CABECERA_PLAN, ETIQUETA_ORDEN, m3ha_total
 
 VERDE = colors.HexColor("#2A7042")
 VERDE_OSCURO = colors.HexColor("#1B482C")
@@ -79,7 +79,9 @@ def plan_pdf(meta: dict[str, Any], filas: list[dict[str, Any]]) -> bytes:
             estilos.append(("BACKGROUND", (0, len(datos) - 1), (-1, len(datos) - 1), VERDE_CLARO))
     total_min = sum(f["duracion_min"] for f in filas)
     total_m3 = sum(f["m3"] for f in filas)
-    datos.append(["Total", "", "", "", _num(total_min, 1), "", _num(total_m3, 1)])
+    total_m3ha = m3ha_total(filas)
+    datos.append(["Total", "", "", "", _num(total_min, 1), "" if total_m3ha is None else _num(total_m3ha, 2),
+                  _num(total_m3, 1)])
     estilos += [("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"), ("LINEABOVE", (0, -1), (-1, -1), 0.8, VERDE)]
 
     tabla = Table(datos, colWidths=[22 * mm, 16 * mm, 22 * mm, 26 * mm, 30 * mm, 22 * mm, 24 * mm], repeatRows=1)

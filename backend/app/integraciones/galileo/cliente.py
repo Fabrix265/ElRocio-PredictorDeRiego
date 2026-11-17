@@ -1,10 +1,12 @@
 """Cliente de solo lectura del Data Warehouse de Fabric (SQL endpoint, TDS 1433, Entra ID).
 
 - Driver: ``mssql-python`` (oficial de Microsoft, trae su propio ODBC).
-- Autenticación: el token de Entra ID se pide con MSAL y se entrega al driver con
-  ``token_provider`` (el ``Authentication=ActiveDirectoryPassword`` nativo del driver es rechazado
-  por Fabric). Con ``usuario`` se usa el flujo usuario/contraseña (solo sirve si la cuenta no exige
-  MFA); con ``servicio``, un service principal (client id + secreto).
+- Autenticación:
+  - ``usuario``: ``Authentication=ActiveDirectoryPassword`` del propio driver (usuario y contraseña
+    de Entra ID; no sirve si la cuenta exige MFA). Un token pedido aparte con la app de Azure CLI
+    se autentica pero Fabric le niega el acceso a la base (probado el 2026-11-17).
+  - ``servicio``: service principal (client id + secreto); el token se pide con MSAL y se entrega
+    al driver con ``token_provider``.
 - La contraseña o el secreto nunca se registran; los mensajes de error se limpian con
   :func:`sin_secretos`.
 """
@@ -34,7 +36,7 @@ class _Token:
 
 
 class ProveedorToken:
-    """``get_token(scope)`` para ``mssql_python.connect(token_provider=...)``."""
+    """``get_token(scope)`` para ``mssql_python.connect(token_provider=...)`` (modo ``servicio``)."""
 
     def __init__(self, cfg: ConfiguracionFabric):
         self.cfg = cfg
@@ -44,33 +46,34 @@ class ProveedorToken:
 
         cfg = self.cfg
         autoridad = f"https://login.microsoftonline.com/{cfg.inquilino_efectivo}"
-        if cfg.autenticacion == "servicio":
-            app = msal.ConfidentialClientApplication(
-                cfg.usuario, client_credential=cfg.clave.get_secret_value(), authority=autoridad)
-            r = app.acquire_token_for_client(scopes=[ALCANCE_SQL])
-        else:
-            app = msal.PublicClientApplication(cfg.cliente_id, authority=autoridad)
-            r = app.acquire_token_by_username_password(
-                cfg.usuario, cfg.clave.get_secret_value(), scopes=[ALCANCE_SQL])
+        app = msal.ConfidentialClientApplication(
+            cfg.usuario, client_credential=cfg.clave.get_secret_value(), authority=autoridad)
+        r = app.acquire_token_for_client(scopes=[ALCANCE_SQL])
         if "access_token" not in r:
             codigos = ",".join(str(c) for c in r.get("error_codes") or [])
             detalle = (r.get("error_description") or "").splitlines()[0][:240]
-            mfa = " (la cuenta exige MFA: hace falta un service principal)" if any(
-                c in codigos for c in ("50076", "50079", "50158")) else ""
             raise ErrorFabric(sin_secretos(
-                f"Entra ID rechazó el inicio de sesión: {r.get('error')} [{codigos}]{mfa} {detalle}", cfg))
+                f"Entra ID rechazó el inicio de sesión: {r.get('error')} [{codigos}] {detalle}", cfg))
         return _Token(r["access_token"], int(time.time()) + int(r.get("expires_in", 3600)))
 
 
+def _escapar(valor: str) -> str:
+    # Valor ODBC entre llaves: una "}" se escribe "}}".
+    return "{" + valor.replace("}", "}}") + "}"
+
+
 def cadena_conexion(cfg: ConfiguracionFabric) -> str:
-    base = cfg.base_datos.replace("}", "}}")
-    return ";".join([
-        f"Server=tcp:{cfg.servidor},1433",
-        f"Database={{{base}}}",
+    partes = [
+        f"Server={cfg.servidor},1433",
+        f"Database={_escapar(cfg.base_datos)}",
         "Encrypt=yes",
         "TrustServerCertificate=no",
         "ApplicationIntent=ReadOnly",
-    ])
+    ]
+    if cfg.autenticacion == "usuario":
+        partes += ["Authentication=ActiveDirectoryPassword", f"UID={_escapar(cfg.usuario)}",
+                   f"PWD={_escapar(cfg.clave.get_secret_value())}"]
+    return ";".join(partes)
 
 
 def sin_secretos(texto: str, cfg: ConfiguracionFabric) -> str:
@@ -87,11 +90,13 @@ def conexion(cfg: ConfiguracionFabric) -> Iterator[Any]:
 
     if not cfg.configurada:
         raise ErrorFabric("Falta configurar " + ", ".join(cfg.faltantes()) + " (backend/.env.fabric)")
-    proveedor = ProveedorToken(cfg)
-    proveedor.get_token(ALCANCE_SQL)  # falla rápido y con el código de Entra ID
+    extra: dict[str, Any] = {}
+    if cfg.autenticacion == "servicio":
+        proveedor = ProveedorToken(cfg)
+        proveedor.get_token(ALCANCE_SQL)  # falla rápido y con el código de Entra ID
+        extra["token_provider"] = proveedor
     try:
-        con = mssql_python.connect(cadena_conexion(cfg), autocommit=True, timeout=cfg.timeout_s,
-                                   token_provider=proveedor)
+        con = mssql_python.connect(cadena_conexion(cfg), autocommit=True, timeout=cfg.timeout_s, **extra)
     except ErrorFabric:
         raise
     except Exception as error:  # noqa: BLE001 - se re-lanza limpio
@@ -123,6 +128,7 @@ class ClienteGalileo:
                 error) else TipoError.RED
             raise ErrorIntegracion(tipo, str(error)[:300], endpoint=ENDPOINT) from None
         self._columnas: dict[str, str] | None = None
+        self._tiene_consola = False
 
     def columnas(self) -> dict[str, str]:
         """Canónico -> nombre real (``adaptador.resolver_columnas``)."""
@@ -132,7 +138,9 @@ class ClienteGalileo:
             _, filas = consultar(self._con, (
                 "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?"),
                 (self.cfg.esquema, self.cfg.tabla))
-            self._columnas = resolver_columnas(f[0] for f in filas)
+            nombres = [f[0] for f in filas]
+            self._tiene_consola = any(n.lower() == "consola" for n in nombres)
+            self._columnas = resolver_columnas(nombres)
         return self._columnas
 
     def filas(self, desde: dt.date, hasta: dt.date) -> list[dict[str, Any]]:
@@ -141,9 +149,12 @@ class ClienteGalileo:
 
         try:
             fecha = self.columnas()["fecha"].replace("]", "]]")
-            cols, filas = consultar(self._con, (
-                f"SELECT * FROM {self.cfg.tabla_calificada()} WHERE [{fecha}] >= ? AND [{fecha}] < ?"),
-                (desde, hasta + dt.timedelta(days=1)))
+            sql = f"SELECT * FROM {self.cfg.tabla_calificada()} WHERE [{fecha}] >= ? AND [{fecha}] < ?"
+            parametros: tuple = (desde, hasta + dt.timedelta(days=1))
+            if self.cfg.consola and self._tiene_consola:
+                sql += " AND [consola] = ?"
+                parametros += (self.cfg.consola,)
+            cols, filas = consultar(self._con, sql, parametros)
         except ValueError as error:
             raise ErrorIntegracion(TipoError.RESPUESTA, str(error), endpoint=ENDPOINT) from None
         except Exception as error:  # noqa: BLE001

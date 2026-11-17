@@ -31,16 +31,15 @@ class ConfiguracionFabric(BaseSettings):
     base_datos: str = "LH_SILVER_GR"
     esquema: str = "dbo"
     tabla: str = "silver_galileo_consolas"
+    # Consola Galileo del fundo (columna ``consola``); vacío = todas.
+    consola: str = "GALENSUENO1"
     # usuario: cuenta de Entra ID con usuario y contraseña (falla si la cuenta exige MFA).
     # servicio: service principal (FABRIC_USUARIO = client id, FABRIC_CLAVE = secreto).
     autenticacion: Literal["usuario", "servicio"] = "usuario"
     usuario: str = ""
     clave: SecretStr = SecretStr("")
-    # Inquilino de Entra ID (vacío = el dominio del correo de FABRIC_USUARIO).
+    # Inquilino de Entra ID para el modo "servicio" (p. ej. gruporocio.com o su GUID).
     inquilino: str = ""
-    # App pública con la que se pide el token en modo "usuario" (por defecto, la de Azure CLI,
-    # que ya tiene permiso sobre Azure SQL / Fabric en cualquier inquilino).
-    cliente_id: str = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
     timeout_s: int = 30
 
     @property

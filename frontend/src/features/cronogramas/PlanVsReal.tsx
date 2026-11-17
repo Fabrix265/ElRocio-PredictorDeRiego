@@ -24,7 +24,7 @@ export function PlanVsReal({ moduloId, fecha }: { moduloId: number; fecha: strin
     <>
       <CardHeader titulo="Plan vs real" descripcion={futuro
         ? "El riego real llega del controlador al día siguiente; mientras tanto se ve el provisional (lo planificado)."
-        : "Modelo, modelo modificado (publicado) y riego real del controlador, por turno."}
+        : "Modelo, modelo modificado y riego real del controlador, por turno."}
         acciones={<div className="w-28"><Select aria-label="Unidad" value={unidad} onValueChange={(v) => setUnidad(v as UnidadAgua)}
           opciones={[{ value: "m3ha", label: "m³/ha" }, { value: "m3", label: "m³" }]} /></div>} />
       <div className="p-4">

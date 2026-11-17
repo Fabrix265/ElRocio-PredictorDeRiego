@@ -44,7 +44,7 @@ def test_llave_concatena_valvulas(valores, esperada):
 
 
 @pytest.mark.parametrize(("valor", "minutos"), [
-    ("05:01:00", 301), ("16:56", 1016), (dt.time(3, 15), 195),
+    ("05:01:00", 301), ("16:56", 1016), ("2026-11-05T05:01:00", 301), (dt.time(3, 15), 195),
     (dt.datetime(1899, 12, 30, 2, 54), 174), (dt.timedelta(hours=11, minutes=36), 696), (0.5, 720),
 ])
 def test_hora_en_varios_formatos(valor, minutos):
@@ -71,15 +71,28 @@ def test_adaptar_agrupa_ciclos_y_calcula_m3_por_hectarea():
     te04 = r.grupos[(4, D1)]
     assert [c["hora_inicio"] for c in te04] == ["03:00", "05:01", "23:30"]
     assert te04[1]["riego_m3"] == 200 and te04[1]["riego_m3ha"] == pytest.approx(200 / 12.459, abs=1e-4)
-    assert te04[1]["duracion_min"] == 45.1 and te04[1]["hora_fin"] == "05:46"
+    assert te04[1]["duracion_min"] == 45.06 and te04[1]["hora_fin"] == "05:46"
     assert te04[2]["fin_dia_siguiente"] is True and te04[2]["hora_fin"] == "00:30"
     assert r.grupos[(1, D1)][0]["riego_m3ha"] == pytest.approx(10.0, abs=1e-3)
     assert r.duplicadas == 1 and r.vacias == 1 and dict(r.sin_turno) == {"1011000": 1}
 
 
+def test_columnas_reales_y_formato_excel():
+    reales = adaptador.resolver_columnas(["system", "time", "valve_a", "valve_b", "valve_c", "valve_d", "valve_e",
+                                          "water_done", "time_water_done", "consola"])
+    assert reales["fecha"] == reales["hora"] == "time" and reales["m3"] == "water_done"
+    excel = adaptador.resolver_columnas(["fecha", "Hora", "Valve A", "Valve B", "Valve C", "Valve D", "Valve E",
+                                         "Water Done", "Time Water Done", "Llave"])
+    assert (excel["fecha"], excel["hora"], excel["minutos"]) == ("fecha", "Hora", "Time Water Done")
+    fila = {"fecha": dt.datetime(2024, 10, 7), "Hora": "05:01:00", "Water Done": 200, "Time Water Done": 45.06,
+            "Valve A": 66, "Valve B": 67, "Valve C": 0, "Valve D": 0, "Valve E": 0}
+    r = adaptador.adaptar([fila], excel, TURNOS)
+    assert r.grupos[(4, dt.date(2024, 10, 7))][0]["hora_inicio"] == "05:01"
+
+
 def test_resolver_columnas_avisa_si_falta_alguna():
     with pytest.raises(ValueError, match="water done"):
-        adaptador.resolver_columnas(["fecha", "Hora", "Valve A", "Valve B", "Valve C", "Valve D", "Valve E"])
+        adaptador.resolver_columnas(["time", "valve_a", "valve_b", "valve_c", "valve_d", "valve_e"])
 
 
 def test_tabla_calificada_rechaza_identificadores_raros():
@@ -152,12 +165,27 @@ def test_el_riego_real_reemplaza_al_provisional_y_lo_conserva(db, reloj):
 
     crudos = db.scalars(select(IngestaCrudo).where(IngestaCrudo.corrida_id == corrida.id)).all()
     assert {c.parametros["dia"] for c in crudos} == {D1.isoformat(), D2.isoformat()}
-    assert crudos[0].payload[0]["Valve A"] == 66
+    assert crudos[0].payload[0]["valve_a"] == 66 and crudos[0].payload[0]["consola"] == "GALENSUENO1"
 
     # Repetir la ingesta con los mismos datos no crea versiones.
     otra = _correr(db, lambda d: [fila_galileo(d, "05:01:00"), fila_galileo(d, "14:00:00", m3=100, minutos=22)])
     assert (otra.filas_nuevas, otra.filas_actualizadas, otra.filas_omitidas) == (0, 0, 2)
     assert len(_versiones(db, turno.id, D1)) == 2
+
+
+def test_igual_al_historico_no_crea_version(db, reloj):
+    # El histórico (Excel del mismo controlador) guarda la duración con 2 decimales y m³/ha sin
+    # redondear: si el controlador trae lo mismo, no hay versión nueva.
+    turno = _te04(db)
+    ciclo = {"inicio_min": 301.0, "fin_min": 346.06, "duracion_min": 45.06, "riego_m3": 200.0,
+             "riego_m3ha": 200 / turno.area_ha, "area_ha": turno.area_ha, "valvula": "6667000",
+             "hora_inicio": "05:01", "hora_fin": "05:46", "fin_dia_siguiente": False}
+    _crear_registro(db, turno=turno, fecha=D1, vigente=None, ciclos=[ciclo], estado=EstadoRiego.aplicado,
+                    origen=OrigenRiego.historico, actor=None)
+    db.commit()
+    corrida = _correr(db, lambda d: [fila_galileo(d)], desde=D1, hasta=D1)
+    assert (corrida.filas_nuevas, corrida.filas_actualizadas, corrida.filas_omitidas) == (0, 0, 1)
+    assert [v.origen for v in _versiones(db, turno.id, D1)] == [OrigenRiego.historico]
 
 
 def test_no_pisa_lo_registrado_a_mano(db, reloj):

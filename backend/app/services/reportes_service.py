@@ -70,7 +70,9 @@ def _totales_por_turno(version: CronogramaVersion | None) -> dict[int, tuple[flo
         acum = salida.setdefault(c.turno_id, [0.0, 0.0])
         acum[0] += c.riego_m3ha
         acum[1] += c.riego_m3
-    return {t: (round(a, 2), round(b, 1)) for t, (a, b) in salida.items()}
+    # m³ con 3 decimales: el gráfico suma turnos y divide por ha; con 1 decimal el total del día
+    # podía diferir en 0,01 m³/ha del que muestra el cronograma.
+    return {t: (round(a, 2), round(b, 3)) for t, (a, b) in salida.items()}
 
 
 # --- Agua aplicada vs propuesta (KPI 1 y Datos de campo) -----------------------------
@@ -106,6 +108,8 @@ def agua(db: Session, modulo_id: int, desde: dt.date | None, hasta: dt.date | No
             propuesta = por_id.get(crono.version_publicada_id)
         else:
             propuesta = por_id.get(crono.version_publicada_id) or por_id.get(crono.borrador_version_id)
+        # Modelo: lo último que generó el modelo (v1, o la regenerada si la hubo); se compara con lo
+        # publicado (la última corrección) y con lo regado.
         modelo_real = _modelo_mas_reciente(lista)
         modelo = None if programador else modelo_real
         prop, mod = _totales_por_turno(propuesta), _totales_por_turno(modelo)
@@ -203,6 +207,7 @@ def _version_exportable(db: Session, crono: Cronograma, usuario: Usuario) -> Cro
 
 def _filas_plan(db: Session, version: CronogramaVersion, modulo_id: int, orden: str = "turno") -> list[dict[str, Any]]:
     turnos = {t.id: t for t in repo_riego.turnos_de_modulo(db, modulo_id)}
+    areas = {t.id: t.area_ha for t in turnos.values()}  # área oficial, como el resto de los totales
     filas = []
     def clave(c):
         turno_ciclo = (turnos[c.turno_id].orden if c.turno_id in turnos else 0, c.ciclo)
@@ -213,8 +218,16 @@ def _filas_plan(db: Session, version: CronogramaVersion, modulo_id: int, orden: 
             "turno": turnos[c.turno_id].codigo if c.turno_id in turnos else str(c.turno_id), "ciclo": c.ciclo,
             "inicio": c.hora_inicio, "fin": c.hora_fin + (" (+1)" if c.fin_dia_siguiente else ""),
             "duracion_min": round(c.duracion_min, 1), "m3ha": round(c.riego_m3ha, 2), "m3": round(c.riego_m3, 1),
+            "area_ha": areas.get(c.turno_id),
         })
     return filas
+
+
+def m3ha_total(filas: list[dict[str, Any]]) -> float | None:
+    """m³/ha del plan entero: m³ totales ÷ hectáreas de los turnos que riegan (cada turno una vez)."""
+    areas = {f["turno"]: f["area_ha"] for f in filas if f.get("area_ha")}
+    area = sum(areas.values())
+    return round(sum(f["m3"] for f in filas) / area, 2) if area else None
 
 
 def exportar(db: Session, cronograma_id: int, formato: str, usuario: Usuario,
@@ -286,7 +299,7 @@ def _plan_xlsx(meta: dict[str, Any], filas: list[dict[str, Any]]) -> bytes:
     for f in filas:
         hoja.append([f["turno"], f["ciclo"], f["inicio"], f["fin"], f["duracion_min"], f["m3ha"], f["m3"]])
     total = len(filas) + 5
-    hoja.append(["Total", None, None, None, f"=SUM(E6:E{total})", None, f"=SUM(G6:G{total})"])
+    hoja.append(["Total", None, None, None, f"=SUM(E6:E{total})", m3ha_total(filas), f"=SUM(G6:G{total})"])
     for celda in hoja[total + 1]:
         celda.font = Font(bold=True)
     for columna, ancho in zip("ABCDEFG", (10, 8, 10, 12, 16, 10, 10)):

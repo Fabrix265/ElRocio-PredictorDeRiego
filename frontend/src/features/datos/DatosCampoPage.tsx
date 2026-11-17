@@ -14,7 +14,7 @@ import { mensajeDeError } from "../../services/httpClient";
 import { claveReportes, reportesApi, type Agua, type Serie } from "../../services/reportes";
 import { useUsuario } from "../auth/AuthProvider";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
-import { csvAgua, turnosElegidos, valorAgua, type SerieAgua, type UnidadAgua } from "./agua";
+import { csvAgua, tooltipAgua, turnosElegidos, valorAgua, valorApilado, type PuntoTooltip, type SerieAgua, type UnidadAgua } from "./agua";
 import { COLORES, Grafico, opcionBase } from "./Grafico";
 import { TablaAgua } from "./TablaAgua";
 
@@ -33,17 +33,27 @@ const ejeValor = (nombre: string, extra: Record<string, unknown> = {}) => ({
 
 function opcionAgua(agua: Agua, turno: string, unidad: UnidadAgua) {
   const fechas = agua.dias.map((d) => d.fecha);
-  const elegir = (serie: SerieAgua) => agua.dias.map((d) => valorAgua(turnosElegidos(d, turno), serie, unidad));
+  const elegir = (serie: SerieAgua) => agua.dias.map((d) => serie === "real" || serie === "provisional"
+    ? valorApilado(turnosElegidos(d, turno), serie, unidad) : valorAgua(turnosElegidos(d, turno), serie, unidad));
+  const codigo = agua.dias[0]?.turnos.find((t) => String(t.turno_id) === turno)?.turno_codigo;
+  const alcance = turno === "todos" ? "todos los turnos" : codigo ?? "turno";
   const series: Record<string, unknown>[] = [
     { name: "Real", type: "bar", stack: "riego", data: elegir("real"), itemStyle: { color: COLORES.aplicado }, barMaxWidth: 22 },
-    { name: "Provisional (sin dato real)", type: "bar", stack: "riego", data: elegir("provisional"),
+    { name: "Provisional (aún sin riego real)", type: "bar", stack: "riego", data: elegir("provisional"),
       itemStyle: { color: COLORES.provisional, borderColor: COLORES.aplicado, borderType: "dashed", borderWidth: 1 }, barMaxWidth: 22 },
-    { name: agua.con_modelo ? "Modelo modificado (publicado)" : "Plan publicado", type: "line", data: elegir("propuesto"), itemStyle: { color: COLORES.propuesto }, lineStyle: { width: 2 }, symbolSize: 5, connectNulls: false },
+    { name: agua.con_modelo ? "Modelo modificado" : "Plan publicado", type: "line", data: elegir("propuesto"), itemStyle: { color: COLORES.propuesto }, lineStyle: { width: 2 }, symbolSize: 5, connectNulls: false },
   ];
   if (agua.con_modelo) {
     series.push({ name: "Modelo", type: "line", data: elegir("modelo"), itemStyle: { color: COLORES.modelo }, lineStyle: { type: "dashed", width: 1.5 }, symbolSize: 4 });
   }
-  return opcionBase({ xAxis: ejeDias(fechas), yAxis: ejeValor(unidad === "m3ha" ? "m³/ha" : "m³"), series });
+  return opcionBase({
+    xAxis: ejeDias(fechas), yAxis: ejeValor(unidad === "m3ha" ? "m³/ha" : "m³"), series,
+    tooltip: { trigger: "axis", confine: true, formatter: (p: PuntoTooltip | PuntoTooltip[]) => {
+      const puntos = Array.isArray(p) ? p : [p];
+      const dia = agua.dias[puntos[0]?.dataIndex ?? -1];
+      return tooltipAgua(puntos, unidad, alcance, { 2: dia?.propuesta_version, 3: dia?.modelo_version });
+    } },
+  });
 }
 
 function opcionPlanta(planta: Serie) {
@@ -183,17 +193,8 @@ export default function DatosCampoPage() {
           <li><strong>Provisional:</strong> lo planificado mientras no llega el dato real.</li>
           <li><strong>{agua.data?.con_modelo ? "Modelo modificado" : "Plan publicado"}:</strong> la versión publicada al programador{agua.data?.con_modelo ? " (igual al modelo si no hubo cambios)" : ""}.</li>
           {agua.data?.con_modelo && <li><strong>Modelo:</strong> lo que propuso el modelo antes de las correcciones.</li>}
-          {unidad === "m3ha" && turno === "todos" && <li>Con todos los turnos, m³/ha = m³ totales ÷ hectáreas de los turnos con dato.</li>}
+          {unidad === "m3ha" && turno === "todos" && <li>Con todos los turnos, m³/ha = m³ totales ÷ hectáreas de los turnos con dato (real y provisional comparten esa superficie, así la barra suma la lámina del día).</li>}
         </ul>
-        {agua.data && <div className="mt-4 flex flex-col gap-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-texto">Detalle por día y turno</h3>
-            <Button tamano="sm" variante="secundario" onClick={() => descargarCsv(csvAgua(agua.data.dias, unidad, agua.data.con_modelo), `riego_${modulo.codigo}_${desde}_${ayer}.csv`)}>
-              <Download aria-hidden="true" /> Descargar CSV
-            </Button>
-          </div>
-          <TablaAgua dias={agua.data.dias} unidad={unidad} conModelo={agua.data.con_modelo} turno={turno} />
-        </div>}
       </Seccion>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -207,6 +208,22 @@ export default function DatosCampoPage() {
 
       <Seccion titulo="Clima" descripcion="ETo y lluvia (mm, barras) y temperaturas máxima y mínima (°C) de la estación WeatherLink." consulta={clima} vacio={!clima.data?.puntos.length}>
         {opciones.clima && <Grafico opcion={opciones.clima} etiqueta="Clima diario: ETo, lluvia y temperaturas" />}
+      </Seccion>
+
+      <Seccion
+        titulo="Riego: detalle por día y turno"
+        descripcion={`Modelo, modificado y real de cada día, en ${unidad === "m3ha" ? "m³/ha" : "m³"} (cambia la unidad y el turno en el gráfico de riego). Toca un día para ver sus turnos.`}
+        consulta={agua}
+        vacio={sinAgua}
+      >
+        {agua.data && <div className="flex flex-col gap-2">
+          <div className="flex justify-end">
+            <Button tamano="sm" variante="secundario" onClick={() => descargarCsv(csvAgua(agua.data.dias, unidad, agua.data.con_modelo), `riego_${modulo.codigo}_${desde}_${ayer}.csv`)}>
+              <Download aria-hidden="true" /> Descargar CSV
+            </Button>
+          </div>
+          <TablaAgua dias={agua.data.dias} unidad={unidad} conModelo={agua.data.con_modelo} turno={turno} />
+        </div>}
       </Seccion>
     </div>
   );

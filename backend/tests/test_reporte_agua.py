@@ -78,6 +78,27 @@ def test_agua_separa_real_modelo_y_modificado(db, escenario):
     assert te02["real_m3ha"] == 18.5 and te02["origen_riego"] == "controlador"
 
 
+def test_el_modelo_es_la_ultima_version_generada_por_el_modelo(db):
+    # v1 modelo (20) -> v2 corrección (TE01 25) -> v3 regenerada (30) -> v4 corrige la v3 (TE01 28).
+    # «Modelo» = lo último que dio el modelo (v3) y «Modificado» = lo publicado (v4).
+    motivo = db.scalars(select(MotivoCorreccion).order_by(MotivoCorreccion.orden)).first()
+    c = Cronograma(modulo_id=1, fecha=FECHA)
+    db.add(c)
+    db.flush()
+    todos = {t.codigo: 30 for t in repo_riego.turnos_de_modulo(db, 1)}
+    v1 = _version(db, c, 1, OrigenVersion.modelo, {})
+    v2 = _version(db, c, 2, OrigenVersion.correccion, {"TE01": 25}, basada_en_id=v1.id, motivo_codigo=motivo.codigo)
+    v3 = _version(db, c, 3, OrigenVersion.regenerado, todos, basada_en_id=v2.id)
+    v4 = _version(db, c, 4, OrigenVersion.correccion, todos | {"TE01": 28}, basada_en_id=v3.id,
+                  motivo_codigo=motivo.codigo)
+    c.version_publicada_id = v4.id
+    db.commit()
+    dia = reportes_service.agua(db, 1, FECHA, FECHA, SimpleNamespace(rol=RolUsuario.encargado))["dias"][0]
+    assert (dia["modelo_version"], dia["propuesta_version"]) == (3, 4)
+    turnos = {t["turno_codigo"]: t for t in dia["turnos"]}
+    assert (turnos["TE01"]["modelo_m3ha"], turnos["TE01"]["propuesto_m3ha"]) == (30, 28)
+
+
 def test_el_programador_no_ve_el_modelo_pero_si_que_hubo_cambios(db, escenario):
     programador = SimpleNamespace(rol=RolUsuario.programador)
     dia = reportes_service.agua(db, 1, FECHA, FECHA, programador)["dias"][0]

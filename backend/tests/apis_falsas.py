@@ -131,11 +131,17 @@ def zip_ndvi(fechas: list[dt.date]) -> bytes:
 
 # --- Servidor falso -------------------------------------------------------------
 
+COLUMNAS_GALILEO = ["system", "time", "program", "valve_a", "valve_b", "valve_c", "valve_d", "valve_e",
+                    "water_done", "time_water_done", "last_flow", "consola", "archivo_origen"]
+
+
 def fila_galileo(dia: dt.date, hora: str = "05:01:00", valvulas=(66, 67, 0, 0, 0), m3: float = 200.0,
                  minutos: float = 45.06) -> dict[str, Any]:
-    """Una fila como la de ``silver_galileo_consolas``."""
-    fila = {"fecha": dt.datetime.combine(dia, dt.time()), "Hora": hora, "Water Done": m3, "Time Water Done": minutos}
-    fila |= {f"Valve {letra}": v for letra, v in zip("ABCDE", valvulas, strict=True)}
+    """Una fila como la de ``silver_galileo_consolas`` (``time`` = inicio del ciclo)."""
+    fila = {"system": 2, "time": dt.datetime.combine(dia, dt.time.fromisoformat(hora)), "program": 22,
+            "water_done": m3, "time_water_done": minutos, "last_flow": 280.0, "consola": "GALENSUENO1",
+            "archivo_origen": f"irrigation_information_{dia.isoformat()}_1.csv"}
+    fila |= {f"valve_{letra}": v for letra, v in zip("abcde", valvulas, strict=True)}
     return fila
 
 
@@ -150,8 +156,7 @@ class ClienteGalileoFalso:
     def columnas(self) -> dict[str, str]:
         from app.integraciones.galileo.adaptador import resolver_columnas
 
-        return resolver_columnas(["fecha", "Hora", "Valve A", "Valve B", "Valve C", "Valve D", "Valve E",
-                                  "Water Done", "Time Water Done", "Llave"])
+        return resolver_columnas(COLUMNAS_GALILEO)
 
     def filas(self, desde: dt.date, hasta: dt.date) -> list[dict[str, Any]]:
         self.pedidos.append((desde, hasta))

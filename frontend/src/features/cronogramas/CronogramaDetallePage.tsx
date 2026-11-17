@@ -27,14 +27,14 @@ import {
   type VersionResumen,
 } from "../../services/cronogramas";
 import { useUsuario } from "../auth/AuthProvider";
-import { ETIQUETA_ESTADO, ETIQUETA_ORIGEN_VERSION, MarcasVersion, TONO_ESTADO, formato } from "./etiquetas";
+import { ETIQUETA_ESTADO, ETIQUETA_ORIGEN_VERSION, MarcasVersion, TONO_ESTADO, formato, totalesPlan } from "./etiquetas";
 import { BotonesExportar } from "./BotonesExportar";
 import { CalculoPulsos } from "./CalculoPulsos";
 import { Gantt } from "./Gantt";
 import { EditorPlan } from "./EditorPlan";
 import { ContextoDiaAnterior } from "./ContextoDiaAnterior";
 import { AccionesCronograma } from "./AccionesCronograma";
-import { Comparador, DatosCronograma, Diferencias, LineaTiempo } from "./ConsultasCronograma";
+import { Comparador, DatosCronograma, Diferencias, LineaTiempo, TotalesComparados } from "./ConsultasCronograma";
 import { PlanVsReal } from "./PlanVsReal";
 
 const TH = "border-b border-borde bg-hundido px-2.5 py-2 text-left text-xs font-semibold text-texto-2";
@@ -47,7 +47,21 @@ function Columnas({ anchos }: { anchos: number[] }) {
 }
 const ENCABEZADOS = ["Turno", "Ciclo", "Hora inicio", "Hora fin", "Duración (min)", "m³/ha", "m³"];
 
-function TablaTurnos({ turnos }: { turnos: TurnoCronograma[] }) {
+/** Fila Total: minutos, m³/ha del plan (m³ ÷ ha de los turnos que riegan) y m³. */
+function FilaTotal({ turnos, m3ha }: { turnos: TurnoCronograma[]; m3ha?: number | null }) {
+  // m³/ha del día: el del backend (área oficial de los turnos) cuando viene; si no, se calcula.
+  const total = { ...totalesPlan(turnos), ...(m3ha != null ? { m3ha } : {}) };
+  return (
+    <tfoot><tr className="font-semibold text-texto [&>td]:border-t-2 [&>td]:border-t-marca/40">
+      <td className={TD} colSpan={4}>Total</td>
+      <td className={cn(TD, NUM)}>{formato.m3(total.min)}</td>
+      <td className={cn(TD, NUM)}>{formato.m3ha(total.m3ha)}</td>
+      <td className={cn(TD, NUM)}>{formato.m3(total.m3)}</td>
+    </tr></tfoot>
+  );
+}
+
+function TablaTurnos({ turnos, m3ha }: { turnos: TurnoCronograma[]; m3ha?: number | null }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[640px] table-fixed border-collapse text-sm">
@@ -83,12 +97,13 @@ function TablaTurnos({ turnos }: { turnos: TurnoCronograma[] }) {
             )),
           )}
         </tbody>
+        <FilaTotal turnos={turnos} m3ha={m3ha} />
       </table>
     </div>
   );
 }
 
-export function TablaPorHora({ turnos }: { turnos: TurnoCronograma[] }) {
+export function TablaPorHora({ turnos, m3ha }: { turnos: TurnoCronograma[]; m3ha?: number | null }) {
   const filas = turnos.flatMap((t, ordenTurno) => t.ciclos.map((c) => ({ t, c, ordenTurno })))
     .sort((a, b) => a.c.inicio_min - b.c.inicio_min || a.ordenTurno - b.ordenTurno || a.c.ciclo - b.c.ciclo);
   return (
@@ -111,6 +126,7 @@ export function TablaPorHora({ turnos }: { turnos: TurnoCronograma[] }) {
           <td className={cn(TD, NUM)}>{formato.m3ha(c.riego_m3ha)}</td>
           <td className={cn(TD, NUM)}>{formato.m3(c.riego_m3)}</td>
         </tr>)}</tbody>
+        <FilaTotal turnos={turnos} m3ha={m3ha} />
       </table>
     </div>
   );
@@ -136,8 +152,8 @@ function ContenidoVersion({ version, orden, alOrdenar }: { version: VersionDetal
             </dd>
           </div>
           <div>
-            <dt>Agua total</dt>
-            <dd className="text-texto">{formato.m3(version.total_m3)} m³</dd>
+            <dt>Agua total del día</dt>
+            <dd className="text-texto">{formato.m3(version.total_m3)} m³ · {formato.m3ha(version.total_m3ha ?? totalesPlan(version.turnos).m3ha)} m³/ha</dd>
           </div>
           <div>
             <dt>Modelo</dt>
@@ -150,7 +166,7 @@ function ContenidoVersion({ version, orden, alOrdenar }: { version: VersionDetal
           <Select value={orden} onValueChange={(v) => alOrdenar(v as OrdenPlan)} opciones={[{ value: "hora", label: "Por horario" }, { value: "turno", label: "Por turno" }]} />
         </Field>
       </div>
-      {orden === "hora" ? <TablaPorHora turnos={version.turnos} /> : <TablaTurnos turnos={version.turnos} />}
+      {orden === "hora" ? <TablaPorHora turnos={version.turnos} m3ha={version.total_m3ha} /> : <TablaTurnos turnos={version.turnos} m3ha={version.total_m3ha} />}
       {version.calculo_pulsos && <CalculoPulsos calculo={version.calculo_pulsos} />}
     </div>
   );
@@ -189,6 +205,11 @@ function ListaVersiones({
                 {formatearFechaHora(v.creado_at)}
                 {v.creado_por ? ` · ${v.creado_por}` : ""}
               </span>
+              {v.total_m3 != null && (
+                <span className="text-xs tabular-nums text-texto">
+                  {formato.m3(v.total_m3)} m³ · {formato.m3ha(v.total_m3ha)} m³/ha
+                </span>
+              )}
             </button>
           </li>
         );
@@ -312,7 +333,10 @@ function Detalle({ id }: { id: number }) {
           <AccionesCronograma cronograma={c!} bloqueado={!!edicion || regenerar.isPending} />
           {usuario.rol === "programador" && vista && publicada && vista.id !== publicada.id && <Card>
             <CardHeader titulo="Cambió desde tu Visto" />
-            <div className="p-4"><Diferencias id={id} base={vista.numero} contra={publicada.numero} /></div>
+            <div className="flex flex-col gap-3 p-4">
+              <TotalesComparados versiones={c!.versiones} base={vista.numero} contra={publicada.numero} />
+              <Diferencias id={id} base={vista.numero} contra={publicada.numero} />
+            </div>
           </Card>}
           <div role="tablist" aria-label="Detalle del cronograma" className="flex flex-wrap gap-1">
             {tabs.map((tab, i) => <button key={tab} type="button" role="tab" id={`tab-${i}`} aria-controls={`panel-${i}`} aria-selected={pestana === tab} tabIndex={pestana === tab ? 0 : -1}

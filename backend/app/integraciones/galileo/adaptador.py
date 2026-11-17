@@ -7,8 +7,12 @@ Reglas (las dio El Rocío):
   TE04). Las llaves que no son de ningún turno se cuentan y se ignoran (otras consolas o módulos).
 - **Agua:** ``Water Done`` son los m³ totales del ciclo y ``Time Water Done`` los minutos; los
   m³/ha salen de dividir por la superficie del turno (``turno.area_ha``).
-- **Hora:** ``fecha`` trae el día y ``Hora`` la hora de **inicio** del ciclo (pendiente de
-  confirmar con los datos reales; ver :data:`HORA_ES_INICIO`).
+- **Hora:** en la tabla real, ``time`` trae día y hora de **inicio** del ciclo (verificado el
+  2026-11-17: coincide minuto a minuto, en duración y en m³ con el histórico de TE04). También se
+  aceptan columnas separadas ``fecha`` + ``Hora`` (formato del Excel).
+- Solo filas de la consola del fundo (``FABRIC_CONSOLA``, por defecto ``GALENSUENO1``): otras
+  consolas podrían repetir números de válvula.
+- La tabla trae filas repetidas (el mismo registro en varias versiones del archivo de origen).
 - Una fila = un ciclo. Las filas repetidas exactas se descartan; si dos filas distintas del mismo
   turno-día empiezan en el mismo minuto se queda la primera y se informa.
 """
@@ -24,12 +28,13 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 MINUTOS_DIA = 1440
-# Si los datos reales muestran que ``Hora`` es la hora de fin, basta con poner False aquí.
+# ``time`` / ``Hora`` es la hora de inicio del ciclo (verificado con el histórico).
 HORA_ES_INICIO = True
 
 # Nombre canónico -> nombres aceptados en la tabla (se comparan sin mayúsculas ni espacios extra).
+# Columnas con "_" se comparan como si fueran espacios (``valve_a`` = ``Valve A``).
 COLUMNAS: dict[str, tuple[str, ...]] = {
-    "fecha": ("fecha", "date"),
+    "fecha": ("fecha", "date", "time"),
     "hora": ("hora", "hour", "time"),
     "valvula_a": ("valve a", "valvula a", "válvula a"),
     "valvula_b": ("valve b", "valvula b", "válvula b"),
@@ -50,7 +55,7 @@ class TurnoDestino(Protocol):
 
 
 def _norm(nombre: str) -> str:
-    return " ".join(nombre.strip().lower().split())
+    return " ".join(nombre.strip().lower().replace("_", " ").split())
 
 
 def resolver_columnas(disponibles: Iterable[str]) -> dict[str, str]:
@@ -130,8 +135,8 @@ def minutos_de(valor: Any) -> float | None:
         return minutos if 0 <= minutos < MINUTOS_DIA else None
     if isinstance(valor, str):
         texto = valor.strip()
-        if " " in texto:  # "1899-12-30 05:01:00" o "2024-10-07 05:01"
-            texto = texto.split()[-1]
+        if " " in texto or "T" in texto:  # "2026-11-05T05:01:00" (crudo JSON) o "1899-12-30 05:01:00"
+            texto = texto.replace("T", " ").split()[-1]
         partes = texto.split(":")
         if 2 <= len(partes) <= 3 and all(p.replace(".", "", 1).isdigit() for p in partes):
             h, m = int(partes[0]), int(partes[1])
@@ -201,7 +206,7 @@ def adaptar(filas: Iterable[Mapping[str, Any]], columnas: Mapping[str, str],
         if inicio < 0:  # terminó después de medianoche: el ciclo empezó el día anterior
             inicio = round(inicio + MINUTOS_DIA, 1)
             fecha -= dt.timedelta(days=1)
-        duracion = round(minutos, 1)
+        duracion = round(minutos, 2)  # como el histórico (no redondear más: cambiaría el hash)
         firma = (turno.id, fecha, inicio, duracion, round(m3, 3))
         if firma in vistos:
             r.duplicadas += 1
@@ -211,11 +216,11 @@ def adaptar(filas: Iterable[Mapping[str, Any]], columnas: Mapping[str, str],
         if any(c["inicio_min"] == inicio for c in ciclos):
             r.choques.append(f"{turno.codigo} {fecha.isoformat()} {hhmm(inicio)}: dos ciclos con el mismo inicio")
             continue
-        fin = round(inicio + duracion, 1)
+        fin = round(inicio + duracion, 2)
         area = float(turno.area_ha)
         ciclos.append({
             "inicio_min": inicio, "fin_min": fin, "duracion_min": duracion,
-            "riego_m3": round(m3, 3), "riego_m3ha": round(m3 / area, 4) if area > 0 else None,
+            "riego_m3": round(m3, 3), "riego_m3ha": m3 / area if area > 0 else None,
             "area_ha": area, "valvula": clave_llave, "hora_inicio": hhmm(inicio), "hora_fin": hhmm(fin),
             "fin_dia_siguiente": fin >= MINUTOS_DIA,
         })

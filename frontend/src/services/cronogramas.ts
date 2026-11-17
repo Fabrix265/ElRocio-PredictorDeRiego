@@ -32,6 +32,9 @@ export interface ResultadoDia {
   preliminar: boolean | null;
   datos_incompletos: boolean | null;
   mensaje: string | null;
+  /** Agua del plan del día: m³ y m³/ha (m³ ÷ ha de los turnos que riegan). */
+  total_m3?: number | null;
+  total_m3ha?: number | null;
 }
 
 export interface GenerarSalida {
@@ -82,6 +85,9 @@ export interface VersionResumen {
   id: number;
   numero: number;
   origen: OrigenVersion;
+  /** Agua del día: m³ y m³/ha (m³ ÷ ha de los turnos que riegan). */
+  total_m3?: number | null;
+  total_m3ha?: number | null;
   creado_at: string;
   creado_por: string | null;
   preliminar: boolean;
@@ -155,7 +161,11 @@ interface CronogramaCabecera {
 }
 
 export interface CronogramaListado extends CronogramaCabecera {
-  version: Pick<VersionResumen, "id" | "numero" | "origen" | "creado_at" | "preliminar" | "datos_incompletos" | "regenerado"> | null;
+  version: Pick<VersionResumen, "id" | "numero" | "origen" | "creado_at" | "preliminar" | "datos_incompletos" | "regenerado" | "total_m3" | "total_m3ha"> | null;
+  /** ETo medida del día anterior (referencia del plan); null si aún no hay dato. */
+  eto_dia_anterior_mm?: number | null;
+  /** true: todavía no hay ETo medida y es la del pronóstico. */
+  eto_dia_anterior_pronostico?: boolean;
 }
 
 export interface CronogramaDetalle extends CronogramaCabecera {

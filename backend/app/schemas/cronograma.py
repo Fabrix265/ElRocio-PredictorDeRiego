@@ -38,6 +38,9 @@ class ResultadoDia(BaseModel):
     preliminar: bool | None = None
     datos_incompletos: bool | None = None
     mensaje: str | None = None
+    # Agua del plan del día: m³ y m³/ha (m³ ÷ ha de los turnos que riegan).
+    total_m3: float | None = None
+    total_m3ha: float | None = None
 
 
 class GenerarSalida(BaseModel):
@@ -88,6 +91,9 @@ class VersionResumen(BaseModel):
     id: int
     numero: int
     origen: str
+    # Agua del día: m³ y m³/ha (m³ ÷ ha de los turnos que riegan).
+    total_m3: float | None = None
+    total_m3ha: float | None = None
     creado_at: dt.datetime
     creado_por: str | None = None
     preliminar: bool
@@ -119,6 +125,8 @@ class VersionListado(BaseModel):
     preliminar: bool
     datos_incompletos: bool
     regenerado: bool
+    total_m3: float | None = None
+    total_m3ha: float | None = None
 
 
 class CronogramaCabecera(BaseModel):
@@ -137,6 +145,9 @@ class CronogramaCabecera(BaseModel):
 
 class CronogramaListado(CronogramaCabecera):
     version: VersionListado | None = None
+    # ETo medida del día anterior (la referencia del plan); None si aún no hay dato.
+    eto_dia_anterior_mm: float | None = None
+    eto_dia_anterior_pronostico: bool = False  # True: aún no hay medida, es la del pronóstico
 
 
 class CronogramaDetalle(CronogramaCabecera):
