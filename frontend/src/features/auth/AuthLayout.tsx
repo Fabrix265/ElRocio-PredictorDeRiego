@@ -1,7 +1,15 @@
 import type { ReactNode } from "react";
 
-import logoAvoperu from "../../assets/logos/avoperu.svg";
-import logoTalsa from "../../assets/logos/talsa.svg";
+import logoAvoperu from "../../assets/logos/avoperu.webp";
+import logoJordie from "../../assets/logos/jordie.webp";
+import logoTalsa from "../../assets/logos/talsa.webp";
+
+/** Empresas del grupo; los archivos vienen recortados y con fondo blanco. */
+const LOGOS = [
+  { src: logoAvoperu, alt: "AvoPerú" },
+  { src: logoTalsa, alt: "Talsa" },
+  { src: logoJordie, alt: "Jordie Inversiones" },
+] as const;
 
 interface AuthLayoutProps {
   titulo: string;
@@ -17,10 +25,16 @@ export function AuthLayout({ titulo, descripcion, children }: AuthLayoutProps) {
   return (
     <div className="grid min-h-dvh grid-cols-1 bg-superficie lg:grid-cols-2">
       <aside className="panel-marca flex flex-col justify-between gap-6 px-5 py-6 text-white sm:px-8 sm:py-8 lg:px-12 lg:py-12">
-        <div className="flex flex-wrap gap-3">
-          <img src={logoAvoperu} alt="Logo AvoPeru" className="h-10 w-auto sm:h-12" />
-          <img src={logoTalsa} alt="Logo Talsa" className="h-10 w-auto sm:h-12" />
-        </div>
+        <ul
+          aria-label="Empresas del grupo"
+          className="grid w-full max-w-md grid-cols-[1fr_1fr_1.45fr] divide-x divide-borde rounded-2xl bg-white px-1 py-3 shadow-lg shadow-green-900/25 ring-1 ring-white/70 sm:px-2 sm:py-4"
+        >
+          {LOGOS.map((logo) => (
+            <li key={logo.alt} className="flex h-14 items-center justify-center px-2.5 sm:h-20 sm:px-4">
+              <img src={logo.src} alt={logo.alt} className="max-h-full max-w-full object-contain" />
+            </li>
+          ))}
+        </ul>
         <div className="flex max-w-md flex-col gap-2.5">
           <span className="text-xs font-semibold tracking-[0.08em] text-green-100 uppercase">Grupo El Rocío</span>
           <p className="text-2xl leading-8 font-semibold text-balance sm:text-[28px] sm:leading-9">
