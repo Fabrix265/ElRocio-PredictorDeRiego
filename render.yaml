@@ -64,3 +64,11 @@ services:
         sync: false
       - key: WEATHERLINK_API_SECRET
         sync: false
+      # Riego real del controlador Galileo (Fabric de El Rocío, solo lectura). Base, tabla y
+      # consola tienen valores por defecto (LH_SILVER_GR, silver_galileo_consolas, GALENSUENO1).
+      - key: FABRIC_SERVIDOR
+        sync: false
+      - key: FABRIC_USUARIO
+        sync: false
+      - key: FABRIC_CLAVE
+        sync: false
