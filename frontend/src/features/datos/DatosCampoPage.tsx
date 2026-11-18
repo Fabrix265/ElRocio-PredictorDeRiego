@@ -15,6 +15,7 @@ import { claveReportes, reportesApi, type Agua, type Serie } from "../../service
 import { useUsuario } from "../auth/AuthProvider";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
 import { csvAgua, tooltipAgua, turnosElegidos, valorAgua, valorApilado, type PuntoTooltip, type SerieAgua, type UnidadAgua } from "./agua";
+import { CRITICO_PROVISIONAL, limitesEjeMds, nivelMds, NIVELES_MDS } from "./estresMds";
 import { COLORES, Grafico, opcionBase } from "./Grafico";
 import { TablaAgua } from "./TablaAgua";
 
@@ -56,19 +57,82 @@ function opcionAgua(agua: Agua, turno: string, unidad: UnidadAgua) {
   });
 }
 
+const fmtUm = new Intl.NumberFormat("es-PE", { maximumFractionDigits: 0 });
+
 function opcionPlanta(planta: Serie) {
   const fechas = planta.puntos.map((p) => String(p.fecha));
+  const mds = planta.puntos.map((p) => numero(p.mds_contraccion_um));
+  const eje = limitesEjeMds(mds);
+  // Franjas del semáforo de estrés detrás de la línea (recortadas al eje) y cada punto con el color de su nivel.
+  // En pantallas angostas los nombres de las franjas se montan sobre los puntos: ahí basta la leyenda.
+  const conNombres = typeof window === "undefined" || window.innerWidth >= 640;
+  const franjas = NIVELES_MDS.filter((n) => n.desde < eje.max).map((n) => [
+    {
+      yAxis: Math.max(n.desde, eje.min), itemStyle: { color: n.fondo },
+      label: { show: conNombres, position: "insideTopRight", distance: 6, formatter: n.nombre, color: n.color, fontSize: 10, fontWeight: 500, opacity: 0.85 },
+    },
+    { yAxis: Math.min(n.hasta, eje.max) },
+  ]);
   return opcionBase({
     xAxis: ejeDias(fechas),
     yAxis: [
-      ejeValor("MDS µm", { nameTextStyle: { fontSize: 10, align: "left", color: COLORES.turnos[3] }, axisLabel: { fontSize: 10, color: COLORES.turnos[3] } }),
+      ejeValor("MDS µm", { min: eje.min, max: eje.max, interval: 20, nameTextStyle: { fontSize: 10, align: "left", color: COLORES.mds }, axisLabel: { fontSize: 10, color: COLORES.mds }, splitLine: { show: false } }),
       ejeValor("Crecimiento µm", { splitLine: { show: false }, nameTextStyle: { fontSize: 10, align: "right", color: COLORES.crecimiento }, axisLabel: { fontSize: 10, color: COLORES.crecimiento } }),
     ],
+    tooltip: {
+      trigger: "axis", confine: true,
+      formatter: (p: { seriesIndex?: number; value?: unknown; axisValueLabel?: string }[]) => {
+        const lista = Array.isArray(p) ? p : [p];
+        let html = `<div style="margin-bottom:4px"><strong>${lista[0]?.axisValueLabel ?? ""}</strong></div>`;
+        for (const punto of lista) {
+          const v = numero(punto.value);
+          if (v == null) continue;
+          if (punto.seriesIndex === 1) {
+            html += `<div style="display:flex;justify-content:space-between;gap:16px"><span>Crecimiento del tronco</span><strong>${fmtUm.format(v)} µm</strong></div>`;
+          } else {
+            const n = nivelMds(v);
+            html += `<div style="display:flex;justify-content:space-between;gap:16px"><span>MDS</span><strong>${fmtUm.format(v)} µm</strong></div>`
+              + `<div style="display:flex;align-items:center;gap:6px;margin-top:2px;color:${n.color};font-weight:600">`
+              + `<span style="width:8px;height:8px;border-radius:50%;background:${n.color}"></span>${n.nombre}</div>`;
+          }
+        }
+        return html;
+      },
+    },
     series: [
-      { name: "MDS (contracción)", type: "line", data: planta.puntos.map((p) => numero(p.mds_contraccion_um)), itemStyle: { color: COLORES.turnos[3] }, symbolSize: 5 },
-      { name: "Crecimiento del tronco", type: "bar", yAxisIndex: 1, data: planta.puntos.map((p) => numero(p.crecimiento_tronco_um)), itemStyle: { color: COLORES.crecimientoBarra, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 18 },
+      {
+        name: "MDS (contracción)", type: "line", z: 3,
+        data: mds.map((v) => (v == null ? null : { value: v, itemStyle: { color: nivelMds(v).color } })),
+        lineStyle: { color: COLORES.mds, width: 2 }, itemStyle: { color: COLORES.mds, borderColor: "#FFFFFF", borderWidth: 1.5 },
+        symbol: "circle", symbolSize: 8,
+        markArea: { silent: true, data: franjas },
+      },
+      { name: "Crecimiento del tronco", type: "bar", yAxisIndex: 1, z: 2, data: planta.puntos.map((p) => numero(p.crecimiento_tronco_um)), itemStyle: { color: COLORES.crecimientoBarra, opacity: 0.55, borderRadius: 3 }, barMaxWidth: 14 },
     ],
   });
+}
+
+/** Leyenda del semáforo de MDS (los colores de las franjas y sus rangos). */
+function LeyendaEstresMds() {
+  return (
+    <div className="mt-3 flex flex-col gap-1.5">
+      <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-texto-2" aria-label="Semáforo de estrés por MDS">
+        {NIVELES_MDS.map((n) => (
+          <li key={n.clave} className="flex items-center gap-1.5">
+            <span className="size-2.5 rounded-full" style={{ background: n.color }} aria-hidden="true" />
+            <span className="font-semibold" style={{ color: n.color }}>{n.nombre}</span>
+            <span className="cifras">
+              {n.hasta === Infinity ? `≥ ${n.desde}` : n.desde === 0 ? `< ${n.hasta}` : `${n.desde}–${n.hasta}`} µm
+              {n.clave === "critico" && CRITICO_PROVISIONAL ? "*" : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {CRITICO_PROVISIONAL && (
+        <p className="text-[11px] text-texto-3">* Umbral provisional: el agrónomo aún no definió desde cuántos µm el estrés es crítico.</p>
+      )}
+    </div>
+  );
 }
 
 function opcionSuelo(suelo: Serie) {
@@ -198,8 +262,9 @@ export default function DatosCampoPage() {
       </Seccion>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Seccion titulo="MDS y crecimiento del tronco" descripcion="Contracción diaria máxima (MDS, eje izquierdo) y crecimiento del tronco (eje derecho), en µm (Phytech)." consulta={planta} vacio={!planta.data?.puntos.length}>
-          {opciones.planta && <Grafico opcion={opciones.planta} etiqueta="MDS y crecimiento del tronco por día" />}
+        <Seccion titulo="MDS y crecimiento del tronco" descripcion="Contracción diaria máxima (MDS, eje izquierdo) sobre el semáforo de estrés hídrico, y crecimiento del tronco (eje derecho), en µm (Phytech)." consulta={planta} vacio={!planta.data?.puntos.length}>
+          {opciones.planta && <Grafico opcion={opciones.planta} alto={280} etiqueta="MDS por día sobre franjas de estrés (sin estrés, moderado, alto y crítico) y crecimiento del tronco" />}
+          <LeyendaEstresMds />
         </Seccion>
         <Seccion titulo="Humedad del suelo por profundidad" descripcion="Media diaria (% vol.) a 15–90 cm de la sonda Phytech y su línea de estrés (discontinua): por debajo de ella la planta empieza a estresarse." consulta={suelo} vacio={!suelo.data?.puntos.length}>
           {opciones.suelo && <Grafico opcion={opciones.suelo} etiqueta="Humedad del suelo por profundidad y línea de estrés" />}
