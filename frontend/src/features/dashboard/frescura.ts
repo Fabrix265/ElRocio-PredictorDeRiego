@@ -15,6 +15,7 @@ const NOMBRE_FUENTE: Record<string, string> = {
   phytech_ndvi: "NDVI",
   pronostico: "Pronóstico Phytech",
   phytech_pronostico: "Pronóstico Phytech",
+  galileo_riego: "Riego real (controlador Galileo)",
   // Corridas de la carga histórica (CLI cargar-historico) y del reproceso (CLI reprocesar-weatherlink).
   historico_meteo: "Carga histórica: clima",
   historico_phytech: "Carga histórica: Phytech",

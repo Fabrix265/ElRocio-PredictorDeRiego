@@ -81,7 +81,24 @@ export const formato = {
   m3ha: (v: number | null | undefined) => (v == null ? "—" : fmt2.format(v)),
   m3: (v: number | null | undefined) => (v == null ? "—" : fmt1.format(v)),
   min: (v: number | null | undefined) => (v == null ? "—" : `${fmt1.format(v)} min`),
+  eto: (v: number | null | undefined) => (v == null ? "—" : fmt1.format(v)),
 };
+
+/** "3,227.7 m³ · 51.37 m³/ha" (vacío si no hay m³). */
+export function textoAgua(m3: number | null | undefined, m3ha: number | null | undefined): string {
+  return m3 == null ? "" : `${formato.m3(m3)} m³ · ${formato.m3ha(m3ha)} m³/ha`;
+}
+
+/** Totales del plan: m³, minutos y m³/ha = m³ ÷ hectáreas de los turnos que riegan. */
+export function totalesPlan(turnos: { area_ha: number; ciclos: { riego_m3: number; duracion_min: number }[] }[]) {
+  let m3 = 0, min = 0, area = 0;
+  for (const t of turnos) {
+    if (!t.ciclos.length) continue;
+    area += t.area_ha;
+    for (const c of t.ciclos) { m3 += c.riego_m3; min += c.duracion_min; }
+  }
+  return { m3, min, m3ha: area > 0 ? m3 / area : null };
+}
 
 /** "07:48" a partir de minutos desde las 00:00 (sin días). */
 export function minutosAHora(min: number | null | undefined): string {

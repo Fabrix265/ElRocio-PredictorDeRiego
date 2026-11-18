@@ -43,6 +43,11 @@ os.environ.update(
         "PHYTECH_PLOT_ID": "70208",
         "PHYTECH_PROJECT_ID": "907557",
         "INGESTA_HORA": "05:00",
+        # Fabric (riego del controlador): vacío pisa backend/.env.fabric; las pruebas usan
+        # tests/apis_falsas.ClienteGalileoFalso.
+        "FABRIC_SERVIDOR": "",
+        "FABRIC_USUARIO": "",
+        "FABRIC_CLAVE": "",
     }
 )
 

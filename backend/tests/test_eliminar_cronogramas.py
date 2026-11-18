@@ -243,6 +243,7 @@ def test_generar_tras_anular_crea_otro_cronograma(client, auth, db, fabrica, mon
     assert r.status_code == 200, r.text
     creado = r.json()["dias_resultado"][0]
     assert creado["accion"] == "creado" and creado["cronograma_id"] != c.id and creado["version"] == 1
+    assert creado["total_m3"] > 0 and creado["total_m3ha"] == pytest.approx(20.0, abs=0.1)  # agua del plan
     assert repo.por_fecha(db, 1, c.fecha).id == creado["cronograma_id"]
 
 
