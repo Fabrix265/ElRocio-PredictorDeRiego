@@ -53,15 +53,17 @@ def test_exportar_orden_y_cabecera(client, auth, db, plan, orden, formato):
             patch.object(exportar_pdf, "Paragraph", wraps=exportar_pdf.Paragraph) as parrafo:
         r = client.get(f"{API}/cronogramas/{crono.id}/exportar", params=parametros, headers=auth())
     assert r.status_code == 200, r.text
-    etiqueta = f"Orden: por {orden or 'turno'}"
+    etiqueta = "Orden: por horario" if orden == "hora" else "Orden: por turno"
     if formato == "xlsx":
         hoja = load_workbook(io.BytesIO(r.content)).active
         assert hoja["A4"].value == etiqueta
         filas = [(f[0], f[1]) for f in hoja.iter_rows(min_row=6, max_row=9, values_only=True)]
         assert hoja["G10"].value == "=SUM(G6:G9)"
+        assert hoja["F10"].value == pytest.approx(20.0)  # m³ totales ÷ ha de los turnos
     else:
         assert r.content.startswith(b"%PDF")
         assert etiqueta in [llamada.args[0] for llamada in parrafo.call_args_list]
+        assert tabla.call_args.args[0][-1][5] == "20,00"
         filas = []
         anterior = None
         for f in tabla.call_args.args[0][1:-1]:
@@ -81,3 +83,45 @@ def test_exportar_orden_invalido(client, auth, plan, formato):
                    params={"formato": formato, "orden": "otro"}, headers=auth())
     assert r.status_code == 422
     assert any(error["loc"] == ["query", "orden"] for error in r.json()["detail"])
+
+
+def test_versiones_traen_m3_y_m3ha_del_dia(client, auth, db, plan):
+    crono, _ = plan
+    turnos = repo_riego.turnos_de_modulo(db, 1)[:2]
+    area = sum(t.area_ha for t in turnos)
+    r = client.get(f"{API}/cronogramas/{crono.id}/versiones", headers=auth())
+    assert r.status_code == 200, r.text
+    (v,) = r.json()
+    assert v["total_m3"] == pytest.approx(round(20 * area, 1))
+    assert v["total_m3ha"] == pytest.approx(20.0)  # 2 ciclos de 10 m³/ha en cada turno
+
+
+def test_listado_trae_agua_y_eto_del_dia_anterior(client, auth, db, plan):
+    from app.models import AmbienteDiario, Modulo
+
+    crono, _ = plan
+    modulo = db.get(Modulo, 1)
+    db.add(AmbienteDiario(fundo_id=modulo.fundo_id, fecha=crono.fecha - dt.timedelta(days=1), eto_mm=3.2))
+    db.commit()
+    r = client.get(f"{API}/cronogramas", params={"modulo_id": 1, "desde": crono.fecha.isoformat(),
+                                                  "hasta": crono.fecha.isoformat()}, headers=auth())
+    assert r.status_code == 200, r.text
+    (fila,) = r.json()
+    assert fila["eto_dia_anterior_mm"] == pytest.approx(3.2) and fila["eto_dia_anterior_pronostico"] is False
+    assert fila["version"]["total_m3ha"] == pytest.approx(20.0)
+    assert fila["version"]["total_m3"] > 0
+
+
+def test_listado_usa_eto_del_pronostico_si_no_hay_medida(client, auth, db, plan):
+    from app.models import Modulo, PronosticoClima
+
+    crono, _ = plan
+    modulo = db.get(Modulo, 1)
+    ayer = crono.fecha - dt.timedelta(days=1)
+    for capturado, eto in ((ayer - dt.timedelta(days=3), 2.5), (ayer - dt.timedelta(days=1), 3.9)):
+        db.add(PronosticoClima(fundo_id=modulo.fundo_id, project_id=1, capturado_fecha=capturado, fecha=ayer, eto_mm=eto))
+    db.commit()
+    r = client.get(f"{API}/cronogramas", params={"modulo_id": 1, "desde": crono.fecha.isoformat(),
+                                                  "hasta": crono.fecha.isoformat()}, headers=auth())
+    (fila,) = r.json()
+    assert fila["eto_dia_anterior_mm"] == pytest.approx(3.9) and fila["eto_dia_anterior_pronostico"] is True

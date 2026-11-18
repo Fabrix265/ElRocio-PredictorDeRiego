@@ -143,6 +143,8 @@ export function TablaRiego({ dias, turnos, registros, onSeleccionar, seleccionad
       {dias.map((fecha) => {
         const delDia = turnos.map((t) => registros.get(claveTurnoDia(t.id, fecha)));
         const m3Dia = delDia.reduce((s, r) => s + resumirCiclos(r?.ciclos).m3, 0);
+        // m³/ha del día: m³ ÷ hectáreas de los turnos que regaron.
+        const haDia = turnos.reduce((s, t, i) => s + (resumirCiclos(delDia[i]?.ciclos).m3 > 0 ? t.area_ha : 0), 0);
         const idTitulo = `dia-${fecha}`;
         return (
           <section
@@ -154,7 +156,7 @@ export function TablaRiego({ dias, turnos, registros, onSeleccionar, seleccionad
               <h3 id={idTitulo} className="cifras text-[13px] font-semibold text-texto capitalize">
                 {formatearDiaCorto(fecha)}
               </h3>
-              <span className="cifras text-[11px] text-texto-3">{m3Dia > 0 ? `${formatearM3(m3Dia)} m³` : "—"}</span>
+              <span className="cifras text-[11px] text-texto-3">{m3Dia > 0 ? `${formatearM3(m3Dia)} m³ · ${formatearM3ha(haDia > 0 ? m3Dia / haDia : null)} m³/ha` : "—"}</span>
               <span className="cifras text-xs text-texto-2">ETo (mm): <strong>{formatearM3ha(etoPorDia?.get(fecha))}</strong></span>
             </div>
             {turnos.map((t, i) => (

@@ -145,7 +145,7 @@ def eliminar(db: Session, registro_id: int, motivo: str, actor: Usuario,
 
 
 def _crear_registro(db: Session, *, turno: Turno, fecha: dt.date, vigente: RiegoRegistro | None,
-                    ciclos: list[dict], estado: EstadoRiego, origen: OrigenRiego, actor: Usuario,
+                    ciclos: list[dict], estado: EstadoRiego, origen: OrigenRiego, actor: Usuario | None,
                     sin_riego: bool = False, cronograma_version_id: int | None = None,
                     motivo: str | None = None, comentario: str | None = None) -> RiegoRegistro:
     numero = repo.max_version_turno_dia(db, turno.id, fecha) + 1
@@ -155,7 +155,7 @@ def _crear_registro(db: Session, *, turno: Turno, fecha: dt.date, vigente: Riego
         modulo_id=turno.modulo_id, turno_id=turno.id, fecha=fecha, version=numero, vigente=True,
         estado=estado, origen=origen, sin_riego=sin_riego, contenido_sha256=hash_contenido(ciclos, sin_riego),
         cronograma_version_id=cronograma_version_id, basado_en_id=vigente.id if vigente else None,
-        motivo=motivo, comentario=comentario, creado_por=actor.id,
+        motivo=motivo, comentario=comentario, creado_por=actor.id if actor else None,
     )
     db.add(registro)
     db.flush()

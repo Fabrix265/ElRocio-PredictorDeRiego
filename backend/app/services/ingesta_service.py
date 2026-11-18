@@ -1,4 +1,5 @@
-"""Ingesta de las APIs (§3.6): WeatherLink, Phytech suelo, Phytech planta, NDVI y pronóstico.
+"""Ingesta de las APIs (§3.6): WeatherLink, Phytech suelo, Phytech planta, NDVI, pronóstico y el
+riego real del controlador Galileo (Data Warehouse de Fabric de El Rocío).
 
 Cada fuente es una corrida en ``ingesta_corrida`` y cada llamada a la API deja su payload tal cual
 en ``ingesta_crudo`` (con los parámetros de negocio, nunca las claves). Después se guardan las
@@ -10,7 +11,8 @@ Rango por defecto de cada fuente (``rango_automatico``): desde la última fecha 
 hueco, así los huecos recientes se corrigen solos. Si la fuente está vacía se piden los últimos
 :data:`DIAS_SIN_HISTORIA` días, y nunca más de :data:`MAX_DIAS_AUTOMATICO` (los huecos más viejos
 se cargan a mano con ``python -m app.cli ingestar --desde --hasta``). NDVI: los últimos 10 días.
-Pronóstico: una captura por día (fecha de captura = hoy).
+Pronóstico: una captura por día (fecha de captura = hoy). Riego del controlador: los últimos
+:data:`DIAS_GALILEO` días (el controlador puede completar días con atraso).
 
 Reglas:
 
@@ -43,6 +45,9 @@ from app.core.errores import Conflicto, DatosInvalidos
 from app.core.logging import redactar
 from app.core.tiempo import FECHA_MINIMA_DATOS, ahora_utc, hoy_lima
 from app.db.session import unidad_de_trabajo
+from app.integraciones.galileo import adaptador as galileo_adaptador
+from app.integraciones.galileo.cliente import ENDPOINT as ENDPOINT_GALILEO
+from app.integraciones.galileo.cliente import ClienteGalileo
 from app.integraciones.http import ErrorIntegracion, Llamada, TipoError
 from app.integraciones.phytech import adaptador as phytech_adaptador
 from app.integraciones.phytech.cliente import DIAS_NDVI, DIAS_PLANTA, DIAS_SUELO, ClientePhytech, tramos
@@ -54,7 +59,7 @@ from app.models.enums import DisparoIngesta, EstadoIngesta, OrigenMeteo
 from app.repositories import datos_campo as repo_datos
 from app.repositories import ingestas as repo
 from app.repositories.datos_campo import ConteoUpsert
-from app.services import ambiente_service, auditoria_service, lecturas_service
+from app.services import ambiente_service, auditoria_service, lecturas_service, riego_controlador_service
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +68,8 @@ PHYTECH_SUELO = "phytech_suelo"
 PHYTECH_PLANTA = "phytech_planta"
 NDVI = "ndvi"
 PRONOSTICO = "pronostico"
-FUENTES: tuple[str, ...] = (WEATHERLINK, PHYTECH_SUELO, PHYTECH_PLANTA, NDVI, PRONOSTICO)
+GALILEO = "galileo_riego"
+FUENTES: tuple[str, ...] = (WEATHERLINK, PHYTECH_SUELO, PHYTECH_PLANTA, NDVI, PRONOSTICO, GALILEO)
 FUENTE_REPROCESAR = "reprocesar_weatherlink"
 
 SOLAPE_DIAS = 3
@@ -71,6 +77,7 @@ DIAS_SIN_HISTORIA = 7
 VENTANA_HUECOS_DIAS = 14
 MIN_LECTURAS_DIA = 36  # como meteo_diaria: con menos, el día queda sin clima
 MAX_DIAS_AUTOMATICO = 62
+DIAS_GALILEO = 7
 MAX_DIAS_MANUAL = 62  # "Actualizar ahora" con rango (la CLI no tiene tope)
 LATIDO_SEGUNDOS = 60  # cada cuánto el proceso que ejecuta una corrida actualiza latido_at
 MINUTOS_SIN_LATIDO = 10  # sin latido en ese tiempo, la corrida en curso no tiene dueño
@@ -87,9 +94,11 @@ class Clientes:
         self,
         weatherlink: Callable[[], ClienteWeatherLink] | None = None,
         phytech: Callable[[], ClientePhytech] | None = None,
+        galileo: Callable[[], ClienteGalileo] | None = None,
     ) -> None:
         self._fabricas = {WEATHERLINK: weatherlink or _weatherlink_desde_config,
-                          "phytech": phytech or _phytech_desde_config}
+                          "phytech": phytech or _phytech_desde_config,
+                          GALILEO: galileo or ClienteGalileo}
         self._creados: dict[str, Any] = {}
 
     def _obtener(self, nombre: str) -> Any:
@@ -102,6 +111,9 @@ class Clientes:
 
     def phytech(self) -> ClientePhytech:
         return self._obtener("phytech")
+
+    def galileo(self) -> ClienteGalileo:
+        return self._obtener(GALILEO)
 
     def cerrar(self) -> None:
         for cliente in self._creados.values():
@@ -327,12 +339,49 @@ def ingestar_pronostico(ctx: Contexto) -> ResultadoFuente:
     return resultado  # el pronóstico no entra en ambiente_diario
 
 
+def ingestar_galileo(ctx: Contexto) -> ResultadoFuente:
+    """Riego real del controlador: crudo por día en ``ingesta_crudo`` y versiones aplicadas en
+    ``riego_registro`` (``riego_controlador_service``)."""
+    resultado = ResultadoFuente()
+    try:
+        cliente = ctx.clientes.galileo()
+        columnas = cliente.columnas()
+    except ErrorIntegracion as error:
+        resultado.error(error)
+        return resultado
+    except ValueError as error:  # faltan columnas
+        resultado.error(ErrorIntegracion(TipoError.RESPUESTA, str(error), endpoint=ENDPOINT_GALILEO))
+        return resultado
+    filas: list[dict[str, Any]] = []
+    for dia in _dias(ctx.desde, ctx.hasta):
+        def leer(d: dt.date = dia) -> Llamada:
+            crudas = cliente.filas(d, d)
+            return Llamada(ENDPOINT_GALILEO, {"dia": d.isoformat()},
+                           [{k: galileo_adaptador.a_json(v) for k, v in f.items()} for f in crudas])
+        llamada = _llamar(ctx.db, ctx.corrida, resultado, leer)
+        if llamada is not None:
+            filas.extend(llamada.payload)
+        if _credenciales_fallaron(resultado):
+            break
+    adaptado = galileo_adaptador.adaptar(filas, columnas, riego_controlador_service.turnos_activos(ctx.db))
+    aplicado = riego_controlador_service.aplicar(ctx.db, adaptado.grupos, hasta=ctx.hoy - dt.timedelta(days=1))
+    resultado.conteo = resultado.conteo.sumar(aplicado.conteo)
+    resumen = adaptado.resumen()
+    logger.info("Ingesta %s: %s filas, %s turno-días, %s provisionales reemplazados, llaves sin turno %s",
+                GALILEO, resumen["filas"], resumen["turno_dias"], aplicado.reemplazos_provisional,
+                resumen["llaves_sin_turno"])
+    for aviso in [*aplicado.avisos, *adaptado.choques][:20]:
+        logger.warning("Ingesta %s: %s", GALILEO, aviso)
+    return resultado
+
+
 INGESTORES: dict[str, Callable[[Contexto], ResultadoFuente]] = {
     WEATHERLINK: ingestar_weatherlink,
     PHYTECH_SUELO: ingestar_phytech_suelo,
     PHYTECH_PLANTA: ingestar_phytech_planta,
     NDVI: ingestar_ndvi,
     PRONOSTICO: ingestar_pronostico,
+    GALILEO: ingestar_galileo,
 }
 
 
@@ -375,6 +424,8 @@ def rango_automatico(db: Session, fuente: str, fundo: Fundo, hoy: dt.date) -> tu
     ayer = hoy - dt.timedelta(days=1)
     if fuente == PRONOSTICO:
         return hoy, hoy
+    if fuente == GALILEO:
+        return ayer - dt.timedelta(days=DIAS_GALILEO - 1), ayer
     if fuente == NDVI:
         return ayer - dt.timedelta(days=DIAS_NDVI - 1), ayer
     ultima = ultima_fecha(db, fuente, fundo)

@@ -29,7 +29,7 @@ describe("ContextoDiaAnterior", () => {
         : serie([{ fecha: "2026-11-10", mds_contraccion_um: 150 }]));
     const pronostico = vi.spyOn(reportesApi, "pronostico");
     montar(<ContextoDiaAnterior fecha="2026-11-11" moduloId={1} />);
-    expect(await screen.findByText(/^4[.,]2$/)).toBeInTheDocument();
+    expect(await screen.findByText(/^4[.,]2 mm$/)).toBeInTheDocument();
     expect(screen.getByText("Día anterior · mar 10/11")).toBeInTheDocument();
     expect(screen.getByText("150")).toBeInTheDocument();
     expect(screen.queryByText("Pronóstico")).not.toBeInTheDocument();
@@ -42,7 +42,7 @@ describe("ContextoDiaAnterior", () => {
     vi.spyOn(reportesApi, "pronostico").mockResolvedValue(serie([{ fecha: "2026-11-12", eto_mm: 5.1, t_max: 29, humedad: 65 }]));
     montar(<ContextoDiaAnterior fecha="2026-11-13" moduloId={1} />);
     expect(await screen.findByText("Pronóstico")).toBeInTheDocument();
-    expect(screen.getByText(/^5[.,]1$/)).toBeInTheDocument();
+    expect(screen.getByText(/^5[.,]1 mm$/)).toBeInTheDocument();
   });
 
   it("sin ningún dato lo dice", async () => {
@@ -62,7 +62,7 @@ describe("ContextoDiaAnterior", () => {
         <ContextoDiaAnterior fecha="2026-11-12" />
       </RangoContextoDiaAnterior>,
     );
-    expect(await screen.findByText(/^3[.,]9$/)).toBeInTheDocument();
+    expect(await screen.findByText(/^3[.,]9 mm$/)).toBeInTheDocument();
     expect(serieApi).toHaveBeenCalledTimes(2); // clima y planta, una vez cada una
     expect(serieApi).toHaveBeenCalledWith("clima", "2026-11-10", "2026-11-11", 1, expect.anything());
   });

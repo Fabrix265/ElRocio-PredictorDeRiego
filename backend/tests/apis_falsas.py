@@ -131,6 +131,42 @@ def zip_ndvi(fechas: list[dt.date]) -> bytes:
 
 # --- Servidor falso -------------------------------------------------------------
 
+COLUMNAS_GALILEO = ["system", "time", "program", "valve_a", "valve_b", "valve_c", "valve_d", "valve_e",
+                    "water_done", "time_water_done", "last_flow", "consola", "archivo_origen"]
+
+
+def fila_galileo(dia: dt.date, hora: str = "05:01:00", valvulas=(66, 67, 0, 0, 0), m3: float = 200.0,
+                 minutos: float = 45.06) -> dict[str, Any]:
+    """Una fila como la de ``silver_galileo_consolas`` (``time`` = inicio del ciclo)."""
+    fila = {"system": 2, "time": dt.datetime.combine(dia, dt.time.fromisoformat(hora)), "program": 22,
+            "water_done": m3, "time_water_done": minutos, "last_flow": 280.0, "consola": "GALENSUENO1",
+            "archivo_origen": f"irrigation_information_{dia.isoformat()}_1.csv"}
+    fila |= {f"valve_{letra}": v for letra, v in zip("abcde", valvulas, strict=True)}
+    return fila
+
+
+class ClienteGalileoFalso:
+    """Como ``ClienteGalileo`` pero sin red: devuelve las filas programadas por día."""
+
+    def __init__(self, filas_por_dia: Callable[[dt.date], list[dict[str, Any]]]):
+        self.filas_por_dia = filas_por_dia
+        self.pedidos: list[tuple[dt.date, dt.date]] = []
+        self.cerrado = False
+
+    def columnas(self) -> dict[str, str]:
+        from app.integraciones.galileo.adaptador import resolver_columnas
+
+        return resolver_columnas(COLUMNAS_GALILEO)
+
+    def filas(self, desde: dt.date, hasta: dt.date) -> list[dict[str, Any]]:
+        self.pedidos.append((desde, hasta))
+        dias = [desde + dt.timedelta(days=i) for i in range((hasta - desde).days + 1)]
+        return [f for d in dias for f in self.filas_por_dia(d)]
+
+    def cerrar(self) -> None:
+        self.cerrado = True
+
+
 @dataclass
 class ApisFalsas:
     """Responde como las APIs y registra cada petición. Se puede programar fallas por ruta."""
@@ -143,6 +179,8 @@ class ApisFalsas:
     tokens_revocados: set[str] = field(default_factory=set)
     peticiones: list[httpx.Request] = field(default_factory=list)
     hoy: dt.date = dt.date(2026, 11, 8)
+    # Filas del controlador Galileo por día (por defecto: TE04 con un ciclo a las 05:01).
+    galileo_filas: Callable[[dt.date], list[dict[str, Any]]] = lambda d: [fila_galileo(d)]
 
     def conteo(self) -> Counter:
         return Counter(r.url.path for r in self.peticiones)
@@ -194,6 +232,9 @@ class ApisFalsas:
         return ClienteWeatherLink(api_key=WL_KEY, api_secret=WL_SECRET, base_url=WL_BASE,
                                   station_id=ESTACION, transport=self.transporte(),
                                   reintentos=kwargs.pop("reintentos", sin_espera()), **kwargs)
+
+    def galileo(self) -> ClienteGalileoFalso:
+        return ClienteGalileoFalso(self.galileo_filas)
 
     def phytech(self, **kwargs: Any) -> ClientePhytech:
         return ClientePhytech(api_key=PH_KEY, api_secret=PH_SECRET, base_url=PH_BASE,

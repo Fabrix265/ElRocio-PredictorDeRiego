@@ -20,7 +20,9 @@ from app.models import (
     ModeloVersion,
     MotivoCorreccion,
     PrediccionEntrada,
+    PronosticoClima,
     RiegoRegistro,
+    Turno,
     Usuario,
 )
 from app.models.enums import EstadoCronograma, TipoEventoCronograma
@@ -85,6 +87,7 @@ def version(db: Session, version_id: int | None) -> CronogramaVersion | None:
 def versiones(db: Session, cronograma_id: int) -> list[CronogramaVersion]:
     return list(db.scalars(
         select(CronogramaVersion).where(CronogramaVersion.cronograma_id == cronograma_id)
+        .options(selectinload(CronogramaVersion.turnos), selectinload(CronogramaVersion.ciclos))
         .order_by(CronogramaVersion.numero.desc())
     ))
 
@@ -94,6 +97,48 @@ def versiones_por_id(db: Session, ids: Iterable[int | None]) -> dict[int, Cronog
     if not ids:
         return {}
     return {v.id: v for v in db.scalars(select(CronogramaVersion).where(CronogramaVersion.id.in_(ids)))}
+
+
+def totales_agua(db: Session, ids: Iterable[int | None]) -> dict[int, dict[str, float | None]]:
+    """Por versión: m³ del día y m³/ha = m³ ÷ hectáreas (oficiales, ``turno.area_ha``) de los turnos
+    que tienen ciclos. El ``area_ha`` guardado en la versión sale de m³ ÷ m³/ha con m³ redondeado y
+    difiere unas milésimas: con él el total no cuadraba con el gráfico de Datos de campo."""
+    ids = {i for i in ids if i}
+    if not ids:
+        return {}
+    m3 = dict(db.execute(
+        select(CronogramaCiclo.version_id, func.sum(CronogramaCiclo.riego_m3))
+        .where(CronogramaCiclo.version_id.in_(ids)).group_by(CronogramaCiclo.version_id)).all())
+    con_ciclos = (select(CronogramaCiclo.version_id, CronogramaCiclo.turno_id)
+                  .where(CronogramaCiclo.version_id.in_(ids)).distinct().subquery())
+    area = dict(db.execute(
+        select(con_ciclos.c.version_id, func.sum(Turno.area_ha))
+        .join(Turno, Turno.id == con_ciclos.c.turno_id).group_by(con_ciclos.c.version_id)).all())
+    salida = {}
+    for i in ids:
+        total, ha = float(m3.get(i) or 0), area.get(i)
+        salida[i] = {"total_m3": round(total, 1), "total_m3ha": round(total / ha, 2) if ha else None}
+    return salida
+
+
+def eto_por_fecha(db: Session, fundo_id: int, fechas: Iterable[dt.date]) -> dict[dt.date, tuple[float, bool]]:
+    """Fecha -> (ETo en mm, es_pronostico): la medida si existe; si no, la del último pronóstico
+    capturado (como el recuadro «Día anterior» del cronograma)."""
+    fechas = set(fechas)
+    if not fechas:
+        return {}
+    salida: dict[dt.date, tuple[float, bool]] = {}
+    for fecha, eto in db.execute(
+        select(PronosticoClima.fecha, PronosticoClima.eto_mm)
+        .where(PronosticoClima.fundo_id == fundo_id, PronosticoClima.fecha.in_(fechas),
+               PronosticoClima.eto_mm.is_not(None))
+        .order_by(PronosticoClima.capturado_fecha)
+    ):
+        salida[fecha] = (eto, True)  # gana la captura más reciente
+    for fecha, eto in db.execute(select(AmbienteDiario.fecha, AmbienteDiario.eto_mm).where(
+            AmbienteDiario.fundo_id == fundo_id, AmbienteDiario.fecha.in_(fechas), AmbienteDiario.eto_mm.is_not(None))):
+        salida[fecha] = (eto, False)
+    return salida
 
 
 def version_por_numero(db: Session, cronograma_id: int, numero: int) -> CronogramaVersion | None:

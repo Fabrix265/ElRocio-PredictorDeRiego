@@ -25,3 +25,7 @@ APScheduler==3.11.3
 httpx==0.28.1
 Jinja2==3.1.6
 reportlab==4.5.1
+
+# Fabric (riego del controlador Galileo): driver oficial de Microsoft con ODBC incluido
+mssql-python==1.17.0
+msal==1.39.0

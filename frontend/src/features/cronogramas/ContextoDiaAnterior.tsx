@@ -78,11 +78,17 @@ function Franja({ fecha, datos }: { fecha: string; datos: ReturnType<typeof useC
       {!hayDatos && !cargando && !error && <span className="text-texto-3">Sin datos del día anterior</span>}
       {error && <span className="text-err-tx">No se pudieron cargar todos los datos del día anterior.</span>}
     </div>
-    {hayDatos && <dl className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-      {valores.map(([etiqueta, unidad, valor]) => <div key={etiqueta} className="flex gap-1">
-        <dt className="text-texto-2">{etiqueta} ({unidad})</dt>
-        <dd className="cifras font-semibold text-texto">{valor === null ? "—" : formato.format(valor)}</dd>
-      </div>)}
+    {hayDatos && <dl className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
+      {valores.map(([etiqueta, unidad, valor], i) => i === 0
+        // La ETo del día anterior es la referencia principal del plan: va destacada.
+        ? <div key={etiqueta} className="flex items-baseline gap-1.5 rounded-md bg-activo-bg px-2 py-0.5">
+          <dt className="font-semibold text-activo-tx">ETo día anterior</dt>
+          <dd className="cifras text-sm font-bold text-activo-tx">{valor === null ? "—" : `${formato.format(valor)} ${unidad}`}</dd>
+        </div>
+        : <div key={etiqueta} className="flex gap-1">
+          <dt className="text-texto-2">{etiqueta} ({unidad})</dt>
+          <dd className="cifras font-semibold text-texto">{valor === null ? "—" : formato.format(valor)}</dd>
+        </div>)}
     </dl>}
   </section>;
 }

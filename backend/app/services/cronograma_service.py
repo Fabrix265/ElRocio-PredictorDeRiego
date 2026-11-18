@@ -236,6 +236,11 @@ def generar(
             generados.add(fecha)
             resultado.append(_fila_resultado(accion, version))
 
+        db.flush()
+        ids_version = [f.pop("_version_id") for f in resultado]
+        totales = repo.totales_agua(db, ids_version)
+        for fila, vid in zip(resultado, ids_version, strict=True):
+            fila.update(totales.get(vid, {}))
         generacion.resultado_por_dia = generador.json_seguro(resultado)
         generacion.duracion_ms = int((time.monotonic() - inicio_reloj) * 1000)
         db.flush()
@@ -261,6 +266,7 @@ def _fila_resultado(accion: Accion, version: CronogramaVersion | None) -> dict[s
         "preliminar": version.preliminar if version else None,
         "datos_incompletos": version.datos_incompletos if version else None,
         "mensaje": accion.mensaje,
+        "_version_id": version.id if version else None,
     }
 
 
@@ -351,6 +357,13 @@ def _visible(crono: Cronograma, usuario: Usuario) -> None:
         raise NoEncontrado("Cronograma no encontrado")
 
 
+def _totales_version(version: CronogramaVersion, areas: dict[int, float]) -> dict[str, float | None]:
+    """m³ del día y m³/ha = m³ ÷ hectáreas oficiales (``turno.area_ha``) de los turnos que riegan."""
+    m3 = sum(c.riego_m3 for c in version.ciclos)
+    area = sum(areas.get(t, 0.0) for t in {c.turno_id for c in version.ciclos})
+    return {"total_m3": round(m3, 1), "total_m3ha": round(m3 / area, 2) if area else None}
+
+
 def _version_salida(db: Session, version: CronogramaVersion, crono: Cronograma, modulo: Modulo, *,
                     con_detalle: bool = True) -> dict[str, Any]:
     nombres = repo_riego.usernames(db, [version.creado_por, version.publicada_por])
@@ -366,6 +379,7 @@ def _version_salida(db: Session, version: CronogramaVersion, crono: Cronograma, 
         "modelo_version": modelos.get(version.modelo_version_id),
         "generacion_id": version.generacion_id,
         "motivo_codigo": version.motivo_codigo, "motivo_comentario": version.motivo_comentario,
+        **_totales_version(version, {t.id: t.area_ha for t in repo_riego.turnos_de_modulo(db, modulo.id)}),
     }
     if not con_detalle:
         return salida
@@ -506,14 +520,18 @@ def listar(db: Session, modulo_id: int, desde: dt.date | None, hasta: dt.date | 
     else:
         refs = {c.id: c.borrador_version_id or c.version_publicada_id for c in cronos}
     versiones_ref = repo.versiones_por_id(db, refs.values())
+    totales = repo.totales_agua(db, refs.values())
+    etos = repo.eto_por_fecha(db, modulo.fundo_id, (c.fecha - dt.timedelta(days=1) for c in cronos))
     salida = []
     for c in cronos:
         v = versiones_ref.get(refs[c.id])
         fila = _cabecera(c, modulo)
+        eto, pronostico = etos.get(c.fecha - dt.timedelta(days=1), (None, False))
+        fila["eto_dia_anterior_mm"], fila["eto_dia_anterior_pronostico"] = eto, pronostico
         fila["version"] = None if v is None else {
             "id": v.id, "numero": v.numero, "origen": v.origen.value, "creado_at": v.created_at,
             "preliminar": v.preliminar, "datos_incompletos": v.datos_incompletos,
-            "regenerado": v.origen == OrigenVersion.regenerado,
+            "regenerado": v.origen == OrigenVersion.regenerado, **totales.get(v.id, {}),
         }
         salida.append(fila)
     return salida

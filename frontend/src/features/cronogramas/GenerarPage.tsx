@@ -17,7 +17,7 @@ import { mensajeDeError } from "../../services/httpClient";
 import { claveCronogramas, cronogramasApi, type GenerarSalida } from "../../services/cronogramas";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
 import { ContextoDiaAnterior, RangoContextoDiaAnterior } from "./ContextoDiaAnterior";
-import { ETIQUETA_ACCION, MarcasVersion, TONO_ACCION } from "./etiquetas";
+import { ETIQUETA_ACCION, MarcasVersion, TONO_ACCION, textoAgua } from "./etiquetas";
 
 export const DIAS_MAX = 7;
 
@@ -154,6 +154,7 @@ export default function GenerarPage() {
                   <span className="w-24 text-sm font-semibold text-texto">{formatearDiaCorto(d.fecha)}</span>
                   <Badge tono={TONO_ACCION[d.accion]}>{ETIQUETA_ACCION[d.accion]}</Badge>
                   {d.version != null && <span className="text-xs text-texto-2">v{d.version}{d.borrador_de_cambios ? " · borrador de cambios" : ""}</span>}
+                  {d.total_m3 != null && <span className="cifras text-xs font-semibold text-texto">{textoAgua(d.total_m3, d.total_m3ha)}</span>}
                   <MarcasVersion marcas={{ preliminar: d.preliminar, datos_incompletos: d.datos_incompletos }} />
                   {d.mensaje && <span className="text-xs text-texto-2">{d.mensaje}</span>}
                 </div>

@@ -77,7 +77,7 @@ def _sesion(db):
 def _correr(db, apis: ApisFalsas, fuentes=ingesta_service.FUENTES, desde=D1, hasta=D3, clientes=None):
     corridas = ingesta_service.crear_corridas(db, fuentes, disparo=DisparoIngesta.script, desde=desde, hasta=hasta)
     db.commit()
-    clientes = clientes or Clientes(weatherlink=apis.weatherlink, phytech=apis.phytech)
+    clientes = clientes or Clientes(weatherlink=apis.weatherlink, phytech=apis.phytech, galileo=apis.galileo)
     resultado = ingesta_service.ejecutar_en_sesiones([c.id for c in corridas], clientes, sesion=_sesion(db))
     clientes.cerrar()
     return {c.fuente: c for c in resultado}
@@ -131,7 +131,9 @@ def test_ingesta_guarda_lecturas_convertidas_crudos_y_ambiente(db, fundo, reloj,
 
     # Un crudo por llamada: 3 días de WeatherLink + 1 tramo por fuente de Phytech.
     crudos = db.scalars(select(IngestaCrudo).order_by(IngestaCrudo.id)).all()
-    assert [c.endpoint for c in crudos].count("historic/28494") == 3 and len(crudos) == 7
+    # + 3 días del controlador Galileo (Fabric).
+    assert [c.endpoint for c in crudos].count("historic/28494") == 3 and len(crudos) == 10
+    assert [c.endpoint for c in crudos].count("fabric:silver_galileo_consolas") == 3
     assert crudos[0].parametros["dia"] == "2026-11-05"
 
     tokens = [f"token-falso-{i:04d}" for i in range(1, apis.token_n + 1)]

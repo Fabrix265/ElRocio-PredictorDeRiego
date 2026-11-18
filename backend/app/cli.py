@@ -381,6 +381,73 @@ def reprocesar_weatherlink(args: argparse.Namespace) -> int:
     return 0
 
 
+def _args_explorar_fabric(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--muestra", type=int, default=5, help="Filas de ejemplo a mostrar (máx. 50)")
+
+
+@comando("explorar-fabric", "Prueba la conexión a Fabric (solo lectura) y describe la tabla del "
+         "controlador Galileo: columnas, filas, fechas y llaves de válvulas.", _args_explorar_fabric)
+def explorar_fabric(args: argparse.Namespace) -> int:
+    from app.integraciones.galileo.cliente import ErrorFabric, conexion, consultar, sin_secretos
+    from app.integraciones.galileo.config import ConfiguracionFabric
+
+    cfg = ConfiguracionFabric()
+    print(f"Servidor: {cfg.servidor or '(vacío)'}\nBase: {cfg.base_datos}  Tabla: {cfg.esquema}.{cfg.tabla}"
+          f"\nAutenticación: {cfg.autenticacion}")
+    try:
+        tabla = cfg.tabla_calificada()
+        with conexion(cfg) as con:
+            print("Conexión: OK\n")
+            columnas_info = consultar(con, (
+                "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+                "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION"),
+                (cfg.esquema, cfg.tabla))[1]
+            if not columnas_info:
+                _, tablas = consultar(con, (
+                    "SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+                    "WHERE TABLE_NAME LIKE '%galileo%' ORDER BY 1, 2"))
+                print("No encontré la tabla. Tablas con 'galileo':",
+                      ", ".join(f"{e}.{t}" for e, t in tablas) or "ninguna")
+                return 1
+            print("Columnas:")
+            for nombre, tipo in columnas_info:
+                print(f"  - {nombre} ({tipo})")
+            nombres = {n.lower(): n for n, _ in columnas_info}
+
+            total = consultar(con, f"SELECT COUNT_BIG(*) FROM {tabla}")[1][0][0]
+            print(f"\nFilas: {total}")
+            if "fecha" in nombres:
+                col = f"[{nombres['fecha']}]"
+                mn, mx = consultar(con, f"SELECT MIN({col}), MAX({col}) FROM {tabla}")[1][0]
+                print(f"Fechas: {mn} a {mx}")
+
+            valvulas = [nombres.get(f"valve {letra}") for letra in "abcde"]
+            if all(valvulas):
+                lista = ", ".join(f"[{v}]" for v in valvulas)
+                _, grupos = consultar(con, (
+                    f"SELECT TOP 40 {lista}, COUNT_BIG(*) AS n FROM {tabla} "
+                    f"GROUP BY {lista} ORDER BY n DESC"))
+                print("\nLlaves de válvulas (A..E concatenadas) más frecuentes:")
+                for *partes, n in grupos:
+                    llave = "".join("" if p is None else str(int(p)) if isinstance(p, float) and p.is_integer()
+                                    else str(p).strip() for p in partes)
+                    print(f"  {llave:<14} {n:>8} filas   (A..E = {partes})")
+
+            muestra = max(1, min(args.muestra, 50))
+            orden = f" ORDER BY [{nombres['fecha']}] DESC" if "fecha" in nombres else ""
+            cols, filas = consultar(con, f"SELECT TOP {muestra} * FROM {tabla}{orden}")
+            print(f"\nÚltimas {muestra} filas:")
+            for fila in filas:
+                print("  " + " | ".join(f"{c}={v}" for c, v in zip(cols, fila, strict=True)))
+    except ErrorFabric as error:
+        print(f"No se pudo conectar: {error}", file=sys.stderr)
+        return 1
+    except Exception as error:  # noqa: BLE001 - mensaje sin secretos
+        print(f"Error al consultar: {sin_secretos(f'{type(error).__name__}: {error}', cfg)}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def construir_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="Administración del backend de riego.")
     sub = parser.add_subparsers(dest="comando", required=True, metavar="comando")

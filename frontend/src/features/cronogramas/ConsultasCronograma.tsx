@@ -6,9 +6,10 @@ import { Field } from "../../components/ui/Field";
 import { Select } from "../../components/ui/Select";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { formatearDiaCorto, formatearFechaHora } from "../../lib/fechas";
-import { claveCronogramas, cronogramasApi, type CronogramaDetalle } from "../../services/cronogramas";
+import { claveCronogramas, cronogramasApi, type CronogramaDetalle, type VersionResumen } from "../../services/cronogramas";
+import { diferenciaPct } from "../datos/agua";
 import { mensajeDeError } from "../../services/httpClient";
-import { minutosAHora } from "./etiquetas";
+import { formato, minutosAHora } from "./etiquetas";
 
 const CELDA = "border-b border-borde p-2 text-left";
 const CAMPOS: Record<string, string> = { n_ciclos: "N.º de ciclos", ciclo: "Ciclo", riego_m3ha: "m³/ha", hora_inicio: "Inicio", inicio_min: "Inicio", duracion_min: "Duración (min)", duracion_manual: "Duración manual", riego_m3: "m³", fin_min: "Fin" };
@@ -32,6 +33,36 @@ export function Diferencias({ id, base, contra }: { id: number; base: number; co
   </table></div>;
 }
 
+/** Total del día de dos versiones lado a lado: m³ y m³/ha, con la diferencia. */
+export function TotalesComparados({ versiones, base, contra }: { versiones: VersionResumen[]; base: number; contra: number }) {
+  const a = versiones.find((v) => v.numero === base);
+  const b = versiones.find((v) => v.numero === contra);
+  if (a?.total_m3 == null || b?.total_m3 == null) return null;
+  const filas: [string, number | null | undefined, number | null | undefined, (v: number | null | undefined) => string][] = [
+    ["Agua total (m³)", a.total_m3, b.total_m3, formato.m3],
+    ["Lámina (m³/ha)", a.total_m3ha, b.total_m3ha, formato.m3ha],
+  ];
+  const NUM = `${CELDA} text-right tabular-nums`;
+  return <div className="max-w-full overflow-x-auto"><table className="w-full min-w-[420px] text-sm">
+    <caption className="sr-only">Total del día en v{base} y v{contra}</caption>
+    <thead className="bg-hundido"><tr>
+      <th className={CELDA}>Total del día</th><th className={`${CELDA} text-right`}>v{base}</th>
+      <th className={`${CELDA} text-right`}>v{contra}</th><th className={`${CELDA} text-right`}>Diferencia</th>
+    </tr></thead>
+    <tbody>{filas.map(([etiqueta, x, y, fmt]) => {
+      const dif = x != null && y != null ? y - x : null;
+      const pct = diferenciaPct(y ?? null, x ?? null);
+      return <tr key={etiqueta}>
+        <th scope="row" className={`${CELDA} font-normal`}>{etiqueta}</th>
+        <td className={NUM}>{fmt(x)}</td><td className={NUM}>{fmt(y)}</td>
+        <td className={`${NUM} ${dif ? "font-semibold text-texto" : "text-texto-2"}`}>
+          {dif == null ? "—" : `${dif > 0 ? "+" : ""}${fmt(dif)}`}{pct ? ` (${pct > 0 ? "+" : ""}${pct} %)` : ""}
+        </td>
+      </tr>;
+    })}</tbody>
+  </table></div>;
+}
+
 export function Comparador({ cronograma: c }: { cronograma: CronogramaDetalle }) {
   const [elegidas, setElegidas] = useState<{ base: number; contra: number } | null>(null);
   const base = elegidas?.base ?? c.versiones.find((v) => v.id === c.version_publicada_id)?.numero ?? c.versiones.at(-1)?.numero;
@@ -43,6 +74,7 @@ export function Comparador({ cronograma: c }: { cronograma: CronogramaDetalle })
       <Field label="Comparar"><Select value={String(base)} opciones={opciones} onValueChange={(v) => setElegidas({ base: Number(v), contra })} /></Field>
       <Field label="Con"><Select value={String(contra)} opciones={opciones} onValueChange={(v) => setElegidas({ base, contra: Number(v) })} /></Field>
     </div>
+    <TotalesComparados versiones={c.versiones} base={base} contra={contra} />
     <Diferencias id={c.id} base={base} contra={contra} />
   </div>;
 }

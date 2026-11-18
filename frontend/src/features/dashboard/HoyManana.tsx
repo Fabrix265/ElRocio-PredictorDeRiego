@@ -13,7 +13,7 @@ import { mensajeDeError } from "../../services/httpClient";
 import { claveCronogramas, cronogramasApi } from "../../services/cronogramas";
 import { useUsuario } from "../auth/AuthProvider";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
-import { ETIQUETA_ESTADO, MarcasVersion, TONO_ESTADO, formato } from "../cronogramas/etiquetas";
+import { ETIQUETA_ESTADO, MarcasVersion, TONO_ESTADO, formato, totalesPlan } from "../cronogramas/etiquetas";
 import { Gantt } from "../cronogramas/Gantt";
 
 /** Cronograma de hoy y de mañana con su Gantt (el programador solo ve los publicados). */
@@ -81,7 +81,7 @@ export function HoyManana({ fechas, consultas }: ReturnType<typeof useCronograma
                   <Gantt turnos={c.version.turnos} compacto />
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-texto-2">
                     <span>
-                      {c.version.turnos.reduce((s, t) => s + t.n_ciclos, 0)} ciclos · {formato.m3(c.version.total_m3)} m³
+                      {c.version.turnos.reduce((s, t) => s + t.n_ciclos, 0)} ciclos · {formato.m3(c.version.total_m3)} m³ · {formato.m3ha(c.version.total_m3ha ?? totalesPlan(c.version.turnos).m3ha)} m³/ha
                     </span>
                     <Link to={`/cronogramas/${c.id}`} className="inline-flex items-center gap-1 font-semibold text-marca hover:underline">
                       Ver detalle <ArrowRight className="size-3.5" aria-hidden="true" />

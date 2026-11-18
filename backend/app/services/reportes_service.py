@@ -11,12 +11,13 @@ import datetime as dt
 import io
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errores import DatosInvalidos, NoEncontrado
 from app.core.tiempo import hoy_lima
-from app.models import Cronograma, CronogramaEvento, CronogramaVersion, Fundo, Modulo, Usuario
-from app.models.enums import OrigenVersion, RolUsuario, TipoEventoCronograma
+from app.models import Cronograma, CronogramaEvento, CronogramaVersion, Fundo, Modulo, MotivoCorreccion, Usuario
+from app.models.enums import EstadoRiego, OrigenVersion, RolUsuario, TipoEventoCronograma
 from app.repositories import cronogramas as repo_crono
 from app.repositories import datos_series as repo_series
 from app.repositories import reportes as repo
@@ -28,6 +29,8 @@ DIAS_AGUA = 14
 MAX_DIAS_AGUA = 92
 MAX_DIAS_REFINAMIENTO = 366
 ORIGENES_MODELO = (OrigenVersion.modelo, OrigenVersion.regenerado)
+ETIQUETA_ORDEN = {"turno": "por turno", "hora": "por horario"}
+CABECERA_PLAN = ("Turno", "Ciclo", "Hora inicio", "Hora fin", "Duración (min)", "m³/ha", "m³")
 CARACTERES_FORMULA = ("=", "+", "-", "@", "\t", "\r")
 
 
@@ -47,6 +50,17 @@ def _modelo_mas_reciente(versiones: list[CronogramaVersion]) -> CronogramaVersio
     return del_modelo[-1] if del_modelo else None
 
 
+def _firmas_por_turno(version: CronogramaVersion | None) -> dict[int, tuple]:
+    """``turno_id -> ciclos (inicio, duración, m³/ha)``: para saber si una versión cambió un turno."""
+    if version is None:
+        return {}
+    salida: dict[int, list[tuple]] = {}
+    for c in version.ciclos:
+        salida.setdefault(c.turno_id, []).append(
+            (round(c.inicio_min, 1), round(c.duracion_min, 1), round(c.riego_m3ha, 2)))
+    return {t: tuple(sorted(v)) for t, v in salida.items()}
+
+
 def _totales_por_turno(version: CronogramaVersion | None) -> dict[int, tuple[float, float]]:
     """``turno_id -> (m3/ha, m3)`` de una versión."""
     if version is None:
@@ -56,7 +70,9 @@ def _totales_por_turno(version: CronogramaVersion | None) -> dict[int, tuple[flo
         acum = salida.setdefault(c.turno_id, [0.0, 0.0])
         acum[0] += c.riego_m3ha
         acum[1] += c.riego_m3
-    return {t: (round(a, 2), round(b, 1)) for t, (a, b) in salida.items()}
+    # m³ con 3 decimales: el gráfico suma turnos y divide por ha; con 1 decimal el total del día
+    # podía diferir en 0,01 m³/ha del que muestra el cronograma.
+    return {t: (round(a, 2), round(b, 3)) for t, (a, b) in salida.items()}
 
 
 # --- Agua aplicada vs propuesta (KPI 1 y Datos de campo) -----------------------------
@@ -78,6 +94,7 @@ def agua(db: Session, modulo_id: int, desde: dt.date | None, hasta: dt.date | No
                  repo_riego.vigentes(db, modulo.id, desde=desde, hasta=hasta + dt.timedelta(days=1))}
     cronos = {c.fecha: c for c in repo.cronogramas_rango(db, modulo.id, desde, hasta)}
     versiones = _por_cronograma(repo.versiones_de(db, [c.id for c in cronos.values()]))
+    motivos = {m.codigo: m.nombre for m in db.scalars(select(MotivoCorreccion))}
 
     dias = []
     fecha = desde
@@ -91,8 +108,16 @@ def agua(db: Session, modulo_id: int, desde: dt.date | None, hasta: dt.date | No
             propuesta = por_id.get(crono.version_publicada_id)
         else:
             propuesta = por_id.get(crono.version_publicada_id) or por_id.get(crono.borrador_version_id)
-        modelo = None if programador else _modelo_mas_reciente(lista)
+        # Modelo: lo último que generó el modelo (v1, o la regenerada si la hubo); se compara con lo
+        # publicado (la última corrección) y con lo regado.
+        modelo_real = _modelo_mas_reciente(lista)
+        modelo = None if programador else modelo_real
         prop, mod = _totales_por_turno(propuesta), _totales_por_turno(modelo)
+        firma_prop, firma_mod = _firmas_por_turno(propuesta), _firmas_por_turno(modelo_real)
+        # Modificada = edición o corrección cuyo contenido difiere del modelo (el programador
+        # también lo ve: no revela cuánto proponía el modelo).
+        dia_modificado = bool(propuesta is not None and propuesta.origen not in ORIGENES_MODELO
+                              and modelo_real is not None and firma_prop != firma_mod)
         filas = []
         for t in turnos:
             r = registros.get((t.id, fecha))
@@ -100,15 +125,28 @@ def agua(db: Session, modulo_id: int, desde: dt.date | None, hasta: dt.date | No
             if r is not None:
                 aplicado_m3ha = round(sum(c.riego_m3ha or 0 for c in r.ciclos), 2)
                 aplicado_m3 = round(sum(c.riego_m3 or 0 for c in r.ciclos), 1)
+            real = r is not None and r.estado == EstadoRiego.aplicado
             filas.append({
                 "turno_id": t.id, "turno_codigo": t.codigo, "area_ha": t.area_ha,
                 "aplicado_m3ha": aplicado_m3ha, "aplicado_m3": aplicado_m3,
-                "estado_riego": r.estado.value if r else None, "sin_riego": bool(r and r.sin_riego),
+                "estado_riego": r.estado.value if r else None, "origen_riego": r.origen.value if r else None,
+                "sin_riego": bool(r and r.sin_riego),
+                "real_m3ha": aplicado_m3ha if real else None, "real_m3": aplicado_m3 if real else None,
                 "propuesto_m3ha": prop.get(t.id, (None, None))[0], "propuesto_m3": prop.get(t.id, (None, None))[1],
                 "modelo_m3ha": mod.get(t.id, (None, None))[0], "modelo_m3": mod.get(t.id, (None, None))[1],
+                "modificado": dia_modificado and firma_prop.get(t.id) != firma_mod.get(t.id),
             })
+        motivo = None
+        if dia_modificado and propuesta is not None:
+            partes = [motivos.get(propuesta.motivo_codigo or "", propuesta.motivo_codigo),
+                      propuesta.motivo_comentario]
+            motivo = " · ".join(p for p in partes if p) or None
         dias.append({"fecha": fecha, "cronograma_id": crono.id if crono and (propuesta or not programador) else None,
-                     "turnos": filas})
+                     "propuesta_version": propuesta.numero if propuesta else None,
+                     "propuesta_origen": propuesta.origen.value if propuesta else None,
+                     "propuesta_publicada": bool(propuesta and crono and propuesta.id == crono.version_publicada_id),
+                     "modelo_version": modelo.numero if modelo else None,
+                     "modificado": dia_modificado, "motivo": motivo, "turnos": filas})
         fecha += dt.timedelta(days=1)
     return {"modulo_id": modulo.id, "desde": desde, "hasta": hasta, "dias": dias,
             "con_modelo": not programador}
@@ -169,6 +207,7 @@ def _version_exportable(db: Session, crono: Cronograma, usuario: Usuario) -> Cro
 
 def _filas_plan(db: Session, version: CronogramaVersion, modulo_id: int, orden: str = "turno") -> list[dict[str, Any]]:
     turnos = {t.id: t for t in repo_riego.turnos_de_modulo(db, modulo_id)}
+    areas = {t.id: t.area_ha for t in turnos.values()}  # área oficial, como el resto de los totales
     filas = []
     def clave(c):
         turno_ciclo = (turnos[c.turno_id].orden if c.turno_id in turnos else 0, c.ciclo)
@@ -179,8 +218,16 @@ def _filas_plan(db: Session, version: CronogramaVersion, modulo_id: int, orden: 
             "turno": turnos[c.turno_id].codigo if c.turno_id in turnos else str(c.turno_id), "ciclo": c.ciclo,
             "inicio": c.hora_inicio, "fin": c.hora_fin + (" (+1)" if c.fin_dia_siguiente else ""),
             "duracion_min": round(c.duracion_min, 1), "m3ha": round(c.riego_m3ha, 2), "m3": round(c.riego_m3, 1),
+            "area_ha": areas.get(c.turno_id),
         })
     return filas
+
+
+def m3ha_total(filas: list[dict[str, Any]]) -> float | None:
+    """m³/ha del plan entero: m³ totales ÷ hectáreas de los turnos que riegan (cada turno una vez)."""
+    areas = {f["turno"]: f["area_ha"] for f in filas if f.get("area_ha")}
+    area = sum(areas.values())
+    return round(sum(f["m3"] for f in filas) / area, 2) if area else None
 
 
 def exportar(db: Session, cronograma_id: int, formato: str, usuario: Usuario,
@@ -243,8 +290,8 @@ def _plan_xlsx(meta: dict[str, Any], filas: list[dict[str, Any]]) -> bytes:
     hoja.append([f"{meta['fundo']} · {meta['modulo']} · {fecha_larga(meta['fecha'])}"])
     hoja.append([f"Estado: {ETIQUETA_ESTADO.get(meta['estado'], meta['estado'])} · versión v{meta['version']}"
                  + (f" · {', '.join(meta['marcas'])}" if meta["marcas"] else "")])
-    hoja.append([f"Orden: por {meta.get('orden', 'turno')}"])
-    cabecera = ["Turno", "Ciclo", "Inicio", "Fin", "Duración (min)", "m³/ha", "m³"]
+    hoja.append([f"Orden: {ETIQUETA_ORDEN.get(meta.get('orden', 'turno'), 'por turno')}"])
+    cabecera = list(CABECERA_PLAN)
     hoja.append(cabecera)
     for celda in hoja[5]:
         celda.font, celda.fill = Font(bold=True, color="FFFFFF"), verde
@@ -252,7 +299,7 @@ def _plan_xlsx(meta: dict[str, Any], filas: list[dict[str, Any]]) -> bytes:
     for f in filas:
         hoja.append([f["turno"], f["ciclo"], f["inicio"], f["fin"], f["duracion_min"], f["m3ha"], f["m3"]])
     total = len(filas) + 5
-    hoja.append(["Total", None, None, None, f"=SUM(E6:E{total})", None, f"=SUM(G6:G{total})"])
+    hoja.append(["Total", None, None, None, f"=SUM(E6:E{total})", m3ha_total(filas), f"=SUM(G6:G{total})"])
     for celda in hoja[total + 1]:
         celda.font = Font(bold=True)
     for columna, ancho in zip("ABCDEFG", (10, 8, 10, 12, 16, 10, 10)):
