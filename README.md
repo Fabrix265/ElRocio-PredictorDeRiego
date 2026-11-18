@@ -143,7 +143,7 @@ cambiarla en el primer ingreso. Las opciones sin preguntas para scripts están e
 ```bash
 cd frontend
 npm install
-npm run dev        # http://localhost:5173 (puerto fijo)
+npm run dev        # http://localhost:5173
 ```
 
 Vite reenvía `/api` al backend en `:8000`, así que el navegador ve un solo origen y
