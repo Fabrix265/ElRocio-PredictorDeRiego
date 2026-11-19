@@ -79,6 +79,9 @@ describe("decidirAcceso", () => {
     ["cargaRiego", "subgerente", false],
     ["cargaRiego", "programador", false],
     ["datos", "programador", true],
+    ["copiloto", "encargado", true],
+    ["copiloto", "subgerente", true],
+    ["copiloto", "programador", false],
   ];
 
   it.each(casos)("pantalla %s con rol %s → permitido=%s", (pantalla, rol, permitido) => {
@@ -88,9 +91,9 @@ describe("decidirAcceso", () => {
 
   it("el menú muestra a cada rol solo sus pantallas", () => {
     const rutas = (rol: Rol) => itemsParaRol(rol).map((i) => i.ruta);
-    expect(rutas("admin")).toEqual(["/", "/generar", "/cronogramas", "/riego", "/datos", "/parametros-riego", "/auditoria", "/usuarios"]);
-    expect(rutas("encargado")).toEqual(["/", "/generar", "/cronogramas", "/riego", "/datos", "/parametros-riego"]);
-    expect(rutas("subgerente")).toEqual(["/", "/cronogramas", "/riego", "/datos", "/parametros-riego", "/auditoria"]);
+    expect(rutas("admin")).toEqual(["/", "/generar", "/cronogramas", "/riego", "/datos", "/copiloto", "/parametros-riego", "/auditoria", "/usuarios"]);
+    expect(rutas("encargado")).toEqual(["/", "/generar", "/cronogramas", "/riego", "/datos", "/copiloto", "/parametros-riego"]);
+    expect(rutas("subgerente")).toEqual(["/", "/cronogramas", "/riego", "/datos", "/copiloto", "/parametros-riego", "/auditoria"]);
     expect(rutas("programador")).toEqual(["/", "/cronogramas", "/riego", "/datos"]);
   });
 });

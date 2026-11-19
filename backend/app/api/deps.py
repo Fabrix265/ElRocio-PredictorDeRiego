@@ -117,6 +117,55 @@ def requiere_rol(*roles: RolUsuario) -> Callable[[Usuario], Usuario]:
 AdminEncargado = Annotated[Usuario, Depends(requiere_rol(RolUsuario.admin, RolUsuario.encargado))]
 
 
+# --- Copiloto: agente (token de servicio) o usuario -----------------------------
+
+CABECERA_TOKEN_AGENTE = "X-Token-Agente"
+ROLES_COPILOTO = (RolUsuario.admin, RolUsuario.encargado, RolUsuario.subgerente)
+
+
+def _agente(db: Session, request: Request, contexto: ContextoPeticion):
+    """El token de servicio de ``X-Token-Agente`` (401 si no es válido); ``None`` si no viene."""
+    from app.services import agente_service
+
+    valor = request.headers.get(CABECERA_TOKEN_AGENTE)
+    if valor is None:
+        return None
+    token = agente_service.autenticar(db, valor.strip())
+    if token is None:
+        raise NoAutenticado()
+    agente_service.registrar_consulta(db, token, request.method, request.url.path, contexto)
+    return token
+
+
+def lector_copiloto(
+    request: Request,
+    db: DbSesion,
+    contexto: Contexto,
+    credenciales: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+):
+    """Lectura del copiloto: el agente con su token, o admin, encargado o subgerente con su sesión.
+
+    El programador no entra: el copiloto muestra la propuesta del modelo (§4).
+    """
+    from app.services.copiloto_service import Lector
+
+    token = _agente(db, request, contexto)
+    if token is not None:
+        return Lector(token=token)
+    usuario = usuario_habilitado(usuario_actual(db, credenciales))
+    if usuario.rol not in ROLES_COPILOTO:
+        raise SinPermiso()
+    return Lector(usuario=usuario)
+
+
+def solo_agente(request: Request, db: DbSesion, contexto: Contexto):
+    """Solo el agente (crear sugerencias): sin token de servicio, 403 aunque haya sesión."""
+    token = _agente(db, request, contexto)
+    if token is None:
+        raise SinPermiso("Solo el agente del copiloto puede crear sugerencias")
+    return token
+
+
 def _origenes_permitidos() -> set[str]:
     return {o.rstrip("/") for o in settings.cors_origin_list} | {settings.frontend_url.rstrip("/")}
 

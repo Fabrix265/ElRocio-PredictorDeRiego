@@ -20,6 +20,7 @@ campo. El subgerente revisa y puede pedir correcciones, y el administrador gesti
 | F5 Gráficos | KPIs del Dashboard (agua aplicada ayer, aplicado vs modelo, MDS, ETo, estado de mañana) y pronóstico Phytech; Datos de campo con gráficos (agua aplicada vs propuesta por turno, MDS y crecimiento, suelo por profundidad con línea de estrés, clima); exportación del cronograma a PDF y Excel; CSV de refinamiento (admin) | **Lista** |
 | F6 PWA y pulido | Instalable como aplicación (manifest, íconos verdes y service worker base sin caché de datos), revisión a 360 px de todas las pantallas, accesibilidad (nombres accesibles, un `h1` por pantalla), sin pantallas provisorias, guía de usuario final | **Lista** |
 | Riego por pulsos | Reparte los m³/ha del modelo según la planilla, con parámetros por módulo, edición en fila por vueltas y lectura y exportación por hora | **Lista** |
+| Copiloto agrónomo | Alertas deterministas del día (plan, datos atrasados, desvío plan vs real, estrés por MDS y suelo, respuesta del suelo al riego, demanda alta) en `/api/v1/copiloto/*` con token de servicio para el agente; sugerencias con aprobación en la vista Copiloto; flujos de n8n (informe diario y agente de Telegram con Claude) en [`automatizacion/n8n/`](automatizacion/n8n/README.md) | **En rama** `feature/copiloto-n8n` |
 
 Todas las fases del MVP están listas. Qué puede hacer cada rol: [`docs/guia_usuario.md`](docs/guia_usuario.md).
 
