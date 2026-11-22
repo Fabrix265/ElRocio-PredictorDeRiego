@@ -85,19 +85,29 @@ describe("Copiloto", () => {
     vi.spyOn(copilotoApi, "avisos").mockResolvedValue({
       modulo: RESUMEN.modulo, generado_at: RESUMEN.generado_at, avisos: [
         { clave: "mds_nivel:1:2026-11-07:alto", codigo: "mds_nivel", severidad: "media", destino: "campo", icono: "🟠",
-          titulo: "El MDS subió a estrés alto", detalle: "El 07/11/2026 el MDS fue de 241 µm.", fecha: "2026-11-07",
-          enviado: true, valores: {} },
+          titulo: "El MDS subió a estrés alto", detalle: "El 07/11/2026 el MDS fue de 241 µm.",
+          resumen: "El 07/11/2026 el MDS fue de 241 µm.", ruta: null, fecha: "2026-11-07", enviado: true, valores: {} },
         { clave: "ingesta_fallida:1:2026-11-08:weatherlink", codigo: "ingesta_fallida", severidad: "alta",
           destino: "sistema", icono: "🔴", titulo: "La ingesta de WeatherLink (clima) falló", detalle: "Error: HTTP 503.",
-          fecha: "2026-11-08", enviado: false, valores: {} },
+          resumen: "Error: HTTP 503.", ruta: null, fecha: "2026-11-08", enviado: false, valores: {} },
+        { clave: "cronograma:1:2026-11-09:e7", codigo: "cronograma", severidad: "info", destino: "cronogramas", icono: "✅",
+          titulo: "Plan de riego publicado · lunes 09/11",
+          detalle: "Plan del lunes 09/11/2026 · Módulo 5\n• TE01 · 2 ciclo(s): 760 m³ · 58.4 m³/ha\n\n🔗 Ver en la app: https://irritall.vercel.app/cronogramas/7",
+          resumen: "lunes 09/11 · versión 2 · 3,812 m³ · 52.4 m³/ha", ruta: "/cronogramas/7", fecha: "2026-11-09",
+          enviado: false, valores: {} },
       ],
     });
     montar();
     const avisos = await screen.findByRole("list", { name: "Avisos" });
     expect(within(avisos).getByText("El MDS subió a estrés alto")).toBeInTheDocument();
     expect(within(avisos).getByText("Enviado por Telegram")).toBeInTheDocument();
-    expect(within(avisos).getByText("Por enviar")).toBeInTheDocument();
+    expect(within(avisos).getAllByText("Por enviar")).toHaveLength(2);
     expect(within(avisos).getByText(/^Sistema · /)).toBeInTheDocument();
+    // Cronograma: resumen visible, detalle completo sin el enlace de Telegram y botón a la pantalla.
+    expect(within(avisos).getByText("lunes 09/11 · versión 2 · 3,812 m³ · 52.4 m³/ha")).toBeInTheDocument();
+    const detalle = within(avisos).getByText(/TE01 · 2 ciclo\(s\)/);
+    expect(detalle.textContent).not.toContain("🔗");
+    expect(within(avisos).getByRole("link", { name: "Ver cronograma" })).toHaveAttribute("href", "/cronogramas/7");
   });
 
   it("sin avisos lo dice", async () => {

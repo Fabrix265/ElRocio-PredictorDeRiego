@@ -7,13 +7,13 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "50 6-21 * * *"
+              "expression": "*/10 5-22 * * *"
             }
           ]
         }
       },
-      "id": "fa53889e-ca2f-522b-b521-e7030ecda771",
-      "name": "Cada hora",
+      "id": "d32a5ea5-cdc8-5b28-af1e-0781e262c211",
+      "name": "Cada 10 minutos",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -41,6 +41,12 @@
               "id": "1805cec7-be6b-5302-9c71-65a8befc87aa",
               "name": "chat_ids_sistema",
               "value": "ID_CHAT_ADMIN",
+              "type": "string"
+            },
+            {
+              "id": "ac1e7a16-18fb-50ac-bed8-e0cce0959ff2",
+              "name": "chat_ids_cronogramas",
+              "value": "ID_CHAT_ENCARGADO,ID_CHAT_SUBGERENTE,ID_CHAT_PROGRAMADOR",
               "type": "string"
             }
           ]
@@ -91,7 +97,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Un mensaje por chat con sus avisos nuevos: «campo» (MDS y riego) y «sistema» (ingesta de datos;\n// si chat_ids_sistema está vacío, van a los de campo). Sin chats configurados no se manda ni se confirma nada.\nconst cfg = $('Configuración').first().json;\nconst lista = (ids) => String(ids || '').split(',').map((s) => s.trim()).filter(Boolean);\nconst campo = lista(cfg.chat_ids_campo);\nconst sistema = lista(cfg.chat_ids_sistema).length ? lista(cfg.chat_ids_sistema) : campo;\nconst r = $input.first().json;\nconst porChat = new Map();\nfor (const a of r.avisos || []) {\n  for (const chat_id of (a.destino === 'sistema' ? sistema : campo)) {\n    if (!porChat.has(chat_id)) porChat.set(chat_id, []);\n    porChat.get(chat_id).push(a);\n  }\n}\nconst cabecera = 'Aviso del copiloto de riego' + (r.modulo && r.modulo.nombre ? ` · ${r.modulo.nombre}` : '');\nreturn [...porChat].map(([chat_id, avisos]) => ({ json: {\n  chat_id,\n  claves: avisos.map((a) => a.clave),\n  texto: [cabecera, ...avisos.map((a) => `${a.icono} ${a.titulo}\\n${a.detalle}`)].join('\\n\\n').slice(0, 4000),\n} }));"
+        "jsCode": "// Un mensaje por aviso y por chat: «campo» (MDS y riego), «sistema» (ingesta de datos) y «cronogramas»\n// (generar, publicar, corregir…). Si chat_ids_sistema o chat_ids_cronogramas están vacíos, esos avisos van a\n// los de campo. Sin chats configurados no se manda ni se confirma nada.\nconst cfg = $('Configuración').first().json;\nconst lista = (ids) => String(ids || '').split(',').map((s) => s.trim()).filter(Boolean);\nconst campo = lista(cfg.chat_ids_campo);\nconst conRespaldo = (ids) => (lista(ids).length ? lista(ids) : campo);\nconst chats = { campo, sistema: conRespaldo(cfg.chat_ids_sistema), cronogramas: conRespaldo(cfg.chat_ids_cronogramas) };\nconst salida = [];\nfor (const a of $input.first().json.avisos || []) {\n  for (const chat_id of chats[a.destino] || campo) {\n    salida.push({ json: {\n      chat_id,\n      claves: [a.clave],\n      texto: `${a.icono} ${a.titulo}\n\n${a.detalle}`.slice(0, 4000),\n    } });\n  }\n}\nreturn salida;"
       },
       "id": "216061de-3d64-55e4-a00d-9edc63d3d146",
       "name": "Mensajes",
@@ -154,7 +160,7 @@
     }
   ],
   "connections": {
-    "Cada hora": {
+    "Cada 10 minutos": {
       "main": [
         [
           {

@@ -12,14 +12,17 @@ from sqlalchemy.orm import Session
 from app.models import (
     Auditoria,
     CopilotoSugerencia,
+    Cronograma,
+    CronogramaEvento,
     IngestaCorrida,
     Modulo,
+    MotivoCorreccion,
     PhytechSueloHorario,
     TokenServicio,
     Turno,
     Usuario,
 )
-from app.models.enums import DisparoIngesta
+from app.models.enums import DisparoIngesta, TipoEventoCronograma
 
 # --- Catálogo -------------------------------------------------------------------
 
@@ -162,3 +165,29 @@ def claves_avisadas(db: Session, claves: Sequence[str], *, accion: str, entidad:
 def bloquear_avisos(db: Session) -> None:
     """Candado de transacción (sirve con el pooler 6543): dos confirmaciones a la vez no duplican."""
     db.execute(text("SELECT pg_advisory_xact_lock(hashtext('riego.copiloto_avisos'))"))
+
+
+def eventos_cronograma(db: Session, modulo_id: int, desde: dt.datetime,
+                       tipos: Sequence[TipoEventoCronograma]) -> list[Any]:
+    """Eventos de los cronogramas del módulo desde ``desde`` (los más antiguos primero)."""
+    return list(db.execute(
+        select(CronogramaEvento, Cronograma)
+        .join(Cronograma, Cronograma.id == CronogramaEvento.cronograma_id)
+        .where(Cronograma.modulo_id == modulo_id, CronogramaEvento.ocurrido_at >= desde,
+               CronogramaEvento.tipo.in_(list(tipos)))
+        .order_by(CronogramaEvento.ocurrido_at, CronogramaEvento.id)
+    ).all())
+
+
+def usuarios_por_id(db: Session, ids: set[int]) -> dict[int, Usuario]:
+    if not ids:
+        return {}
+    return {u.id: u for u in db.scalars(select(Usuario).where(Usuario.id.in_(ids)))}
+
+
+def nombres_motivo(db: Session, codigos: set[str]) -> dict[str, str]:
+    if not codigos:
+        return {}
+    filas = db.execute(select(MotivoCorreccion.codigo, MotivoCorreccion.nombre)
+                       .where(MotivoCorreccion.codigo.in_(codigos))).all()
+    return {codigo: nombre for codigo, nombre in filas}

@@ -131,6 +131,9 @@ return ids.map((chat_id) => ({{ json: {{ chat_id, texto }} }}));"""
 # Si el agente falla (modelo caído, API sin respuesta, demasiadas herramientas), el bot avisa en vez de callar.
 SIN_RESPUESTA = ("No pude consultar los datos en este momento. Intenta de nuevo en unos minutos o revisa "
                  "el plan en la app.")
+# /plan: el backend arma el texto. Si la fecha no se entiende (422) o la API falla, una ayuda.
+PLAN_NO_ENTENDIDO = "No entendí la fecha. Prueba con /plan hoy, /plan mañana, /plan lunes o /plan 23/11."
+RESPUESTA_PLAN = f"={{{{ String($json.texto || '{PLAN_NO_ENTENDIDO}').slice(0, {LIMITE_TELEGRAM}) }}}}"
 RESPUESTA_AGENTE = f"={{{{ String($json.output || '{SIN_RESPUESTA}').slice(0, {LIMITE_TELEGRAM}) }}}}"
 
 
@@ -175,7 +178,7 @@ def informe_diario() -> dict[str, Any]:
 
 # --- Flujo 2: agente conversacional por Telegram ------------------------------------
 
-PREPARAR_JS = f"""// Autoriza el chat, atiende /start, /ayuda y /avisos sin gastar el modelo y traduce los comandos.
+PREPARAR_JS = f"""// Autoriza el chat, atiende /start, /ayuda, /avisos y /plan sin gastar el modelo y traduce los comandos.
 const msg = $('Mensaje de Telegram').first().json.message || {{}};
 const cfg = $('{CONFIG}').first().json;
 const autorizados = String(cfg.chat_ids_autorizados || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -190,6 +193,7 @@ const COMANDOS = {{
 }};
 let tipo = 'agente';
 let pregunta = texto;
+let dia = null;
 if (!autorizados.includes(chat_id)) tipo = 'no_autorizado';
 else if (!texto) tipo = 'sin_texto';
 else if (/^\\/(start|ayuda)\\b/i.test(texto)) tipo = 'ayuda';
@@ -197,10 +201,11 @@ else {{
   const partes = texto.split(/\\s+/);
   const comando = partes[0].split('@')[0].toLowerCase();
   if (comando === '/avisos') tipo = 'avisos';
+  else if (comando === '/plan') {{ tipo = 'plan'; dia = partes.slice(1).join(' ').slice(0, 20) || 'hoy'; }}
   else if (COMANDOS[comando]) pregunta = COMANDOS[comando];
   else if (comando === '/turno') pregunta = `Dame el plan de hoy del turno ${{partes[1] || ''}} y su agua de los últimos 7 días.`;
 }}
-return [{{ json: {{ tipo, chat_id, pregunta }} }}];"""
+return [{{ json: {{ tipo, chat_id, pregunta, dia }} }}];"""
 
 AYUDA = (
     "Hola, soy el copiloto de riego del MOD5. Te respondo con los datos del sistema.\\n\\n"
@@ -211,7 +216,8 @@ AYUDA = (
     "• /semana – agua de los últimos 7 días\\n"
     "• /turno TE03 – detalle de un turno\\n"
     "• /sugerencias – pendientes de aprobación\\n"
-    "• /avisos – avisos del día (MDS, ingesta de datos, riego)\\n\\n"
+    "• /plan 23/11 – plan completo de un día (también /plan hoy, /plan mañana)\\n"
+    "• /avisos – avisos recientes (MDS, ingesta, riego y cronogramas)\\n\\n"
     "También puedes preguntar libre, por ejemplo:\\n"
     "• ¿Por qué el TE02 tiene más agua hoy?\\n"
     "• ¿Hubo estrés esta semana?\\n"
@@ -225,9 +231,10 @@ let texto;
 if (r.error || !Array.isArray(r.avisos)) {{
   texto = 'No pude consultar los avisos en este momento. Intenta de nuevo en unos minutos.';
 }} else if (!r.avisos.length) {{
-  texto = 'No hay avisos por ahora. Te escribo apenas el MDS cambie de nivel, falle la ingesta de datos o el suelo no responda al riego.';
+  texto = 'No hay avisos por ahora. Te escribo apenas cambie el nivel del MDS, falle la ingesta de datos, el suelo no responda al riego o se genere, corrija o publique un cronograma.';
 }} else {{
-  texto = ['Avisos de hoy:', ...r.avisos.map((a) => `${{a.icono}} ${{a.titulo}}${{a.enviado ? ' (ya avisado)' : ''}}\\n${{a.detalle}}`)].join('\\n\\n');
+  texto = ['Avisos recientes:', ...r.avisos.map((a) => `${{a.icono}} ${{a.titulo}}${{a.enviado ? ' (ya avisado)' : ''}}\\n${{a.resumen || a.detalle}}`),
+           'Para ver un plan completo: /plan DD/MM'].join('\\n\\n');
 }}
 return [{{ json: {{ chat_id, texto: texto.slice(0, {LIMITE_TELEGRAM}) }} }}];"""
 
@@ -344,7 +351,7 @@ def agente_telegram() -> dict[str, Any]:
                                                 "operator": {"type": "string", "operation": "equals"}}],
                                 "combinator": "and"},
                  "renameOutput": True, "outputKey": t}
-                for t in ("agente", "ayuda", "sin_texto", "no_autorizado", "avisos")
+                for t in ("agente", "ayuda", "sin_texto", "no_autorizado", "avisos", "plan")
             ]},
             "options": {},
         }),
@@ -362,16 +369,25 @@ def agente_telegram() -> dict[str, Any]:
         }, CRED_TOKEN), "onError": "continueRegularOutput"},
         nodo("Formatear avisos", "n8n-nodes-base.code", 2, (1140, 480), {"jsCode": AVISOS_BOT_JS}),
         telegram("Responder avisos", (1360, 480), "={{ $json.chat_id }}", "={{ $json.texto }}"),
+        {**nodo("Plan en texto", "n8n-nodes-base.httpRequest", 4.2, (920, 640), {
+            "url": url("/copiloto/plan/texto"), "authentication": "genericCredentialType",
+            "genericAuthType": "httpHeaderAuth", "sendQuery": True,
+            "queryParameters": {"parameters": [{"name": "dia", "value": "={{ $('Preparar').first().json.dia }}"}]},
+            "options": {"timeout": 60000},
+        }, CRED_TOKEN), "onError": "continueRegularOutput"},
+        telegram("Responder plan", (1140, 640), "={{ $('Preparar').first().json.chat_id }}", RESPUESTA_PLAN),
     ]
     conexiones: dict[str, Any] = {
         "Mensaje de Telegram": {"main": [[conexion(CONFIG)]]},
         CONFIG: {"main": [[conexion("Preparar")]]},
         "Preparar": {"main": [[conexion("¿Qué hacer?")]]},
         "¿Qué hacer?": {"main": [[conexion("Agente copiloto")], [conexion("Ayuda")], [conexion("Solo texto")],
-                                 [conexion("No autorizado")], [conexion("Avisos de hoy")]]},
+                                 [conexion("No autorizado")], [conexion("Avisos de hoy")],
+                                 [conexion("Plan en texto")]]},
         "Agente copiloto": {"main": [[conexion("Responder")]]},
         "Avisos de hoy": {"main": [[conexion("Formatear avisos")]]},
         "Formatear avisos": {"main": [[conexion("Responder avisos")]]},
+        "Plan en texto": {"main": [[conexion("Responder plan")]]},
         **conexiones_agente,
     }
     return flujo("Copiloto · agente de Telegram", nodos, conexiones)
@@ -397,42 +413,42 @@ def agente_chat_prueba() -> dict[str, Any]:
 
 # --- Flujo 4: avisos por Telegram (sin modelo) ------------------------------------------
 
-MENSAJES_JS = f"""// Un mensaje por chat con sus avisos nuevos: «campo» (MDS y riego) y «sistema» (ingesta de datos;
-// si chat_ids_sistema está vacío, van a los de campo). Sin chats configurados no se manda ni se confirma nada.
+MENSAJES_JS = f"""// Un mensaje por aviso y por chat: «campo» (MDS y riego), «sistema» (ingesta de datos) y «cronogramas»
+// (generar, publicar, corregir…). Si chat_ids_sistema o chat_ids_cronogramas están vacíos, esos avisos van a
+// los de campo. Sin chats configurados no se manda ni se confirma nada.
 const cfg = $('{CONFIG}').first().json;
 const lista = (ids) => String(ids || '').split(',').map((s) => s.trim()).filter(Boolean);
 const campo = lista(cfg.chat_ids_campo);
-const sistema = lista(cfg.chat_ids_sistema).length ? lista(cfg.chat_ids_sistema) : campo;
-const r = $input.first().json;
-const porChat = new Map();
-for (const a of r.avisos || []) {{
-  for (const chat_id of (a.destino === 'sistema' ? sistema : campo)) {{
-    if (!porChat.has(chat_id)) porChat.set(chat_id, []);
-    porChat.get(chat_id).push(a);
+const conRespaldo = (ids) => (lista(ids).length ? lista(ids) : campo);
+const chats = {{ campo, sistema: conRespaldo(cfg.chat_ids_sistema), cronogramas: conRespaldo(cfg.chat_ids_cronogramas) }};
+const salida = [];
+for (const a of $input.first().json.avisos || []) {{
+  for (const chat_id of chats[a.destino] || campo) {{
+    salida.push({{ json: {{
+      chat_id,
+      claves: [a.clave],
+      texto: `${{a.icono}} ${{a.titulo}}\n\n${{a.detalle}}`.slice(0, {LIMITE_TELEGRAM}),
+    }} }});
   }}
 }}
-const cabecera = 'Aviso del copiloto de riego' + (r.modulo && r.modulo.nombre ? ` · ${{r.modulo.nombre}}` : '');
-return [...porChat].map(([chat_id, avisos]) => ({{ json: {{
-  chat_id,
-  claves: avisos.map((a) => a.clave),
-  texto: [cabecera, ...avisos.map((a) => `${{a.icono}} ${{a.titulo}}\\n${{a.detalle}}`)].join('\\n\\n').slice(0, {LIMITE_TELEGRAM}),
-}} }}));"""
+return salida;"""
 
 CLAVES_ENVIADAS = "={{ JSON.stringify({ claves: [...new Set($('Mensajes').all().flatMap((i) => i.json.claves))] }) }}"
 
 
 def avisos() -> dict[str, Any]:
-    """Cada hora (06:50 a 21:50) pide los avisos pendientes, los manda y confirma los enviados.
+    """Cada 10 minutos (de 05:00 a 22:50) pide los avisos pendientes, los manda y confirma los enviados.
 
     No usa el modelo: el texto lo arma el backend. Si Telegram falla no se confirma y el aviso sale
     en la siguiente consulta."""
     nodos = [
-        nodo("Cada hora", "n8n-nodes-base.scheduleTrigger", 1.2, (0, 0),
-             {"rule": {"interval": [{"field": "cronExpression", "expression": "50 6-21 * * *"}]}}),
+        nodo("Cada 10 minutos", "n8n-nodes-base.scheduleTrigger", 1.2, (0, 0),
+             {"rule": {"interval": [{"field": "cronExpression", "expression": "*/10 5-22 * * *"}]}}),
         nodo(CONFIG, "n8n-nodes-base.set", 3.4, (220, 0), asignaciones([
             ("api_url", API_URL_EJEMPLO, "string"),
             ("chat_ids_campo", "ID_CHAT_ENCARGADO,ID_CHAT_SUBGERENTE", "string"),
             ("chat_ids_sistema", "ID_CHAT_ADMIN", "string"),
+            ("chat_ids_cronogramas", "ID_CHAT_ENCARGADO,ID_CHAT_SUBGERENTE,ID_CHAT_PROGRAMADOR", "string"),
         ])),
         nodo("Avisos pendientes", "n8n-nodes-base.httpRequest", 4.2, (440, 0), {
             "url": url("/copiloto/avisos"), "authentication": "genericCredentialType",
@@ -449,7 +465,7 @@ def avisos() -> dict[str, Any]:
         }, CRED_TOKEN), "executeOnce": True},
     ]
     conexiones = {
-        "Cada hora": {"main": [[conexion(CONFIG)]]},
+        "Cada 10 minutos": {"main": [[conexion(CONFIG)]]},
         CONFIG: {"main": [[conexion("Avisos pendientes")]]},
         "Avisos pendientes": {"main": [[conexion("Mensajes")]]},
         "Mensajes": {"main": [[conexion("Enviar aviso")]]},

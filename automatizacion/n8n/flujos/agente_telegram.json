@@ -55,7 +55,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Autoriza el chat, atiende /start, /ayuda y /avisos sin gastar el modelo y traduce los comandos.\nconst msg = $('Mensaje de Telegram').first().json.message || {};\nconst cfg = $('Configuración').first().json;\nconst autorizados = String(cfg.chat_ids_autorizados || '').split(',').map((s) => s.trim()).filter(Boolean);\nconst chat_id = String(msg.chat?.id ?? '');\nconst texto = String(msg.text || '').trim().slice(0, 1000);\nconst COMANDOS = {\n  '/hoy': 'Dame el plan de riego de hoy por turno, con m³, m³/ha y la ETo.',\n  '/manana': 'Dame el plan de riego de mañana por turno, con m³, m³/ha y la ETo.',\n  '/alertas': '¿Qué alertas hay hoy y qué conviene revisar?',\n  '/semana': '¿Cuánta agua regamos en los últimos 7 días frente a lo propuesto, por turno?',\n  '/sugerencias': '¿Qué sugerencias están pendientes de aprobación?',\n};\nlet tipo = 'agente';\nlet pregunta = texto;\nif (!autorizados.includes(chat_id)) tipo = 'no_autorizado';\nelse if (!texto) tipo = 'sin_texto';\nelse if (/^\\/(start|ayuda)\\b/i.test(texto)) tipo = 'ayuda';\nelse {\n  const partes = texto.split(/\\s+/);\n  const comando = partes[0].split('@')[0].toLowerCase();\n  if (comando === '/avisos') tipo = 'avisos';\n  else if (COMANDOS[comando]) pregunta = COMANDOS[comando];\n  else if (comando === '/turno') pregunta = `Dame el plan de hoy del turno ${partes[1] || ''} y su agua de los últimos 7 días.`;\n}\nreturn [{ json: { tipo, chat_id, pregunta } }];"
+        "jsCode": "// Autoriza el chat, atiende /start, /ayuda, /avisos y /plan sin gastar el modelo y traduce los comandos.\nconst msg = $('Mensaje de Telegram').first().json.message || {};\nconst cfg = $('Configuración').first().json;\nconst autorizados = String(cfg.chat_ids_autorizados || '').split(',').map((s) => s.trim()).filter(Boolean);\nconst chat_id = String(msg.chat?.id ?? '');\nconst texto = String(msg.text || '').trim().slice(0, 1000);\nconst COMANDOS = {\n  '/hoy': 'Dame el plan de riego de hoy por turno, con m³, m³/ha y la ETo.',\n  '/manana': 'Dame el plan de riego de mañana por turno, con m³, m³/ha y la ETo.',\n  '/alertas': '¿Qué alertas hay hoy y qué conviene revisar?',\n  '/semana': '¿Cuánta agua regamos en los últimos 7 días frente a lo propuesto, por turno?',\n  '/sugerencias': '¿Qué sugerencias están pendientes de aprobación?',\n};\nlet tipo = 'agente';\nlet pregunta = texto;\nlet dia = null;\nif (!autorizados.includes(chat_id)) tipo = 'no_autorizado';\nelse if (!texto) tipo = 'sin_texto';\nelse if (/^\\/(start|ayuda)\\b/i.test(texto)) tipo = 'ayuda';\nelse {\n  const partes = texto.split(/\\s+/);\n  const comando = partes[0].split('@')[0].toLowerCase();\n  if (comando === '/avisos') tipo = 'avisos';\n  else if (comando === '/plan') { tipo = 'plan'; dia = partes.slice(1).join(' ').slice(0, 20) || 'hoy'; }\n  else if (COMANDOS[comando]) pregunta = COMANDOS[comando];\n  else if (comando === '/turno') pregunta = `Dame el plan de hoy del turno ${partes[1] || ''} y su agua de los últimos 7 días.`;\n}\nreturn [{ json: { tipo, chat_id, pregunta, dia } }];"
       },
       "id": "1cc6c7fa-7842-5234-9625-2d45c0980b4d",
       "name": "Preparar",
@@ -184,6 +184,29 @@
               },
               "renameOutput": true,
               "outputKey": "avisos"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "bc68cb08-7885-59e6-8e8a-1128d9d4741a",
+                    "leftValue": "={{ $json.tipo }}",
+                    "rightValue": "plan",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "plan"
             }
           ]
         },
@@ -543,7 +566,7 @@
     {
       "parameters": {
         "chatId": "={{ $json.chat_id }}",
-        "text": "Hola, soy el copiloto de riego del MOD5. Te respondo con los datos del sistema.\n\nComandos:\n• /hoy – plan de hoy por turno\n• /manana – plan de mañana\n• /alertas – alertas del día\n• /semana – agua de los últimos 7 días\n• /turno TE03 – detalle de un turno\n• /sugerencias – pendientes de aprobación\n• /avisos – avisos del día (MDS, ingesta de datos, riego)\n\nTambién puedes preguntar libre, por ejemplo:\n• ¿Por qué el TE02 tiene más agua hoy?\n• ¿Hubo estrés esta semana?\n• ¿Qué ETo se espera el jueves?",
+        "text": "Hola, soy el copiloto de riego del MOD5. Te respondo con los datos del sistema.\n\nComandos:\n• /hoy – plan de hoy por turno\n• /manana – plan de mañana\n• /alertas – alertas del día\n• /semana – agua de los últimos 7 días\n• /turno TE03 – detalle de un turno\n• /sugerencias – pendientes de aprobación\n• /plan 23/11 – plan completo de un día (también /plan hoy, /plan mañana)\n• /avisos – avisos recientes (MDS, ingesta, riego y cronogramas)\n\nTambién puedes preguntar libre, por ejemplo:\n• ¿Por qué el TE02 tiene más agua hoy?\n• ¿Hubo estrés esta semana?\n• ¿Qué ETo se espera el jueves?",
         "additionalFields": {
           "appendAttribution": false
         }
@@ -636,7 +659,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// /avisos: los avisos de hoy (ya enviados o pendientes), sin gastar el modelo.\nconst r = $input.first().json;\nconst chat_id = $('Preparar').first().json.chat_id;\nlet texto;\nif (r.error || !Array.isArray(r.avisos)) {\n  texto = 'No pude consultar los avisos en este momento. Intenta de nuevo en unos minutos.';\n} else if (!r.avisos.length) {\n  texto = 'No hay avisos por ahora. Te escribo apenas el MDS cambie de nivel, falle la ingesta de datos o el suelo no responda al riego.';\n} else {\n  texto = ['Avisos de hoy:', ...r.avisos.map((a) => `${a.icono} ${a.titulo}${a.enviado ? ' (ya avisado)' : ''}\\n${a.detalle}`)].join('\\n\\n');\n}\nreturn [{ json: { chat_id, texto: texto.slice(0, 4000) } }];"
+        "jsCode": "// /avisos: los avisos de hoy (ya enviados o pendientes), sin gastar el modelo.\nconst r = $input.first().json;\nconst chat_id = $('Preparar').first().json.chat_id;\nlet texto;\nif (r.error || !Array.isArray(r.avisos)) {\n  texto = 'No pude consultar los avisos en este momento. Intenta de nuevo en unos minutos.';\n} else if (!r.avisos.length) {\n  texto = 'No hay avisos por ahora. Te escribo apenas cambie el nivel del MDS, falle la ingesta de datos, el suelo no responda al riego o se genere, corrija o publique un cronograma.';\n} else {\n  texto = ['Avisos recientes:', ...r.avisos.map((a) => `${a.icono} ${a.titulo}${a.enviado ? ' (ya avisado)' : ''}\\n${a.resumen || a.detalle}`),\n           'Para ver un plan completo: /plan DD/MM'].join('\\n\\n');\n}\nreturn [{ json: { chat_id, texto: texto.slice(0, 4000) } }];"
       },
       "id": "97152436-0f84-5c65-bcb7-c3907b0f7aaf",
       "name": "Formatear avisos",
@@ -662,6 +685,63 @@
       "position": [
         1360,
         480
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR",
+          "name": "Bot Telegram copiloto"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Configuración').first().json.api_url }}/api/v1/copiloto/plan/texto",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "dia",
+              "value": "={{ $('Preparar').first().json.dia }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "c0a13a9f-77ef-5ccf-a882-fab031586e8f",
+      "name": "Plan en texto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        640
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR",
+          "name": "Token agente copiloto"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Preparar').first().json.chat_id }}",
+        "text": "={{ String($json.texto || 'No entendí la fecha. Prueba con /plan hoy, /plan mañana, /plan lunes o /plan 23/11.').slice(0, 4000) }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "c03fc3c1-fa9f-5ea2-84d3-e1615242e0be",
+      "name": "Responder plan",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1140,
+        640
       ],
       "credentials": {
         "telegramApi": {
@@ -741,6 +821,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Plan en texto",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -771,6 +858,17 @@
         [
           {
             "node": "Responder avisos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan en texto": {
+      "main": [
+        [
+          {
+            "node": "Responder plan",
             "type": "main",
             "index": 0
           }
