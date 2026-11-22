@@ -143,8 +143,15 @@ def plan_del_dia(db: Session, modulo: Modulo, fecha: dt.date, turnos: list[Turno
     crono = repo_crono.por_fecha(db, modulo.id, fecha)
     if crono is None:
         return None
-    turnos = turnos if turnos is not None else repo_riego.turnos_de_modulo(db, modulo.id)
     version = repo_crono.version(db, crono.version_publicada_id or crono.borrador_version_id)
+    return plan_de_version(db, modulo, crono, version, turnos)
+
+
+def plan_de_version(db: Session, modulo: Modulo, crono: Cronograma, version: Any | None,
+                    turnos: list[Turno] | None = None) -> dict[str, Any]:
+    """Como :func:`plan_del_dia`, pero de una versión concreta del cronograma (p. ej. la de un evento)."""
+    fecha = crono.fecha
+    turnos = turnos if turnos is not None else repo_riego.turnos_de_modulo(db, modulo.id)
     eto = repo_crono.eto_por_fecha(db, modulo.fundo_id, [fecha - dt.timedelta(days=1), fecha])
     eto_ant, eto_dia = eto.get(fecha - dt.timedelta(days=1)), eto.get(fecha)
     salida: dict[str, Any] = {
@@ -153,6 +160,7 @@ def plan_del_dia(db: Session, modulo: Modulo, fecha: dt.date, turnos: list[Turno
         "publicado": crono.version_publicada_id is not None,
         "borrador_pendiente": crono.version_publicada_id is not None and crono.borrador_version_id is not None,
         "version": version.numero if version else None,
+        "version_id": version.id if version else None,
         "origen_version": version.origen.value if version else None,
         "eto_dia_anterior_mm": _r(eto_ant[0], 2) if eto_ant else None,
         "eto_dia_anterior_es_pronostico": eto_ant[1] if eto_ant else None,
@@ -178,6 +186,7 @@ def plan_del_dia(db: Session, modulo: Modulo, fecha: dt.date, turnos: list[Turno
             "inicio": ciclos[0].hora_inicio if ciclos else None,
             "fin": ciclos[-1].hora_fin if ciclos else None,
             "ciclos": [{"ciclo": i + 1, "hora_inicio": c.hora_inicio, "hora_fin": c.hora_fin,
+                        "fin_dia_siguiente": bool(getattr(c, "fin_dia_siguiente", False)),
                         "duracion_min": _r(c.duracion_min, 0), "m3": _r(c.riego_m3, 1),
                         "m3ha": _r(c.riego_m3ha, 2)} for i, c in enumerate(ciclos)],
         })

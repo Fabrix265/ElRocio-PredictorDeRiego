@@ -60,7 +60,12 @@ function FilaAlerta({ alerta }: { alerta: Alerta }) {
   );
 }
 
-const DESTINO_AVISO: Record<Aviso["destino"], string> = { campo: "Campo", sistema: "Sistema" };
+const DESTINO_AVISO: Record<Aviso["destino"], string> = { campo: "Campo", sistema: "Sistema", cronogramas: "Cronogramas" };
+
+/** El texto del aviso termina con el enlace para Telegram; en la app se usa el botón. */
+function sinEnlace(detalle: string): string {
+  return detalle.replace(/\s*🔗 Ver en la app: \S+\s*$/u, "");
+}
 
 function FilaAviso({ aviso }: { aviso: Aviso }) {
   return (
@@ -73,7 +78,15 @@ function FilaAviso({ aviso }: { aviso: Aviso }) {
         <span className="text-xs text-texto-3">{DESTINO_AVISO[aviso.destino]} · {formatearDia(aviso.fecha)}</span>
       </div>
       <p className="text-sm font-semibold text-texto">{aviso.titulo}</p>
-      <p className="text-[13px] leading-5 text-texto-2">{aviso.detalle}</p>
+      <details className="group">
+        <summary className="cursor-pointer text-[13px] leading-5 text-texto-2 marker:text-texto-3">{aviso.resumen}</summary>
+        <p className="mt-1.5 text-[13px] leading-5 break-words whitespace-pre-line text-texto-2">{sinEnlace(aviso.detalle)}</p>
+      </details>
+      {aviso.ruta && (
+        <Link to={aviso.ruta} className="w-fit text-xs font-semibold text-activo-tx hover:underline">
+          {aviso.codigo === "cronograma" ? "Ver cronograma" : "Ver en la app"}
+        </Link>
+      )}
     </li>
   );
 }
@@ -246,7 +259,7 @@ export function CopilotoPage() {
           <Card>
             <CardHeader
               titulo="Avisos por Telegram"
-              descripcion="El copiloto los manda solo, apenas pasan: el MDS cambia de nivel, falla la ingesta de datos o el suelo no responde al riego."
+              descripcion="El copiloto los manda solo, apenas pasan: el MDS cambia de nivel, falla la ingesta de datos, el suelo no responde al riego o se genera, corrige o publica un cronograma. Toca un aviso para ver el detalle."
             />
             <CardBody>
               {!modulo ? null : avisos.isPending ? (

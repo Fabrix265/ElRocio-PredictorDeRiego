@@ -70,7 +70,7 @@ def test_mds_sube_de_moderado_a_alto(db, modulo):
     assert aviso["clave"] == f"mds_nivel:{modulo.id}:{AYER.isoformat()}:alto"
     assert aviso["severidad"] == "media" and aviso["icono"] == "🟠" and aviso["destino"] == "campo"
     assert aviso["titulo"] == "El MDS subió a estrés alto"
-    assert "241 µm, con ETo de 4,1 mm" in aviso["detalle"] and "205 µm (estrés moderado)" in aviso["detalle"]
+    assert "241 µm, con ETo de 4.1 mm" in aviso["detalle"] and "205 µm (estrés moderado)" in aviso["detalle"]
     assert "Revisa que el plan de hoy cubra la demanda" in aviso["detalle"]
     assert aviso["valores"]["sube"] is True and aviso["enviado"] is False
 
@@ -173,8 +173,8 @@ def test_riego_sin_respuesta_con_m3_m3ha_y_eto(db, modulo, turnos):
     assert aviso["clave"] == f"riego_sin_respuesta:{modulo.id}:{AYER.isoformat()}:suelo"
     assert aviso["severidad"] == "alta" and aviso["destino"] == "campo"
     area = sum(t.area_ha for t in turnos if t.activo)
-    assert f"{45.0 * area:.0f} m³ (45,0 m³/ha) con ETo de 4,3 mm" in aviso["detalle"]
-    assert "0,40 % vol." in aviso["detalle"] and "~3,0 % vol." in aviso["detalle"]
+    assert f"{45.0 * area:,.0f} m³ (45.0 m³/ha) con ETo de 4.3 mm" in aviso["detalle"]
+    assert "0.40 % vol." in aviso["detalle"] and "~3.0 % vol." in aviso["detalle"]
 
 
 def test_respuesta_normal_del_suelo_no_avisa(db, modulo, turnos):

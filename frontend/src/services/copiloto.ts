@@ -79,15 +79,20 @@ export interface Sugerencia {
   comentario_resolucion: string | null;
 }
 
-/** Aviso que n8n manda solo por Telegram (cambio de nivel del MDS, ingesta fallida, riego sin respuesta). */
+/** Aviso que n8n manda solo por Telegram (MDS, ingesta fallida, riego sin respuesta y cambios en cronogramas). */
 export interface Aviso {
   clave: string;
-  codigo: "mds_nivel" | "ingesta_fallida" | "riego_sin_respuesta";
+  codigo: "mds_nivel" | "ingesta_fallida" | "riego_sin_respuesta" | "cronograma";
   severidad: Severidad;
-  destino: "campo" | "sistema";
+  destino: "campo" | "sistema" | "cronogramas";
   icono: string;
   titulo: string;
+  /** Texto completo del mensaje (varias líneas). */
   detalle: string;
+  /** Una línea para listados. */
+  resumen: string;
+  /** Pantalla de la app que lo muestra (relativa), si la hay. */
+  ruta: string | null;
   fecha: string;
   enviado: boolean;
   valores: Record<string, unknown>;

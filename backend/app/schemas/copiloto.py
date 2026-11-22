@@ -65,7 +65,7 @@ class SugerenciaCreada(SugerenciaSalida):
 
 
 # código:módulo:fecha:detalle (largo máximo 58: cabe en auditoria.entidad_id, de 60).
-PATRON_CLAVE_AVISO = r"^(mds_nivel|ingesta_fallida|riego_sin_respuesta):\d{1,6}:\d{4}-\d{2}-\d{2}:[a-z0-9_]{1,20}$"
+PATRON_CLAVE_AVISO = r"^(mds_nivel|ingesta_fallida|riego_sin_respuesta|cronograma):\d{1,6}:\d{4}-\d{2}-\d{2}:[a-z0-9_]{1,20}$"
 
 
 class ConfirmarAvisosEntrada(BaseModel):

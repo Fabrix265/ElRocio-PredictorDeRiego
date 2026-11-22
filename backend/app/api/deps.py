@@ -123,6 +123,11 @@ CABECERA_TOKEN_AGENTE = "X-Token-Agente"
 ROLES_COPILOTO = (RolUsuario.admin, RolUsuario.encargado, RolUsuario.subgerente)
 
 
+# Consultas periódicas del agente que no se auditan (n8n las hace cada 10 min y llenarían la
+# auditoría); lo que sí queda es cada envío confirmado (``aviso_enviado``).
+RUTAS_SIN_AUDITAR = ("/copiloto/avisos",)
+
+
 def _agente(db: Session, request: Request, contexto: ContextoPeticion):
     """El token de servicio de ``X-Token-Agente`` (401 si no es válido); ``None`` si no viene."""
     from app.services import agente_service
@@ -133,7 +138,8 @@ def _agente(db: Session, request: Request, contexto: ContextoPeticion):
     token = agente_service.autenticar(db, valor.strip())
     if token is None:
         raise NoAutenticado()
-    agente_service.registrar_consulta(db, token, request.method, request.url.path, contexto)
+    if not (request.method == "GET" and request.url.path.endswith(RUTAS_SIN_AUDITAR)):
+        agente_service.registrar_consulta(db, token, request.method, request.url.path, contexto)
     return token
 
 

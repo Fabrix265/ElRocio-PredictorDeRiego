@@ -6,6 +6,7 @@
 | ``GET /copiloto/resumen?modulo_id&fecha`` | agente · A · E · S |
 | ``GET /copiloto/alertas?modulo_id&fecha`` | agente · A · E · S |
 | ``GET /copiloto/plan?modulo_id&fecha`` | agente · A · E · S |
+| ``GET /copiloto/plan/texto?modulo_id&dia`` | agente · A · E · S |
 | ``GET /copiloto/agua?modulo_id&desde&hasta&turno`` | agente · A · E · S |
 | ``GET /copiloto/clima?modulo_id&desde&hasta`` | agente · A · E · S |
 | ``GET /copiloto/pronostico?dias`` | agente · A · E · S |
@@ -85,6 +86,18 @@ def plan(_lector: LectorCopiloto, db: DbSesion, modulo_id: IdQuery = None, fecha
     """Plan de un día por turno (publicado o, si no hay, el borrador). ``null`` si no se generó."""
     copiloto_service.datos_service.validar_fechas(fecha)
     return copiloto_service.plan_del_dia(db, copiloto_service.modulo_de(db, modulo_id), fecha or hoy_lima())
+
+
+@router.get("/plan/texto")
+def plan_texto(
+    _lector: LectorCopiloto,
+    db: DbSesion,
+    modulo_id: IdQuery = None,
+    dia: Annotated[str, Query(max_length=20, pattern=r"^[\w ./-]*$",
+                              description="hoy, mañana, un día de la semana, 23/11 o 2026-11-23")] = "hoy",
+) -> dict[str, Any]:
+    """El plan completo de un día como texto listo para Telegram (comando ``/plan`` del bot)."""
+    return avisos_service.plan_en_texto(db, copiloto_service.modulo_de(db, modulo_id), dia)
 
 
 @router.get("/agua")

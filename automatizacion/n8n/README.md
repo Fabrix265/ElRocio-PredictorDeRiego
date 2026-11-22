@@ -4,7 +4,7 @@ Flujos de n8n sobre la API del sistema de riego:
 
 | Flujo | Archivo | Qué hace |
 |---|---|---|
-| Avisos por Telegram | `flujos/avisos.json` | Cada hora (de 06:50 a 21:50) pide los **avisos** pendientes y los manda apenas pasan: el MDS cambia de nivel, falla la ingesta de datos o el suelo no responde al riego. No usa el modelo y nunca repite un aviso (ver [Avisos](#avisos-por-telegram)). |
+| Avisos por Telegram | `flujos/avisos.json` | Cada 10 minutos (de 05:00 a 22:50) pide los **avisos** pendientes y los manda apenas pasan: el MDS cambia de nivel, falla la ingesta de datos, el suelo no responde al riego o se genera, corrige, publica o anula un cronograma (con el plan completo). No usa el modelo y nunca repite un aviso (ver [Avisos](#avisos-por-telegram)). |
 | Informe diario | `flujos/informe_diario.json` | A las 06:15 (Lima) pide `/copiloto/resumen`, Claude redacta el informe y lo envía por Telegram. Las alertas de severidad alta se vuelven **sugerencias pendientes** en la app. |
 | Agente de Telegram | `flujos/agente_telegram.json` | Responde preguntas por Telegram con datos reales (herramientas HTTP de solo lectura). Puede dejar sugerencias pendientes, nunca publicar ni cambiar el riego. |
 | Chat de prueba | `flujos/agente_chat_prueba.json` | El mismo agente, para conversar desde el editor de n8n (botón **Open chat**) sin Telegram. Útil para probar y para la demo. |
@@ -95,12 +95,13 @@ Las claves solo se guardan en n8n (cifradas). No van en los JSON ni en el repo.
 3. Edita el nodo **Configuración** de cada flujo:
    - `api_url`: URL base de la API sin `/api/v1` (p. ej. `https://riego.tu-dominio.pe`).
    - `chat_ids` (informe) y `chat_ids_autorizados` (agente): IDs de chat de Telegram separados por coma.
-   - `chat_ids_campo` y `chat_ids_sistema` (avisos): quién recibe los avisos de campo (MDS y riego) y los
-     del sistema (ingesta de datos). Si `chat_ids_sistema` queda vacío, esos avisos van a los de campo.
+   - `chat_ids_campo`, `chat_ids_sistema` y `chat_ids_cronogramas` (avisos): quién recibe los avisos de
+     campo (MDS y riego), los del sistema (ingesta de datos) y los de cronogramas (generar, corregir,
+     publicar…). Si `chat_ids_sistema` o `chat_ids_cronogramas` quedan vacíos, esos avisos van a los de campo.
 4. Para saber el ID de chat de cada persona, activa el flujo del agente y pídele que escriba al bot.
    Si no está autorizado, el bot le responde con su ID. Agrégalo a la lista.
-5. Activa los flujos. Para probar el informe sin esperar a las 06:15, o los avisos sin esperar a la
-   siguiente hora, usa **Execute workflow**.
+5. Activa los flujos. Para probar el informe sin esperar a las 06:15, o los avisos sin esperar 10
+   minutos, usa **Execute workflow**.
 
 ### Modelo
 
@@ -137,8 +138,12 @@ Si algún nodo no se importa bien en tu versión de n8n, puedes rehacerlo a mano
 nodos *HTTP Request Tool* con la credencial `Token agente copiloto` y los parámetros llenados
 con `$fromAI(...)`.
 
-Comandos del bot (los resuelve el flujo; `/start`, `/ayuda` y `/avisos` no gastan el modelo): `/hoy`,
-`/manana`, `/alertas`, `/semana`, `/turno TE03`, `/sugerencias`, `/avisos`, `/ayuda`.
+Comandos del bot (los resuelve el flujo; `/start`, `/ayuda`, `/avisos` y `/plan` no gastan el modelo):
+`/hoy`, `/manana`, `/alertas`, `/semana`, `/turno TE03`, `/sugerencias`, `/avisos`, `/plan`, `/ayuda`.
+
+`/plan` muestra el plan completo de un día (por turno y ciclo, con m³, m³/ha, horario y ETo) con el texto
+que arma `GET /copiloto/plan/texto?dia=`. Entiende `hoy`, `mañana`, `ayer`, `pasado mañana`, un día de la
+semana (`/plan jueves`), `23/11`, `23/11/2026` o `2026-11-23`. Sin año, toma la fecha más cercana a hoy.
 
 ## Avisos por Telegram
 
@@ -150,13 +155,31 @@ Los calcula el backend (`app/services/avisos_service.py`, con pruebas) en `GET /
 | `mds_nivel` | campo | El MDS del último día con dato cambió de nivel frente al día anterior: sube a estrés moderado (≥ 190 µm), alto (≥ 220) o crítico (≥ 250), o baja. |
 | `ingesta_fallida` | sistema | 30 min después de `INGESTA_HORA`, una fuente de la ingesta programada de hoy falló, quedó incompleta o no corrió. También si corrió, pero el clima o Phytech no llegan a ayer, o el riego registrado tiene 2 o más días de atraso. |
 | `riego_sin_respuesta` | campo | Se regó, pero la humedad de la zona radicular casi no subió: posible gotero tapado, válvula o fuga. Trae m³, m³/ha y ETo. |
+| `cronograma` | cronogramas | En las últimas 12 horas se generó, regeneró, corrigió, publicó, publicó con cambios, anuló o descartó un cronograma, o se pidió o mantuvo una corrección. |
+
+Los avisos de cronogramas traen:
+- **Quién y cuándo:** quién lo hizo y a qué hora.
+- **La versión:** su origen, el estado actual del cronograma y si es preliminar o se calculó con datos incompletos.
+- **El motivo**, si lo hay.
+- **La ETo**: del día anterior y la pronosticada.
+- **El plan completo** por turno y por ciclo: horario, m³ y m³/ha.
+- **Qué cambió** frente a la versión anterior (al regenerar, corregir o publicar cambios): el total y cada turno, con su %.
+- **El enlace** al cronograma en la app.
+
+Una generación de varios días llega como un solo aviso, con cada día por turno. Ver, abrir o atender una
+corrección no avisa: la atención la sigue el aviso de «cambios publicados».
 
 Cada aviso tiene una clave (`código:módulo:fecha:detalle`). El flujo pide los pendientes
-(`?pendientes=true`), arma un mensaje por chat, lo manda y confirma las claves con
-`POST /copiloto/avisos/confirmar`, que queda en la auditoría como «Aviso del copiloto enviado por
-Telegram». Un aviso confirmado no vuelve a salir. Si Telegram falla, no se confirma y sale en la
-siguiente hora. Con `/avisos` el bot muestra los avisos de hoy (enviados o no), y la vista Copiloto de
-la app también los muestra.
+(`?pendientes=true`), manda un mensaje por aviso y por chat, y confirma las claves con
+`POST /copiloto/avisos/confirmar`. La confirmación queda en la auditoría como «Aviso del copiloto enviado
+por Telegram», y un aviso confirmado no vuelve a salir. Si Telegram falla, no se confirma y sale en la
+siguiente consulta.
+
+La consulta periódica (`GET /copiloto/avisos`) no se audita como «consulta del agente», porque cada
+10 minutos llenaría la auditoría.
+
+Con `/avisos`, el bot lista los avisos recientes (enviados o no) con una línea de resumen cada uno. La
+vista Copiloto de la app los muestra con el detalle desplegable y un enlace al cronograma.
 
 Los umbrales son los del semáforo de la app (`COPILOTO_MDS_*`). La espera tras la ingesta se cambia con
 `COPILOTO_GRACIA_INGESTA_MIN`.
