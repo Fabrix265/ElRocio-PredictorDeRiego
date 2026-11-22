@@ -109,6 +109,8 @@ class Settings(BaseSettings):
     copiloto_margen_estres_suelo: float = Field(default=0.5, ge=0)
     # Desde esta hora (Lima) el plan de mañana sin publicar pasa de «info» a alerta.
     copiloto_hora_plan_manana: int = Field(default=16, ge=0, le=23)
+    # Minutos después de INGESTA_HORA para avisar por Telegram si la ingesta programada falló.
+    copiloto_gracia_ingesta_min: int = Field(default=30, ge=0, le=600)
 
     @field_validator("ingesta_hora")
     @classmethod

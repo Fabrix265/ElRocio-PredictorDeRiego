@@ -30,6 +30,12 @@ assert.equal(destinatarios({ text: "x".repeat(6000) }).length, 4000); ok++; // l
 assert.match(destinatarios({ error: "modelo caído" }), /^No pude redactar el informe/); ok++;
 assert.equal(informe.nodes.find((n) => n.name === "Redactar informe").onError, "continueRegularOutput"); ok++;
 
+// --- Disparadores con webhookId fijo (sin él, n8n no registra el webhook de Telegram al publicar)
+const chatPrueba = cargar("agente_chat_prueba.json");
+for (const [flujo, nombre] of [[agente, "Mensaje de Telegram"], [chatPrueba, "Chat de prueba"]]) {
+  assert.match(flujo.nodes.find((n) => n.name === nombre).webhookId ?? "", /^[0-9a-f-]{36}$/); ok++;
+}
+
 // --- Respuesta del agente (expresión del nodo «Responder»)
 const nodoAgente = agente.nodes.find((n) => n.name === "Agente copiloto");
 assert.equal(nodoAgente.onError, "continueRegularOutput"); ok++;
@@ -74,6 +80,44 @@ assert.match(preparar("/turno TE03").pregunta, /turno TE03/);
 assert.equal(preparar("¿Por qué subió el TE02?").pregunta, "¿Por qué subió el TE02?");
 assert.equal(preparar("¿Por qué subió el TE02?").tipo, "agente");
 assert.equal(preparar("x".repeat(5000)).pregunta.length, 1000);
-ok += 11;
+assert.equal(preparar("/avisos").tipo, "avisos");
+assert.equal(preparar("/avisos@GR_riegoBOT").tipo, "avisos");
+assert.equal(preparar("/avisos", 999).tipo, "no_autorizado");
+ok += 14;
+
+// --- /avisos del bot (Formatear avisos)
+const formatear = (entrada) => correr(codigo(agente, "Formatear avisos"), {
+  entrada, nodos: { Preparar: { chat_id: "111" } },
+})[0].json;
+const avisoMds = { clave: "mds_nivel:1:2026-11-07:alto", icono: "🟠", titulo: "El MDS subió a estrés alto",
+  detalle: "El 07/11/2026 el MDS fue de 241 µm.", destino: "campo", enviado: true };
+const avisoIngesta = { clave: "ingesta_fallida:1:2026-11-08:weatherlink", icono: "🔴",
+  titulo: "La ingesta de WeatherLink (clima) falló", detalle: "Error: HTTP 503.", destino: "sistema", enviado: false };
+const conAvisos = formatear({ avisos: [avisoMds, avisoIngesta] });
+assert.equal(conAvisos.chat_id, "111");
+assert.match(conAvisos.texto, /^Avisos de hoy:\n\n🟠 El MDS subió a estrés alto \(ya avisado\)\nEl 07\/11\/2026/);
+assert.match(conAvisos.texto, /🔴 La ingesta de WeatherLink \(clima\) falló\nError: HTTP 503\.$/);
+assert.match(formatear({ avisos: [] }).texto, /^No hay avisos por ahora/);
+assert.match(formatear({ error: "timeout" }).texto, /^No pude consultar los avisos/);
+ok += 4;
+
+// --- Flujo de avisos (Mensajes por chat)
+// Sin modelo: un solo archivo para Anthropic y Devlum.
+const flujoAvisos = JSON.parse(readFileSync(new URL("../flujos/avisos.json", import.meta.url), "utf8"));
+const mensajes = (cfg, avisos) => correr(codigo(flujoAvisos, "Mensajes"), {
+  entrada: { modulo: { nombre: "ENSUEÑO 1 MODULO 5" }, avisos }, nodos: { "Configuración": cfg },
+}).map((m) => m.json);
+const separados = mensajes({ chat_ids_campo: "111, 222", chat_ids_sistema: "333" }, [avisoMds, avisoIngesta]);
+assert.deepEqual(separados.map((m) => [m.chat_id, m.claves]), [
+  ["111", [avisoMds.clave]], ["222", [avisoMds.clave]], ["333", [avisoIngesta.clave]]]);
+assert.equal(separados[0].texto, "Aviso del copiloto de riego · ENSUEÑO 1 MODULO 5\n\n🟠 El MDS subió a estrés alto\nEl 07/11/2026 el MDS fue de 241 µm.");
+const juntos = mensajes({ chat_ids_campo: "111", chat_ids_sistema: "" }, [avisoMds, avisoIngesta]);
+assert.deepEqual(juntos.map((m) => [m.chat_id, m.claves.length]), [["111", 2]]);  // sin chats de sistema: van a campo
+assert.deepEqual(mensajes({ chat_ids_campo: "", chat_ids_sistema: "" }, [avisoMds]), []);  // nada que mandar ni confirmar
+assert.deepEqual(mensajes({ chat_ids_campo: "111" }, []), []);
+const largo = mensajes({ chat_ids_campo: "111" }, [{ ...avisoMds, detalle: "x".repeat(6000) }]);
+assert.equal(largo[0].texto.length, 4000);
+assert.equal(flujoAvisos.nodes.find((n) => n.name === "Confirmar enviados").executeOnce, true);
+ok += 7;
 
 console.log(`OK: ${ok} comprobaciones de los nodos Code`);

@@ -1,0 +1,224 @@
+{
+  "name": "Copiloto · avisos por Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "50 6-21 * * *"
+            }
+          ]
+        }
+      },
+      "id": "fa53889e-ca2f-522b-b521-e7030ecda771",
+      "name": "Cada hora",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "98091941-36ca-5def-950e-9de3576f9c45",
+              "name": "api_url",
+              "value": "https://riego.tu-dominio.pe",
+              "type": "string"
+            },
+            {
+              "id": "2b3206ad-0933-5673-861d-315ecb97fba2",
+              "name": "chat_ids_campo",
+              "value": "ID_CHAT_ENCARGADO,ID_CHAT_SUBGERENTE",
+              "type": "string"
+            },
+            {
+              "id": "1805cec7-be6b-5302-9c71-65a8befc87aa",
+              "name": "chat_ids_sistema",
+              "value": "ID_CHAT_ADMIN",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "be97a2e5-ed79-5d00-a348-5cb943a28d5c",
+      "name": "Configuración",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Configuración').first().json.api_url }}/api/v1/copiloto/avisos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "pendientes",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "fbb0201e-bdd3-5ce8-a142-f8b9344408aa",
+      "name": "Avisos pendientes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR",
+          "name": "Token agente copiloto"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Un mensaje por chat con sus avisos nuevos: «campo» (MDS y riego) y «sistema» (ingesta de datos;\n// si chat_ids_sistema está vacío, van a los de campo). Sin chats configurados no se manda ni se confirma nada.\nconst cfg = $('Configuración').first().json;\nconst lista = (ids) => String(ids || '').split(',').map((s) => s.trim()).filter(Boolean);\nconst campo = lista(cfg.chat_ids_campo);\nconst sistema = lista(cfg.chat_ids_sistema).length ? lista(cfg.chat_ids_sistema) : campo;\nconst r = $input.first().json;\nconst porChat = new Map();\nfor (const a of r.avisos || []) {\n  for (const chat_id of (a.destino === 'sistema' ? sistema : campo)) {\n    if (!porChat.has(chat_id)) porChat.set(chat_id, []);\n    porChat.get(chat_id).push(a);\n  }\n}\nconst cabecera = 'Aviso del copiloto de riego' + (r.modulo && r.modulo.nombre ? ` · ${r.modulo.nombre}` : '');\nreturn [...porChat].map(([chat_id, avisos]) => ({ json: {\n  chat_id,\n  claves: avisos.map((a) => a.clave),\n  texto: [cabecera, ...avisos.map((a) => `${a.icono} ${a.titulo}\\n${a.detalle}`)].join('\\n\\n').slice(0, 4000),\n} }));"
+      },
+      "id": "216061de-3d64-55e4-a00d-9edc63d3d146",
+      "name": "Mensajes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.texto }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "14c98a76-c8ba-54aa-b759-08b33fdb6912",
+      "name": "Enviar aviso",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR",
+          "name": "Bot Telegram copiloto"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuración').first().json.api_url }}/api/v1/copiloto/avisos/confirmar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ claves: [...new Set($('Mensajes').all().flatMap((i) => i.json.claves))] }) }}",
+        "options": {}
+      },
+      "id": "d564908e-ba34-5f5c-8717-4e98c987d127",
+      "name": "Confirmar enviados",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR",
+          "name": "Token agente copiloto"
+        }
+      },
+      "executeOnce": true
+    }
+  ],
+  "connections": {
+    "Cada hora": {
+      "main": [
+        [
+          {
+            "node": "Configuración",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuración": {
+      "main": [
+        [
+          {
+            "node": "Avisos pendientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisos pendientes": {
+      "main": [
+        [
+          {
+            "node": "Mensajes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensajes": {
+      "main": [
+        [
+          {
+            "node": "Enviar aviso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar aviso": {
+      "main": [
+        [
+          {
+            "node": "Confirmar enviados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Lima",
+    "saveDataSuccessExecution": "all"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

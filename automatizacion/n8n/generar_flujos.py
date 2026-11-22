@@ -31,6 +31,7 @@ DEVLUM_URL = "https://ai.devlumlabs.com/api/v1"
 PROVEEDORES = ("anthropic", "devlum")
 CONFIG = "Configuración"
 _proveedor = "anthropic"  # lo fija main() para cada juego de flujos
+DISPARADORES_WEBHOOK = {"n8n-nodes-base.telegramTrigger", "@n8n/n8n-nodes-langchain.chatTrigger"}
 
 
 def _id(nombre: str) -> str:
@@ -41,6 +42,10 @@ def nodo(nombre: str, tipo: str, version: float, posicion: tuple[int, int], para
          credenciales: dict[str, Any] | None = None) -> dict[str, Any]:
     salida = {"parameters": parametros, "id": _id(nombre), "name": nombre, "type": tipo, "typeVersion": version,
               "position": list(posicion)}
+    if tipo in DISPARADORES_WEBHOOK:
+        # Sin webhookId, n8n arma la ruta con el nombre del nodo (con espacios) y no la registra al
+        # publicar: Telegram recibe 404. El editor lo asigna solo; en un JSON importado debe venir.
+        salida["webhookId"] = _id(f"webhook-{nombre}")
     if credenciales:
         salida["credentials"] = credenciales
     return salida
@@ -170,7 +175,7 @@ def informe_diario() -> dict[str, Any]:
 
 # --- Flujo 2: agente conversacional por Telegram ------------------------------------
 
-PREPARAR_JS = f"""// Autoriza el chat, atiende /start y /ayuda sin gastar el modelo y traduce los comandos.
+PREPARAR_JS = f"""// Autoriza el chat, atiende /start, /ayuda y /avisos sin gastar el modelo y traduce los comandos.
 const msg = $('Mensaje de Telegram').first().json.message || {{}};
 const cfg = $('{CONFIG}').first().json;
 const autorizados = String(cfg.chat_ids_autorizados || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -191,7 +196,8 @@ else if (/^\\/(start|ayuda)\\b/i.test(texto)) tipo = 'ayuda';
 else {{
   const partes = texto.split(/\\s+/);
   const comando = partes[0].split('@')[0].toLowerCase();
-  if (COMANDOS[comando]) pregunta = COMANDOS[comando];
+  if (comando === '/avisos') tipo = 'avisos';
+  else if (COMANDOS[comando]) pregunta = COMANDOS[comando];
   else if (comando === '/turno') pregunta = `Dame el plan de hoy del turno ${{partes[1] || ''}} y su agua de los últimos 7 días.`;
 }}
 return [{{ json: {{ tipo, chat_id, pregunta }} }}];"""
@@ -204,12 +210,26 @@ AYUDA = (
     "• /alertas – alertas del día\\n"
     "• /semana – agua de los últimos 7 días\\n"
     "• /turno TE03 – detalle de un turno\\n"
-    "• /sugerencias – pendientes de aprobación\\n\\n"
+    "• /sugerencias – pendientes de aprobación\\n"
+    "• /avisos – avisos del día (MDS, ingesta de datos, riego)\\n\\n"
     "También puedes preguntar libre, por ejemplo:\\n"
     "• ¿Por qué el TE02 tiene más agua hoy?\\n"
     "• ¿Hubo estrés esta semana?\\n"
     "• ¿Qué ETo se espera el jueves?"
 )
+
+AVISOS_BOT_JS = f"""// /avisos: los avisos de hoy (ya enviados o pendientes), sin gastar el modelo.
+const r = $input.first().json;
+const chat_id = $('Preparar').first().json.chat_id;
+let texto;
+if (r.error || !Array.isArray(r.avisos)) {{
+  texto = 'No pude consultar los avisos en este momento. Intenta de nuevo en unos minutos.';
+}} else if (!r.avisos.length) {{
+  texto = 'No hay avisos por ahora. Te escribo apenas el MDS cambie de nivel, falle la ingesta de datos o el suelo no responda al riego.';
+}} else {{
+  texto = ['Avisos de hoy:', ...r.avisos.map((a) => `${{a.icono}} ${{a.titulo}}${{a.enviado ? ' (ya avisado)' : ''}}\\n${{a.detalle}}`)].join('\\n\\n');
+}}
+return [{{ json: {{ chat_id, texto: texto.slice(0, {LIMITE_TELEGRAM}) }} }}];"""
 
 HOY = "{{ $now.setZone('America/Lima').toFormat('cccc d \\'de\\' LLLL \\'de\\' yyyy', { locale: 'es' }) }}"
 HOY_ISO = "{{ $now.setZone('America/Lima').toISODate() }}"
@@ -324,7 +344,7 @@ def agente_telegram() -> dict[str, Any]:
                                                 "operator": {"type": "string", "operation": "equals"}}],
                                 "combinator": "and"},
                  "renameOutput": True, "outputKey": t}
-                for t in ("agente", "ayuda", "sin_texto", "no_autorizado")
+                for t in ("agente", "ayuda", "sin_texto", "no_autorizado", "avisos")
             ]},
             "options": {},
         }),
@@ -336,14 +356,22 @@ def agente_telegram() -> dict[str, Any]:
         telegram("No autorizado", (920, 340), "={{ $json.chat_id }}",
                  "=Este chat no está autorizado. Pídele al administrador que agregue tu ID de chat: "
                  "{{ $json.chat_id }}"),
+        {**nodo("Avisos de hoy", "n8n-nodes-base.httpRequest", 4.2, (920, 480), {
+            "url": url("/copiloto/avisos"), "authentication": "genericCredentialType",
+            "genericAuthType": "httpHeaderAuth", "options": {"timeout": 60000},
+        }, CRED_TOKEN), "onError": "continueRegularOutput"},
+        nodo("Formatear avisos", "n8n-nodes-base.code", 2, (1140, 480), {"jsCode": AVISOS_BOT_JS}),
+        telegram("Responder avisos", (1360, 480), "={{ $json.chat_id }}", "={{ $json.texto }}"),
     ]
     conexiones: dict[str, Any] = {
         "Mensaje de Telegram": {"main": [[conexion(CONFIG)]]},
         CONFIG: {"main": [[conexion("Preparar")]]},
         "Preparar": {"main": [[conexion("¿Qué hacer?")]]},
         "¿Qué hacer?": {"main": [[conexion("Agente copiloto")], [conexion("Ayuda")], [conexion("Solo texto")],
-                                 [conexion("No autorizado")]]},
+                                 [conexion("No autorizado")], [conexion("Avisos de hoy")]]},
         "Agente copiloto": {"main": [[conexion("Responder")]]},
+        "Avisos de hoy": {"main": [[conexion("Formatear avisos")]]},
+        "Formatear avisos": {"main": [[conexion("Responder avisos")]]},
         **conexiones_agente,
     }
     return flujo("Copiloto · agente de Telegram", nodos, conexiones)
@@ -367,8 +395,74 @@ def agente_chat_prueba() -> dict[str, Any]:
     return flujo("Copiloto · chat de prueba", nodos, conexiones)
 
 
+# --- Flujo 4: avisos por Telegram (sin modelo) ------------------------------------------
+
+MENSAJES_JS = f"""// Un mensaje por chat con sus avisos nuevos: «campo» (MDS y riego) y «sistema» (ingesta de datos;
+// si chat_ids_sistema está vacío, van a los de campo). Sin chats configurados no se manda ni se confirma nada.
+const cfg = $('{CONFIG}').first().json;
+const lista = (ids) => String(ids || '').split(',').map((s) => s.trim()).filter(Boolean);
+const campo = lista(cfg.chat_ids_campo);
+const sistema = lista(cfg.chat_ids_sistema).length ? lista(cfg.chat_ids_sistema) : campo;
+const r = $input.first().json;
+const porChat = new Map();
+for (const a of r.avisos || []) {{
+  for (const chat_id of (a.destino === 'sistema' ? sistema : campo)) {{
+    if (!porChat.has(chat_id)) porChat.set(chat_id, []);
+    porChat.get(chat_id).push(a);
+  }}
+}}
+const cabecera = 'Aviso del copiloto de riego' + (r.modulo && r.modulo.nombre ? ` · ${{r.modulo.nombre}}` : '');
+return [...porChat].map(([chat_id, avisos]) => ({{ json: {{
+  chat_id,
+  claves: avisos.map((a) => a.clave),
+  texto: [cabecera, ...avisos.map((a) => `${{a.icono}} ${{a.titulo}}\\n${{a.detalle}}`)].join('\\n\\n').slice(0, {LIMITE_TELEGRAM}),
+}} }}));"""
+
+CLAVES_ENVIADAS = "={{ JSON.stringify({ claves: [...new Set($('Mensajes').all().flatMap((i) => i.json.claves))] }) }}"
+
+
+def avisos() -> dict[str, Any]:
+    """Cada hora (06:50 a 21:50) pide los avisos pendientes, los manda y confirma los enviados.
+
+    No usa el modelo: el texto lo arma el backend. Si Telegram falla no se confirma y el aviso sale
+    en la siguiente consulta."""
+    nodos = [
+        nodo("Cada hora", "n8n-nodes-base.scheduleTrigger", 1.2, (0, 0),
+             {"rule": {"interval": [{"field": "cronExpression", "expression": "50 6-21 * * *"}]}}),
+        nodo(CONFIG, "n8n-nodes-base.set", 3.4, (220, 0), asignaciones([
+            ("api_url", API_URL_EJEMPLO, "string"),
+            ("chat_ids_campo", "ID_CHAT_ENCARGADO,ID_CHAT_SUBGERENTE", "string"),
+            ("chat_ids_sistema", "ID_CHAT_ADMIN", "string"),
+        ])),
+        nodo("Avisos pendientes", "n8n-nodes-base.httpRequest", 4.2, (440, 0), {
+            "url": url("/copiloto/avisos"), "authentication": "genericCredentialType",
+            "genericAuthType": "httpHeaderAuth", "sendQuery": True,
+            "queryParameters": {"parameters": [{"name": "pendientes", "value": "true"}]},
+            "options": {"timeout": 60000},
+        }, CRED_TOKEN),
+        nodo("Mensajes", "n8n-nodes-base.code", 2, (660, 0), {"jsCode": MENSAJES_JS}),
+        telegram("Enviar aviso", (880, 0), "={{ $json.chat_id }}", "={{ $json.texto }}"),
+        {**nodo("Confirmar enviados", "n8n-nodes-base.httpRequest", 4.2, (1100, 0), {
+            "method": "POST", "url": url("/copiloto/avisos/confirmar"), "authentication": "genericCredentialType",
+            "genericAuthType": "httpHeaderAuth", "sendBody": True, "specifyBody": "json",
+            "jsonBody": CLAVES_ENVIADAS, "options": {},
+        }, CRED_TOKEN), "executeOnce": True},
+    ]
+    conexiones = {
+        "Cada hora": {"main": [[conexion(CONFIG)]]},
+        CONFIG: {"main": [[conexion("Avisos pendientes")]]},
+        "Avisos pendientes": {"main": [[conexion("Mensajes")]]},
+        "Mensajes": {"main": [[conexion("Enviar aviso")]]},
+        "Enviar aviso": {"main": [[conexion("Confirmar enviados")]]},
+    }
+    return flujo("Copiloto · avisos por Telegram", nodos, conexiones)
+
+
 def main() -> None:
     global _proveedor
+    destino = AQUI / "flujos" / "avisos.json"  # sin modelo: el mismo para Anthropic y Devlum
+    destino.write_text(json.dumps(avisos(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"Escrito {destino} (6 nodos)")
     for proveedor in PROVEEDORES:
         _proveedor = proveedor
         destino = AQUI / "flujos" / ("" if proveedor == "anthropic" else proveedor)

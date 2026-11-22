@@ -54,6 +54,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   vi.spyOn(copilotoApi, "resumen").mockResolvedValue(RESUMEN);
   vi.spyOn(copilotoApi, "sugerencias").mockResolvedValue([SUGERENCIA]);
+  vi.spyOn(copilotoApi, "avisos").mockResolvedValue({ modulo: RESUMEN.modulo, generado_at: RESUMEN.generado_at, avisos: [] });
 });
 
 describe("Copiloto", () => {
@@ -78,6 +79,30 @@ describe("Copiloto", () => {
     await userEvent.type(within(dialogo).getByRole("textbox"), "Ya se revisó ayer");
     await userEvent.click(confirmar);
     expect(descartar).toHaveBeenCalledWith(3, "Ya se revisó ayer");
+  });
+
+  it("muestra los avisos por Telegram y si ya se enviaron", async () => {
+    vi.spyOn(copilotoApi, "avisos").mockResolvedValue({
+      modulo: RESUMEN.modulo, generado_at: RESUMEN.generado_at, avisos: [
+        { clave: "mds_nivel:1:2026-11-07:alto", codigo: "mds_nivel", severidad: "media", destino: "campo", icono: "🟠",
+          titulo: "El MDS subió a estrés alto", detalle: "El 07/11/2026 el MDS fue de 241 µm.", fecha: "2026-11-07",
+          enviado: true, valores: {} },
+        { clave: "ingesta_fallida:1:2026-11-08:weatherlink", codigo: "ingesta_fallida", severidad: "alta",
+          destino: "sistema", icono: "🔴", titulo: "La ingesta de WeatherLink (clima) falló", detalle: "Error: HTTP 503.",
+          fecha: "2026-11-08", enviado: false, valores: {} },
+      ],
+    });
+    montar();
+    const avisos = await screen.findByRole("list", { name: "Avisos" });
+    expect(within(avisos).getByText("El MDS subió a estrés alto")).toBeInTheDocument();
+    expect(within(avisos).getByText("Enviado por Telegram")).toBeInTheDocument();
+    expect(within(avisos).getByText("Por enviar")).toBeInTheDocument();
+    expect(within(avisos).getByText(/^Sistema · /)).toBeInTheDocument();
+  });
+
+  it("sin avisos lo dice", async () => {
+    montar();
+    expect(await screen.findByText("Sin avisos por ahora")).toBeInTheDocument();
   });
 
   it("el subgerente ve las sugerencias pero no las resuelve", async () => {

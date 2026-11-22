@@ -12,10 +12,12 @@
 | ``GET /copiloto/sugerencias?estado&modulo_id`` | agente · A · E · S |
 | ``POST /copiloto/sugerencias`` | solo el agente |
 | ``POST /copiloto/sugerencias/{id}/aprobar`` · ``/descartar`` | A · E |
+| ``GET /copiloto/avisos?modulo_id&pendientes`` | agente · A · E · S |
+| ``POST /copiloto/avisos/confirmar`` | solo el agente |
 
 El agente se autentica con ``X-Token-Agente`` (token de servicio, ver ``app.services.agente_service``);
-los usuarios, con su sesión. Todo es de solo lectura salvo las sugerencias, que nunca tocan
-cronogramas ni riego.
+los usuarios, con su sesión. Todo es de solo lectura salvo las sugerencias y la confirmación de
+avisos enviados, que nunca tocan cronogramas ni riego.
 """
 
 from __future__ import annotations
@@ -34,18 +36,19 @@ from app.api.deps import (
     lector_copiloto,
     solo_agente,
 )
-from app.core.tiempo import hoy_lima
+from app.core.tiempo import ahora_lima, hoy_lima
 from app.models import TokenServicio
 from app.repositories import copiloto as repo
 from app.repositories import riego as repo_riego
 from app.schemas.copiloto import (
+    ConfirmarAvisosEntrada,
     EstadoSugerencia,
     ResolverEntrada,
     SugerenciaCreada,
     SugerenciaEntrada,
     SugerenciaSalida,
 )
-from app.services import copiloto_service, sugerencia_service
+from app.services import avisos_service, copiloto_service, sugerencia_service
 from app.services.copiloto_service import Lector
 
 router = APIRouter(prefix="/copiloto")
@@ -141,3 +144,22 @@ def descartar(sugerencia_id: IdPath, datos: ResolverEntrada, usuario: AdminEncar
     fila = sugerencia_service.resolver(db, sugerencia_id, aprobar=False, comentario=datos.comentario,
                                        actor=usuario, contexto=contexto)
     return sugerencia_service.salidas(db, [fila])[0]
+
+
+@router.get("/avisos")
+def avisos(_lector: LectorCopiloto, db: DbSesion, modulo_id: IdQuery = None,
+           pendientes: Annotated[bool, Query(description="Solo los que aún no se mandaron")] = False) -> dict[str, Any]:
+    """Avisos para mandar apenas pasan: el MDS cambia de nivel, la ingesta programada falló o el
+    suelo no respondió al riego. Cada uno trae ``enviado`` (si n8n ya confirmó su envío)."""
+    modulo = copiloto_service.modulo_de(db, modulo_id)
+    lista = avisos_service.avisos(db, modulo)
+    if pendientes:
+        lista = [a for a in lista if not a["enviado"]]
+    return {"modulo": {"id": modulo.id, "codigo": modulo.codigo, "nombre": modulo.nombre},
+            "generado_at": ahora_lima().isoformat(timespec="seconds"), "avisos": lista}
+
+
+@router.post("/avisos/confirmar")
+def confirmar_avisos(datos: ConfirmarAvisosEntrada, token: Agente, db: DbSesion, contexto: Contexto) -> dict[str, int]:
+    """n8n confirma los avisos que ya mandó por Telegram: no vuelven a salir como pendientes."""
+    return avisos_service.confirmar(db, datos.claves, token=token, contexto=contexto)

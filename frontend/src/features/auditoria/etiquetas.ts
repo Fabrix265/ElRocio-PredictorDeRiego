@@ -47,6 +47,7 @@ const ACCIONES: Record<string, string> = {
   sugerencia_creada: "Sugerencia del copiloto creada",
   sugerencia_aprobada: "Sugerencia del copiloto aprobada",
   sugerencia_descartada: "Sugerencia del copiloto descartada",
+  aviso_enviado: "Aviso del copiloto enviado por Telegram",
 };
 
 const ENTIDADES: Record<string, string> = {
@@ -59,6 +60,7 @@ const ENTIDADES: Record<string, string> = {
   exportacion: "Exportación",
   token_servicio: "Token del agente",
   copiloto_sugerencia: "Sugerencia del copiloto",
+  copiloto_aviso: "Aviso del copiloto",
 };
 
 const CAMPOS: Record<string, string> = {

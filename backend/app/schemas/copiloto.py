@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -61,3 +62,23 @@ class SugerenciaSalida(BaseModel):
 
 class SugerenciaCreada(SugerenciaSalida):
     duplicada: bool = Field(description="True si ya había una pendiente igual (no se creó otra)")
+
+
+# código:módulo:fecha:detalle (largo máximo 58: cabe en auditoria.entidad_id, de 60).
+PATRON_CLAVE_AVISO = r"^(mds_nivel|ingesta_fallida|riego_sin_respuesta):\d{1,6}:\d{4}-\d{2}-\d{2}:[a-z0-9_]{1,20}$"
+
+
+class ConfirmarAvisosEntrada(BaseModel):
+    """Claves de los avisos que n8n ya mandó por Telegram."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claves: list[str] = Field(min_length=1, max_length=50)
+
+    @field_validator("claves")
+    @classmethod
+    def _claves_validas(cls, claves: list[str]) -> list[str]:
+        invalidas = [c for c in claves if not re.match(PATRON_CLAVE_AVISO, c)]
+        if invalidas:
+            raise ValueError(f"Clave de aviso inválida: {str(invalidas[0])[:80]}")
+        return claves

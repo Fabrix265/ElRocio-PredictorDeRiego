@@ -16,6 +16,7 @@
         0,
         0
       ],
+      "webhookId": "416256aa-3904-55ae-8c09-8148b566f66c",
       "credentials": {
         "telegramApi": {
           "id": "REEMPLAZAR",
@@ -54,7 +55,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Autoriza el chat, atiende /start y /ayuda sin gastar el modelo y traduce los comandos.\nconst msg = $('Mensaje de Telegram').first().json.message || {};\nconst cfg = $('Configuración').first().json;\nconst autorizados = String(cfg.chat_ids_autorizados || '').split(',').map((s) => s.trim()).filter(Boolean);\nconst chat_id = String(msg.chat?.id ?? '');\nconst texto = String(msg.text || '').trim().slice(0, 1000);\nconst COMANDOS = {\n  '/hoy': 'Dame el plan de riego de hoy por turno, con m³, m³/ha y la ETo.',\n  '/manana': 'Dame el plan de riego de mañana por turno, con m³, m³/ha y la ETo.',\n  '/alertas': '¿Qué alertas hay hoy y qué conviene revisar?',\n  '/semana': '¿Cuánta agua regamos en los últimos 7 días frente a lo propuesto, por turno?',\n  '/sugerencias': '¿Qué sugerencias están pendientes de aprobación?',\n};\nlet tipo = 'agente';\nlet pregunta = texto;\nif (!autorizados.includes(chat_id)) tipo = 'no_autorizado';\nelse if (!texto) tipo = 'sin_texto';\nelse if (/^\\/(start|ayuda)\\b/i.test(texto)) tipo = 'ayuda';\nelse {\n  const partes = texto.split(/\\s+/);\n  const comando = partes[0].split('@')[0].toLowerCase();\n  if (COMANDOS[comando]) pregunta = COMANDOS[comando];\n  else if (comando === '/turno') pregunta = `Dame el plan de hoy del turno ${partes[1] || ''} y su agua de los últimos 7 días.`;\n}\nreturn [{ json: { tipo, chat_id, pregunta } }];"
+        "jsCode": "// Autoriza el chat, atiende /start, /ayuda y /avisos sin gastar el modelo y traduce los comandos.\nconst msg = $('Mensaje de Telegram').first().json.message || {};\nconst cfg = $('Configuración').first().json;\nconst autorizados = String(cfg.chat_ids_autorizados || '').split(',').map((s) => s.trim()).filter(Boolean);\nconst chat_id = String(msg.chat?.id ?? '');\nconst texto = String(msg.text || '').trim().slice(0, 1000);\nconst COMANDOS = {\n  '/hoy': 'Dame el plan de riego de hoy por turno, con m³, m³/ha y la ETo.',\n  '/manana': 'Dame el plan de riego de mañana por turno, con m³, m³/ha y la ETo.',\n  '/alertas': '¿Qué alertas hay hoy y qué conviene revisar?',\n  '/semana': '¿Cuánta agua regamos en los últimos 7 días frente a lo propuesto, por turno?',\n  '/sugerencias': '¿Qué sugerencias están pendientes de aprobación?',\n};\nlet tipo = 'agente';\nlet pregunta = texto;\nif (!autorizados.includes(chat_id)) tipo = 'no_autorizado';\nelse if (!texto) tipo = 'sin_texto';\nelse if (/^\\/(start|ayuda)\\b/i.test(texto)) tipo = 'ayuda';\nelse {\n  const partes = texto.split(/\\s+/);\n  const comando = partes[0].split('@')[0].toLowerCase();\n  if (comando === '/avisos') tipo = 'avisos';\n  else if (COMANDOS[comando]) pregunta = COMANDOS[comando];\n  else if (comando === '/turno') pregunta = `Dame el plan de hoy del turno ${partes[1] || ''} y su agua de los últimos 7 días.`;\n}\nreturn [{ json: { tipo, chat_id, pregunta } }];"
       },
       "id": "1cc6c7fa-7842-5234-9625-2d45c0980b4d",
       "name": "Preparar",
@@ -160,6 +161,29 @@
               },
               "renameOutput": true,
               "outputKey": "no_autorizado"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "3a7c9aa1-74e9-500c-9d4a-8c69dcc7a86b",
+                    "leftValue": "={{ $json.tipo }}",
+                    "rightValue": "avisos",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "avisos"
             }
           ]
         },
@@ -520,7 +544,7 @@
     {
       "parameters": {
         "chatId": "={{ $json.chat_id }}",
-        "text": "Hola, soy el copiloto de riego del MOD5. Te respondo con los datos del sistema.\n\nComandos:\n• /hoy – plan de hoy por turno\n• /manana – plan de mañana\n• /alertas – alertas del día\n• /semana – agua de los últimos 7 días\n• /turno TE03 – detalle de un turno\n• /sugerencias – pendientes de aprobación\n\nTambién puedes preguntar libre, por ejemplo:\n• ¿Por qué el TE02 tiene más agua hoy?\n• ¿Hubo estrés esta semana?\n• ¿Qué ETo se espera el jueves?",
+        "text": "Hola, soy el copiloto de riego del MOD5. Te respondo con los datos del sistema.\n\nComandos:\n• /hoy – plan de hoy por turno\n• /manana – plan de mañana\n• /alertas – alertas del día\n• /semana – agua de los últimos 7 días\n• /turno TE03 – detalle de un turno\n• /sugerencias – pendientes de aprobación\n• /avisos – avisos del día (MDS, ingesta de datos, riego)\n\nTambién puedes preguntar libre, por ejemplo:\n• ¿Por qué el TE02 tiene más agua hoy?\n• ¿Hubo estrés esta semana?\n• ¿Qué ETo se espera el jueves?",
         "additionalFields": {
           "appendAttribution": false
         }
@@ -578,6 +602,67 @@
       "position": [
         920,
         340
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR",
+          "name": "Bot Telegram copiloto"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Configuración').first().json.api_url }}/api/v1/copiloto/avisos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "98386936-4575-5b1d-a505-d2a609c17f95",
+      "name": "Avisos de hoy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        480
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR",
+          "name": "Token agente copiloto"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// /avisos: los avisos de hoy (ya enviados o pendientes), sin gastar el modelo.\nconst r = $input.first().json;\nconst chat_id = $('Preparar').first().json.chat_id;\nlet texto;\nif (r.error || !Array.isArray(r.avisos)) {\n  texto = 'No pude consultar los avisos en este momento. Intenta de nuevo en unos minutos.';\n} else if (!r.avisos.length) {\n  texto = 'No hay avisos por ahora. Te escribo apenas el MDS cambie de nivel, falle la ingesta de datos o el suelo no responda al riego.';\n} else {\n  texto = ['Avisos de hoy:', ...r.avisos.map((a) => `${a.icono} ${a.titulo}${a.enviado ? ' (ya avisado)' : ''}\\n${a.detalle}`)].join('\\n\\n');\n}\nreturn [{ json: { chat_id, texto: texto.slice(0, 4000) } }];"
+      },
+      "id": "97152436-0f84-5c65-bcb7-c3907b0f7aaf",
+      "name": "Formatear avisos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.texto }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "173f4c01-fe09-59d2-b416-e191b3a5ff4f",
+      "name": "Responder avisos",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1360,
+        480
       ],
       "credentials": {
         "telegramApi": {
@@ -650,6 +735,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Avisos de hoy",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -658,6 +750,28 @@
         [
           {
             "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisos de hoy": {
+      "main": [
+        [
+          {
+            "node": "Formatear avisos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear avisos": {
+      "main": [
+        [
+          {
+            "node": "Responder avisos",
             "type": "main",
             "index": 0
           }
