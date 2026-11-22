@@ -53,13 +53,16 @@ interface Marcas {
   desactualizado?: boolean | null;
 }
 
-/** Marcas de calidad de una versión (§3.3), con el texto de ayuda en el title. */
-export function MarcasVersion({ marcas, className }: { marcas: Marcas; className?: string }) {
+/**
+ * Marcas de calidad de una versión (§3.3), con el texto de ayuda en el title. Si se pasa `origen`
+ * y ya es «regenerado», no se repite la marca «Regenerado» (el texto de la versión ya lo dice).
+ */
+export function MarcasVersion({ marcas, className, origen }: { marcas: Marcas; className?: string; origen?: OrigenVersion }) {
   const lista: { clave: keyof typeof AYUDA_MARCA; texto: string; tono: TonoBadge; icono?: React.ReactNode }[] = [];
   if (marcas.desactualizado) lista.push({ clave: "desactualizado", texto: "Desactualizado", tono: "aviso", icono: <RefreshCw /> });
   if (marcas.datos_incompletos) lista.push({ clave: "datos_incompletos", texto: "Datos incompletos", tono: "aviso", icono: <AlertTriangle /> });
   if (marcas.preliminar) lista.push({ clave: "preliminar", texto: "Preliminar", tono: "info", icono: <Clock /> });
-  if (marcas.regenerado) lista.push({ clave: "regenerado", texto: "Regenerado", tono: "neutro" });
+  if (marcas.regenerado && origen !== "regenerado") lista.push({ clave: "regenerado", texto: "Regenerado", tono: "neutro" });
   if (lista.length === 0) return null;
   return (
     <ul className={className ?? "flex flex-wrap gap-1.5"} aria-label="Marcas de la versión">
@@ -83,6 +86,16 @@ export const formato = {
   min: (v: number | null | undefined) => (v == null ? "—" : `${fmt1.format(v)} min`),
   eto: (v: number | null | undefined) => (v == null ? "—" : fmt1.format(v)),
 };
+
+/**
+ * Nombre legible del modelo: "2026-11-21_rf_total" → "21/11/2026" (fecha de entrenamiento).
+ * Si el nombre no empieza con una fecha, se devuelve tal cual.
+ */
+export function fechaModelo(nombre: string | null | undefined): string {
+  if (!nombre) return "—";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(nombre);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : nombre;
+}
 
 /** "3,227.7 m³ · 51.37 m³/ha" (vacío si no hay m³). */
 export function textoAgua(m3: number | null | undefined, m3ha: number | null | undefined): string {

@@ -27,7 +27,8 @@ import {
   type VersionResumen,
 } from "../../services/cronogramas";
 import { useUsuario } from "../auth/AuthProvider";
-import { ETIQUETA_ESTADO, ETIQUETA_ORIGEN_VERSION, MarcasVersion, TONO_ESTADO, formato, totalesPlan } from "./etiquetas";
+import { ETIQUETA_ESTADO, ETIQUETA_ORIGEN_VERSION, MarcasVersion, TONO_ESTADO, fechaModelo, formato, totalesPlan } from "./etiquetas";
+import { textoEto, useEtoDiaAnterior } from "./useEtoDiaAnterior";
 import { BotonesExportar } from "./BotonesExportar";
 import { CalculoPulsos } from "./CalculoPulsos";
 import { Gantt } from "./Gantt";
@@ -132,11 +133,11 @@ export function TablaPorHora({ turnos, m3ha }: { turnos: TurnoCronograma[]; m3ha
   );
 }
 
-function ContenidoVersion({ version, orden, alOrdenar }: { version: VersionDetalle; orden: OrdenPlan; alOrdenar: (orden: OrdenPlan) => void }) {
+function ContenidoVersion({ version, orden, alOrdenar, eto }: { version: VersionDetalle; orden: OrdenPlan; alOrdenar: (orden: OrdenPlan) => void; eto?: string }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2 px-4 pt-3">
-        <MarcasVersion marcas={version} />
+        <MarcasVersion marcas={version} origen={version.origen} />
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-texto-2 sm:grid-cols-4">
           <div>
             <dt>Versión</dt>
@@ -153,11 +154,16 @@ function ContenidoVersion({ version, orden, alOrdenar }: { version: VersionDetal
           </div>
           <div>
             <dt>Agua total del día</dt>
-            <dd className="text-texto">{formato.m3(version.total_m3)} m³ · {formato.m3ha(version.total_m3ha ?? totalesPlan(version.turnos).m3ha)} m³/ha</dd>
+            <dd className="cifras text-texto">
+              {formato.m3(version.total_m3)} m³ · {formato.m3ha(version.total_m3ha ?? totalesPlan(version.turnos).m3ha)} m³/ha
+              {eto && <> · {eto}</>}
+            </dd>
           </div>
           <div>
             <dt>Modelo</dt>
-            <dd className="text-texto">{version.modelo_version ?? "—"}</dd>
+            <dd className="text-texto" title={version.modelo_version ?? undefined}>
+              {version.modelo_version ? `Entrenado el ${fechaModelo(version.modelo_version)}` : "—"}
+            </dd>
           </div>
         </dl>
       </div>
@@ -265,6 +271,7 @@ function Detalle({ id }: { id: number }) {
   });
 
   const c: CronogramaDetalle | undefined = consulta.data;
+  const eto = useEtoDiaAnterior(c?.modulo_id, c?.fecha);
   const version = numero !== null ? otra.data : c?.version ?? undefined;
 
   const vista = c?.versiones.find((v) => v.numero === c.mi_ultimo_visto_numero);
@@ -338,16 +345,18 @@ function Detalle({ id }: { id: number }) {
               <Diferencias id={id} base={vista.numero} contra={publicada.numero} />
             </div>
           </Card>}
-          <div role="tablist" aria-label="Detalle del cronograma" className="flex flex-wrap gap-1">
+          <div className="sin-barra -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+          <div role="tablist" aria-label="Detalle del cronograma" className="inline-flex gap-1 rounded-lg bg-hundido p-1 ring-1 ring-borde ring-inset">
             {tabs.map((tab, i) => <button key={tab} type="button" role="tab" id={`tab-${i}`} aria-controls={`panel-${i}`} aria-selected={pestana === tab} tabIndex={pestana === tab ? 0 : -1}
               disabled={!!edicion && tab !== "Plan"}
-              className={cn("rounded-md px-3 py-2 text-sm font-semibold disabled:opacity-50", pestana === tab ? "bg-activo-bg text-activo-tx" : "text-texto-2 hover:bg-hundido")}
+              className={cn("rounded-md px-3.5 py-1.5 text-[13.5px] font-semibold whitespace-nowrap transition-colors disabled:opacity-50", pestana === tab ? "bg-superficie text-green-700 shadow-suave" : "text-texto-2 hover:text-texto")}
               onClick={() => setPestana(tab)} onKeyDown={(e) => {
                 if (edicion || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
                 e.preventDefault();
                 const siguiente = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
                 setPestana(tabs[siguiente]); document.getElementById(`tab-${siguiente}`)?.focus();
               }}>{tab}</button>)}
+          </div>
           </div>
           <Card role="tabpanel" id={`panel-${tabs.indexOf(pestana)}`} aria-labelledby={`tab-${tabs.indexOf(pestana)}`} tabIndex={0}>
             {(pestana === "Plan" || pestana === "Gantt") && <>
@@ -371,7 +380,7 @@ function Detalle({ id }: { id: number }) {
               ) : pestana === "Gantt" ? (
                 <div className="p-4"><Gantt turnos={version.turnos} /></div>
               ) : (
-                <div className="pb-2"><ContenidoVersion version={version} orden={orden} alOrdenar={setOrden} /></div>
+                <div className="pb-2"><ContenidoVersion version={version} orden={orden} alOrdenar={setOrden} eto={textoEto(eto)} /></div>
               )}
             </>}
             {pestana === "Plan vs real" && <PlanVsReal moduloId={c!.modulo_id} fecha={c!.fecha} />}

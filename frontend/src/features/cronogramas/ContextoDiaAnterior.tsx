@@ -10,7 +10,9 @@ const CAMPOS_CLIMA = ["eto_mm", "t_max", "hr_media", "lluvia_mm"];
 const numero = (valor: Punto[string] | undefined): number | null => typeof valor === "number" && Number.isFinite(valor) ? valor : null;
 const puntoDia = (serie: Serie | undefined, fecha: string) => serie?.puntos.find((p) => p.fecha === fecha);
 const tieneClima = (p: Punto | undefined) => CAMPOS_CLIMA.some((campo) => numero(p?.[campo]) !== null);
-const formato = new Intl.NumberFormat("es-PE", { maximumFractionDigits: 1 });
+const formato = new Intl.NumberFormat("es-PE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+/** MDS en µm enteros; el resto con un decimal fijo. */
+const formatoEntero = new Intl.NumberFormat("es-PE", { maximumFractionDigits: 0 });
 
 function useContextoRango(desde: string, hasta: string, moduloId: number) {
   const clima = useQuery({
@@ -87,7 +89,7 @@ function Franja({ fecha, datos }: { fecha: string; datos: ReturnType<typeof useC
         </div>
         : <div key={etiqueta} className="flex gap-1">
           <dt className="text-texto-2">{etiqueta} ({unidad})</dt>
-          <dd className="cifras font-semibold text-texto">{valor === null ? "—" : formato.format(valor)}</dd>
+          <dd className="cifras font-semibold text-texto">{valor === null ? "—" : (unidad === "µm" ? formatoEntero : formato).format(valor)}</dd>
         </div>)}
     </dl>}
   </section>;

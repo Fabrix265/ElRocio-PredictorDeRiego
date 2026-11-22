@@ -8,6 +8,7 @@ import { formatearFechaLarga, hoyLima } from "../../lib/fechas";
 import { useAhora } from "../../lib/useAhora";
 import { ETIQUETA_ROL } from "../../lib/roles";
 import { useAuth, useUsuario } from "../auth/AuthProvider";
+import { BotonInstalar } from "./AvisosPwa";
 import { Avatar, Marca } from "./Marca";
 import { itemsInferiores } from "./navegacion";
 import { ListaNav } from "./Sidebar";
@@ -28,7 +29,7 @@ export function MenuInferior() {
     <>
       <nav
         aria-label="Accesos rápidos"
-        className="fixed inset-x-0 bottom-0 z-30 flex border-t border-borde bg-superficie pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="vidrio fixed inset-x-0 bottom-0 z-30 flex border-t border-borde pb-[env(safe-area-inset-bottom)] shadow-[0_-6px_20px_-12px_rgb(18_48_31/0.25)] md:hidden"
       >
         {atajos.map((item) => {
           const Icono = item.icono;
@@ -41,7 +42,7 @@ export function MenuInferior() {
             >
               {({ isActive }) => (
                 <>
-                  <span className={cn("flex h-7 w-12 items-center justify-center rounded-full", isActive && "bg-green-50")}>
+                  <span className={cn("flex h-7 w-12 items-center justify-center rounded-full transition-colors", isActive && "bg-green-100")}>
                     <Icono className="size-[18px]" strokeWidth={isActive ? 2.1 : 1.75} aria-hidden="true" />
                   </span>
                   {item.corta}
@@ -58,7 +59,7 @@ export function MenuInferior() {
             Menú
           </DialogPrimitive.Trigger>
           <DialogPrimitive.Portal>
-            <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-green-900/40" />
+            <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-green-900/40 backdrop-blur-[2px] animate-[aparecer_0.15s_ease-out]" />
             <DialogPrimitive.Content
               aria-describedby={undefined}
               className="fixed inset-y-0 left-0 z-50 flex w-[min(86vw,320px)] flex-col border-r border-borde bg-sidebar px-3 py-4 shadow-elevada focus:outline-none"
@@ -81,6 +82,7 @@ export function MenuInferior() {
                 <ListaNav alNavegar={() => setAbierto(false)} />
               </nav>
               <div className="flex flex-col gap-1 border-t border-borde pt-3">
+                <BotonInstalar className="mb-1" alInstalar={() => setAbierto(false)} />
                 <div className="flex items-center gap-2.5 rounded-lg bg-green-50 p-2.5">
                   <Avatar nombre={usuario.nombre} />
                   <span className="flex min-w-0 flex-col">

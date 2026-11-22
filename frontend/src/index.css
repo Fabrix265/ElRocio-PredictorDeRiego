@@ -43,6 +43,9 @@
   --color-info-bg: var(--info-bg);
   --color-info: var(--info);
   --color-info-tx: var(--info-tx);
+  --color-violeta-bg: var(--violeta-bg);
+  --color-violeta: var(--violeta);
+  --color-ambar: var(--ambar);
 
   --color-sidebar: var(--sidebar);
   --color-fondo: var(--fondo);
@@ -50,6 +53,8 @@
   --color-hundido: var(--hundido);
   --color-deshabilitado: var(--deshabilitado);
   --color-borde: var(--borde);
+  --color-borde-suave: var(--borde-suave);
+  --color-lima: var(--lima);
   --color-borde-input: var(--borde-input);
   --color-texto: var(--texto);
   --color-texto-2: var(--texto-2);
@@ -68,6 +73,8 @@
   --radius-xl: var(--radio-xl);
   --shadow-suave: var(--sombra);
   --shadow-elevada: var(--sombra-lg);
+  --shadow-hover: var(--sombra-hover);
+  --shadow-marca: var(--sombra-marca);
 
   --font-sans: var(--fuente);
   --font-mono: var(--fuente-mono);
@@ -80,7 +87,12 @@
   body {
     margin: 0;
     min-height: 100dvh;
-    background: var(--fondo);
+    background-color: var(--fondo);
+    /* Brillo verde muy suave arriba a la derecha: da profundidad sin cargar la vista */
+    background-image:
+      radial-gradient(1200px 520px at 100% -10%, rgb(163 217 119 / 0.14), transparent 60%),
+      radial-gradient(900px 480px at -10% -20%, rgb(42 112 66 / 0.07), transparent 60%);
+    background-attachment: fixed;
     color: var(--texto);
     font-family: var(--fuente);
     font-size: 14px;
@@ -101,6 +113,15 @@
     color: var(--texto-3);
     opacity: 1;
   }
+  ::selection {
+    background: var(--green-200);
+    color: var(--green-900);
+  }
+  /* Barras de desplazamiento finas y discretas (escritorio) */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--sand-300) transparent;
+  }
 }
 
 @layer utilities {
@@ -113,12 +134,36 @@
     outline-offset: 0;
     box-shadow: 0 0 0 4px var(--foco-anillo);
   }
-  /* Panel de marca del login: degradado green-600 → green-700 con un brillo suave */
+  /* Panel de marca (login y portada del dashboard): degradado verde con brillo lima y una
+     trama de surcos muy tenue que recuerda las líneas de riego. */
   .panel-marca {
-    background-color: var(--green-600);
+    background-color: var(--green-700);
     background-image:
-      radial-gradient(circle at 85% 15%, rgb(255 255 255 / 0.18), transparent 45%),
-      linear-gradient(160deg, var(--green-600), var(--green-700));
+      radial-gradient(circle at 88% 12%, rgb(163 217 119 / 0.35), transparent 42%),
+      radial-gradient(circle at 8% 100%, rgb(255 255 255 / 0.1), transparent 45%),
+      repeating-linear-gradient(115deg, rgb(255 255 255 / 0.045) 0 2px, transparent 2px 26px),
+      linear-gradient(150deg, #2f7d4a 0%, var(--green-700) 55%, var(--green-800) 100%);
+  }
+  /* Superficie translúcida con desenfoque (cabecera y menú inferior) */
+  .vidrio {
+    background-color: rgb(255 255 255 / 0.82);
+    -webkit-backdrop-filter: saturate(1.6) blur(14px);
+    backdrop-filter: saturate(1.6) blur(14px);
+  }
+  /* Tarjeta que se puede tocar: se eleva un poco al pasar el mouse */
+  .tarjeta-interactiva {
+    transition:
+      box-shadow 0.18s ease,
+      transform 0.18s ease,
+      border-color 0.18s ease;
+  }
+  .tarjeta-interactiva:hover {
+    box-shadow: var(--sombra-hover);
+    border-color: var(--green-200);
+    transform: translateY(-1px);
+  }
+  .entrada-suave {
+    animation: aparecer-sube 0.32s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   }
   .sin-barra::-webkit-scrollbar {
     display: none;
@@ -134,6 +179,26 @@
   }
   to {
     opacity: 1;
+  }
+}
+
+@keyframes aparecer-sube {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes brillo {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
   }
 }
 

@@ -13,7 +13,8 @@ import { mensajeDeError } from "../../services/httpClient";
 import { claveCronogramas, cronogramasApi } from "../../services/cronogramas";
 import { useUsuario } from "../auth/AuthProvider";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
-import { ETIQUETA_ESTADO, MarcasVersion, TONO_ESTADO, formato, totalesPlan } from "../cronogramas/etiquetas";
+import { ETIQUETA_ESTADO, ETIQUETA_ORIGEN_VERSION, MarcasVersion, TONO_ESTADO, formato, totalesPlan } from "../cronogramas/etiquetas";
+import { textoEto, useEtoDiaAnterior } from "../cronogramas/useEtoDiaAnterior";
 import { Gantt } from "../cronogramas/Gantt";
 
 /** Cronograma de hoy y de mañana con su Gantt (el programador solo ve los publicados). */
@@ -31,6 +32,11 @@ export function useCronogramasHoyManana() {
   return { fechas, consultas };
 }
 
+function EtoDia({ fecha }: { fecha: string }) {
+  const { modulo } = useSeleccion();
+  return <>{textoEto(useEtoDiaAnterior(modulo?.id, fecha))}</>;
+}
+
 export function HoyManana({ fechas, consultas }: ReturnType<typeof useCronogramasHoyManana>) {
   const usuario = useUsuario();
   const { modulo } = useSeleccion();
@@ -42,7 +48,7 @@ export function HoyManana({ fechas, consultas }: ReturnType<typeof useCronograma
         titulo="Hoy y mañana"
         descripcion={usuario.rol === "programador" ? "Cronogramas publicados" : "Versión vigente de cada día"}
       />
-      <div className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 p-4 sm:p-5 xl:grid-cols-2">
         {fechas.map((fecha, i) => {
           const q = consultas[i];
           const c = q.data;
@@ -55,7 +61,7 @@ export function HoyManana({ fechas, consultas }: ReturnType<typeof useCronograma
                 {c && (
                   <span className="flex items-center gap-1.5">
                     <Badge tono={TONO_ESTADO[c.estado]}>{ETIQUETA_ESTADO[c.estado]}</Badge>
-                    {c.version && <span className="text-xs text-texto-2">v{c.version.numero}</span>}
+                    {c.version && <span className="text-xs text-texto-2">v{c.version.numero} · {ETIQUETA_ORIGEN_VERSION[c.version.origen]}</span>}
                   </span>
                 )}
               </div>
@@ -77,11 +83,11 @@ export function HoyManana({ fechas, consultas }: ReturnType<typeof useCronograma
                 </div>
               ) : (
                 <>
-                  <MarcasVersion marcas={c.version} />
+                  <MarcasVersion marcas={c.version} origen={c.version.origen} />
                   <Gantt turnos={c.version.turnos} compacto />
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-texto-2">
-                    <span>
-                      {c.version.turnos.reduce((s, t) => s + t.n_ciclos, 0)} ciclos · {formato.m3(c.version.total_m3)} m³ · {formato.m3ha(c.version.total_m3ha ?? totalesPlan(c.version.turnos).m3ha)} m³/ha
+                    <span className="cifras">
+                      {c.version.turnos.reduce((s, t) => s + t.n_ciclos, 0)} ciclos · {formato.m3(c.version.total_m3)} m³ · {formato.m3ha(c.version.total_m3ha ?? totalesPlan(c.version.turnos).m3ha)} m³/ha · <EtoDia fecha={fecha} />
                     </span>
                     <Link to={`/cronogramas/${c.id}`} className="inline-flex items-center gap-1 font-semibold text-marca hover:underline">
                       Ver detalle <ArrowRight className="size-3.5" aria-hidden="true" />

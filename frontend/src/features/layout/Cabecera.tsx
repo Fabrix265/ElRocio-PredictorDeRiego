@@ -11,7 +11,7 @@ function FechaHoy() {
   const ahora = useAhora();
   const larga = formatearFechaLarga(ahora);
   return (
-    <time dateTime={hoyLima(ahora)} className="hidden text-[13px] whitespace-nowrap text-texto-2 sm:inline">
+    <time dateTime={hoyLima(ahora)} className="hidden rounded-full bg-hundido px-3 py-1 text-[12.5px] whitespace-nowrap text-texto-2 ring-1 ring-borde-suave ring-inset sm:inline">
       <span className="xl:hidden" aria-hidden="true" title={`${larga} (Lima)`}>
         {formatearFechaCorta(ahora)}
       </span>
@@ -25,7 +25,7 @@ function FechaHoy() {
 /** Cabecera blanca con filete verde: selector Fundo › Módulo, fecha de hoy y menú de usuario. */
 export function Cabecera() {
   return (
-    <header className="sticky top-0 z-30 flex h-[var(--cabecera-alto)] shrink-0 items-center gap-3 border-b-[3px] border-marca bg-superficie px-3 sm:px-5">
+    <header className="vidrio sticky top-0 z-30 flex h-[var(--cabecera-alto)] shrink-0 items-center gap-3 border-b border-borde px-3 sm:px-5 after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:bg-linear-to-r after:from-green-600 after:via-green-400 after:to-lima/60">
       <div className="min-w-0 flex-1">
         <SelectorFundo />
       </div>

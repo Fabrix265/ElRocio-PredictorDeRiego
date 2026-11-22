@@ -66,7 +66,7 @@ describe("Copiloto", () => {
     expect(screen.getByText(/^ETo día anterior 4[.,]8 mm$/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /1130|1 130|m³\/ha/ })).toHaveAttribute("href", "/cronogramas/7");
     expect(await screen.findByText("Revisar la válvula del TE03")).toBeInTheDocument();
-    expect(screen.getByText(/Agente n8n-copiloto/)).toBeInTheDocument();
+    expect(screen.getByText(/Propuesta por el agente del copiloto/)).toBeInTheDocument();
   });
 
   it("el encargado descarta con motivo obligatorio", async () => {
@@ -127,7 +127,7 @@ describe("etiquetas del copiloto", () => {
   it("ordena por severidad y nombra al agente", () => {
     expect(ordenarPorSeveridad([{ severidad: "info" }, { severidad: "alta" }, { severidad: "media" }] as const).map((a) => a.severidad))
       .toEqual(["alta", "media", "info"]);
-    expect(nombreAgente("agente:n8n")).toBe("Agente n8n");
+    expect(nombreAgente("agente:n8n")).toBe("el agente del copiloto");
     expect(nombreAgente("otro")).toBe("otro");
   });
 });

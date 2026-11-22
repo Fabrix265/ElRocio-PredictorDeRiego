@@ -11,8 +11,8 @@ import { diferenciaPct, estadoReal, turnosElegidos, valorAgua, type UnidadAgua }
 const TH = "border-b border-borde bg-hundido px-2.5 py-2 text-xs font-semibold text-texto-2 whitespace-nowrap";
 const TD = "border-b border-borde px-2.5 py-2 whitespace-nowrap";
 const NUM = "text-right tabular-nums";
-const formato = new Intl.NumberFormat("es-PE", { maximumFractionDigits: 1 });
-const formatoPct = new Intl.NumberFormat("es-PE", { maximumFractionDigits: 1, signDisplay: "exceptZero" });
+const formato = new Intl.NumberFormat("es-PE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const formatoPct = new Intl.NumberFormat("es-PE", { minimumFractionDigits: 1, maximumFractionDigits: 1, signDisplay: "exceptZero" });
 const cifra = (v: number | null) => (v == null ? "—" : formato.format(v));
 
 const ESTADO: Record<ReturnType<typeof estadoReal>, [string, TonoBadge]> = {

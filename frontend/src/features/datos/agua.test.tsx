@@ -80,7 +80,7 @@ describe("TablaAgua", () => {
     expect(within(tabla).getByRole("link", { name: /v2/ })).toHaveAttribute("href", "/cronogramas/7");
     await userEvent.click(within(tabla).getByRole("button", { name: /lun 09\/11|09\/11/ }));
     expect(within(tabla).getByText("TE02")).toBeInTheDocument();
-    expect(within(tabla).getByText("pendiente: 20")).toBeInTheDocument();
+    expect(within(tabla).getByText("pendiente: 20.0")).toBeInTheDocument();
   });
 
   it("para el programador no hay columnas del modelo", () => {
