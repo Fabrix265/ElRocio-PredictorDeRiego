@@ -28,7 +28,7 @@ function Diferencia({ valor }: { valor: number | null }) {
   return <span className={cn(fuerte ? "font-semibold text-err-tx" : "text-texto")}>{formatoPct.format(valor)} %</span>;
 }
 
-function Celdas({ turnos, unidad, conModelo }: { turnos: AguaTurno[]; unidad: UnidadAgua; conModelo: boolean }) {
+function Celdas({ turnos, unidad, conModelo, conProvisional }: { turnos: AguaTurno[]; unidad: UnidadAgua; conModelo: boolean; conProvisional: boolean }) {
   const modelo = valorAgua(turnos, "modelo", unidad);
   const prop = valorAgua(turnos, "propuesto", unidad);
   const real = valorAgua(turnos, "real", unidad);
@@ -38,7 +38,7 @@ function Celdas({ turnos, unidad, conModelo }: { turnos: AguaTurno[]; unidad: Un
     <td className={cn(TD, NUM)}>{cifra(prop)}</td>
     <td className={cn(TD, NUM)}>
       {cifra(real)}
-      {real == null && provisional != null && <div className="text-xs text-texto-3">pendiente: {cifra(provisional)}</div>}
+      {conProvisional && real == null && provisional != null && <div className="text-xs text-texto-3">pendiente: {cifra(provisional)}</div>}
     </td>
     <td className={cn(TD, NUM)}><Diferencia valor={diferenciaPct(real, prop)} /></td>
     {conModelo && <td className={cn(TD, NUM)}><Diferencia valor={diferenciaPct(real, modelo)} /></td>}
@@ -48,10 +48,15 @@ function Celdas({ turnos, unidad, conModelo }: { turnos: AguaTurno[]; unidad: Un
 /**
  * Tabla por día (y, al desplegar, por turno): modelo, modificado/publicado, real y sus diferencias.
  * «Pendiente» es el riego provisional del cronograma mientras no llega el dato real del controlador.
+ * Con `conProvisional={false}` (Datos de campo) no se muestra: sin dato real, el día queda «Sin dato».
  */
-export function TablaAgua({ dias, unidad, conModelo, turno = "todos", desplegado = false, enlaces = true }: {
-  dias: AguaDia[]; unidad: UnidadAgua; conModelo: boolean; turno?: string; desplegado?: boolean; enlaces?: boolean;
+export function TablaAgua({ dias, unidad, conModelo, turno = "todos", desplegado = false, enlaces = true, conProvisional = true }: {
+  dias: AguaDia[]; unidad: UnidadAgua; conModelo: boolean; turno?: string; desplegado?: boolean; enlaces?: boolean; conProvisional?: boolean;
 }) {
+  const estadoDe = (turnos: AguaTurno[]) => {
+    const estado = estadoReal(turnos);
+    return ESTADO[!conProvisional && estado === "provisional" ? "sin_dato" : estado];
+  };
   const [abiertos, setAbiertos] = useState<Set<string>>(() => new Set(desplegado ? dias.map((d) => d.fecha) : []));
   const u = unidad === "m3ha" ? "m³/ha" : "m³";
   const ordenados = [...dias].sort((a, b) => b.fecha.localeCompare(a.fecha));
@@ -82,7 +87,7 @@ export function TablaAgua({ dias, unidad, conModelo, turno = "todos", desplegado
           {ordenados.map((d) => {
             const turnos = turnosElegidos(d, turno);
             const abierto = abiertos.has(d.fecha);
-            const [estado, tono] = ESTADO[estadoReal(turnos)];
+            const [estado, tono] = estadoDe(turnos);
             const modificado = turnos.some((t) => t.modificado);
             return (
               <Fragment key={d.fecha}>
@@ -94,7 +99,7 @@ export function TablaAgua({ dias, unidad, conModelo, turno = "todos", desplegado
                       {formatearDiaCorto(d.fecha)}
                     </button>
                   </th>
-                  <Celdas turnos={turnos} unidad={unidad} conModelo={conModelo} />
+                  <Celdas turnos={turnos} unidad={unidad} conModelo={conModelo} conProvisional={conProvisional} />
                   <td className={TD}><Badge tono={tono}>{estado}</Badge></td>
                   <td className={cn(TD, "max-w-56 whitespace-normal")}>
                     {modificado ? <><Badge tono="info">Modificado</Badge>{d.motivo && <div className="mt-0.5 text-xs text-texto-2">{d.motivo}</div>}</>
@@ -110,8 +115,8 @@ export function TablaAgua({ dias, unidad, conModelo, turno = "todos", desplegado
                 {abierto && turnos.map((t) => (
                   <tr key={`${d.fecha}-${t.turno_id}`} className="bg-hundido/40 text-[13px]">
                     <th scope="row" className={cn(TD, "pl-8 text-left font-normal text-texto")}>{t.turno_codigo}</th>
-                    <Celdas turnos={[t]} unidad={unidad} conModelo={conModelo} />
-                    <td className={cn(TD, "text-xs text-texto-2")}>{t.sin_riego ? "No se regó" : ESTADO[estadoReal([t])][0]}</td>
+                    <Celdas turnos={[t]} unidad={unidad} conModelo={conModelo} conProvisional={conProvisional} />
+                    <td className={cn(TD, "text-xs text-texto-2")}>{t.sin_riego ? "No se regó" : estadoDe([t])[0]}</td>
                     <td className={cn(TD, "text-xs")}>{t.modificado ? <span className="font-semibold text-info-tx">Cambió</span> : <span className="text-texto-3">—</span>}</td>
                     {enlaces && <td className={TD} />}
                   </tr>
