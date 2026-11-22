@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import auditoria, auth, catalogo, health, usuarios
 from app.api.v1.endpoints import riego as riego_endpoints
-from app.api.v1.endpoints import cronogramas, datos, ingestas, pulsos, reportes
+from app.api.v1.endpoints import copiloto, cronogramas, datos, ingestas, pulsos, reportes
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["salud"])
@@ -16,3 +16,4 @@ api_router.include_router(ingestas.router, tags=["ingestas"])
 api_router.include_router(cronogramas.router, tags=["cronogramas"])
 api_router.include_router(reportes.router, tags=["reportes"])
 api_router.include_router(pulsos.router, tags=["riego por pulsos"])
+api_router.include_router(copiloto.router, tags=["copiloto"])

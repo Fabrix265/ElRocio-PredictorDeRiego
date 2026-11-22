@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -97,6 +97,18 @@ class Settings(BaseSettings):
     ingesta_hora: str = "05:00"
     scheduler_enabled: bool = False
     upload_max_mb: int = 15
+
+    # Copiloto agrónomo (reglas de alertas del agente de n8n). Los umbrales de MDS son los del
+    # semáforo de la app (frontend/src/features/datos/estresMds.ts).
+    copiloto_desvio_pct: float = Field(default=15.0, gt=0, le=100)
+    copiloto_dias_estres: int = Field(default=2, ge=1, le=14)
+    copiloto_mds_moderado_um: float = 190.0
+    copiloto_mds_alto_um: float = 220.0
+    copiloto_mds_critico_um: float = 250.0
+    # % vol. por debajo de la línea de estrés para contar el día como estresado.
+    copiloto_margen_estres_suelo: float = Field(default=0.5, ge=0)
+    # Desde esta hora (Lima) el plan de mañana sin publicar pasa de «info» a alerta.
+    copiloto_hora_plan_manana: int = Field(default=16, ge=0, le=23)
 
     @field_validator("ingesta_hora")
     @classmethod

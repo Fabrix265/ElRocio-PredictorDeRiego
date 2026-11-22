@@ -20,6 +20,8 @@ export const ACCESO = {
   usuarios: ["admin"],
   /** Parámetros del riego por pulsos (los datos fijos de la planilla). */
   parametros: ["admin", "encargado", "subgerente"],
+  /** Copiloto agrónomo: alertas del día y sugerencias del agente (muestra la propuesta del modelo). */
+  copiloto: ["admin", "encargado", "subgerente"],
 } as const satisfies Record<string, readonly Rol[]>;
 
 export type Pantalla = keyof typeof ACCESO;
@@ -53,6 +55,8 @@ export const PERMISOS = {
   verIngestas: ["admin", "encargado", "subgerente"],
   /** Editar los parámetros del riego por pulsos (PUT /modulos/{id}/parametros-pulsos). */
   editarParametrosRiego: ["admin", "encargado"],
+  /** Aprobar o descartar las sugerencias del copiloto. */
+  resolverSugerencias: ["admin", "encargado"],
 } as const satisfies Record<string, readonly Rol[]>;
 
 export type Permiso = keyof typeof PERMISOS;

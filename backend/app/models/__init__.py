@@ -11,6 +11,7 @@ from app.models.cronograma import (
     MotivoCorreccion,
     PrediccionEntrada,
 )
+from app.models.copiloto import CopilotoSugerencia, TokenServicio
 from app.models.datos import (
     AmbienteDiario,
     IngestaCorrida,
@@ -38,6 +39,7 @@ __all__ = [
     "Auditoria",
     "CargaRiego",
     "CargaRiegoTurnoDia",
+    "CopilotoSugerencia",
     "Cronograma",
     "CronogramaCiclo",
     "CronogramaEvento",
@@ -65,6 +67,7 @@ __all__ = [
     "RiegoCiclo",
     "RiegoRegistro",
     "SesionRefresh",
+    "TokenServicio",
     "Turno",
     "Usuario",
 ]

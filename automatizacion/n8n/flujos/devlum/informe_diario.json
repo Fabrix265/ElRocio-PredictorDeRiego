@@ -1,0 +1,290 @@
+{
+  "name": "Copiloto · informe diario (devlum)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "15 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "befd7664-b48b-50bb-b439-722bca988819",
+      "name": "Cada día 06:15",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "98091941-36ca-5def-950e-9de3576f9c45",
+              "name": "api_url",
+              "value": "https://riego.tu-dominio.pe",
+              "type": "string"
+            },
+            {
+              "id": "c80b3b1f-88c1-5377-bf52-4f2f66197f78",
+              "name": "chat_ids",
+              "value": "ID_CHAT_ENCARGADO,ID_CHAT_SUBGERENTE",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "be97a2e5-ed79-5d00-a348-5cb943a28d5c",
+      "name": "Configuración",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Configuración').first().json.api_url }}/api/v1/copiloto/resumen",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "0b0fc5b3-93e8-578a-b34b-2d4ed22ed790",
+      "name": "Resumen del copiloto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR",
+          "name": "Token agente copiloto"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Redacta el informe de riego de esta mañana para el equipo del fundo ENSUEÑO 1 (módulo EN01-MOD5, palto). Lo leerán por Telegram en el celular antes de salir a campo.\n\nAbajo va, en JSON, el resumen que calculó el sistema: plan de hoy y de mañana por turno, agua de ayer, últimos días de clima y planta, pronóstico de Phytech y alertas ya ordenadas por severidad. Usa solo esas cifras; si falta un dato, dilo en vez de estimarlo.\n\nFormato (texto plano, sin Markdown ni tablas, viñetas con \"•\", hasta 25 líneas):\n1. Una línea de saludo con el día (\"Buenos días. Plan del lunes 9 de noviembre:\").\n2. Plan de hoy: total en m³ y m³/ha, la ETo del día anterior en mm (aclara si es pronóstico) y si está publicado o sigue en borrador. Luego una viñeta por turno con ciclos, horario de inicio a fin y m³/ha. Si no hay plan, dilo en una línea.\n3. Alertas: primero las de severidad alta, luego las medias, una viñeta cada una con lo que pasó y qué conviene revisar. Las de tipo \"info\" van juntas en una sola línea al final. Si no hay alertas, escribe \"Sin alertas: todo en orden con los datos de hoy.\"\n4. Una línea con lo que viene según el pronóstico (ETo y temperatura máxima de los próximos días).\n5. Cierra con dos preguntas que pueden hacerte por este chat, por ejemplo \"¿Por qué el TE02 tiene más agua hoy?\" o \"¿Cuánto regamos esta semana?\".\n\nCuando expliques un cambio en el plan, preséntalo como contexto (\"coincide con una ETo alta ayer\"), no como causa segura. No inventes acciones que el sistema no indique.\n\nResumen del sistema:\n{{ JSON.stringify($json) }}"
+      },
+      "id": "fa233846-ee17-50e5-8604-28f70dbbafd1",
+      "name": "Redactar informe",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        680,
+        -100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-opus-5-5",
+          "mode": "id"
+        },
+        "options": {
+          "baseURL": "https://ai.devlumlabs.com/api/v1",
+          "maxTokens": 4000
+        }
+      },
+      "id": "5c6176f4-6424-5487-914b-6746191b49a9",
+      "name": "Claude",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        680,
+        120
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "REEMPLAZAR",
+          "name": "Devlum AI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Un ítem por chat de Telegram de la lista de Configuración (texto recortado al límite de Telegram).\n// Si el modelo falló, «Redactar informe» sigue sin texto y se manda un aviso en su lugar.\nconst ids = String($('Configuración').first().json.chat_ids || '')\n  .split(',').map((s) => s.trim()).filter(Boolean);\nconst texto = (String($input.first().json.text || '').trim() || 'No pude redactar el informe de hoy. Revisa el plan y las alertas en la vista Copiloto de la app.').slice(0, 4000);\nreturn ids.map((chat_id) => ({ json: { chat_id, texto } }));"
+      },
+      "id": "6354ad1f-b64b-5b58-9932-697a07577e7d",
+      "name": "Destinatarios",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.texto }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "8bf8b96f-89d3-5203-a53c-2b5ef28ea9dc",
+      "name": "Enviar por Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1140,
+        -100
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR",
+          "name": "Bot Telegram copiloto"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alertas de severidad alta -> sugerencias pendientes (el backend no duplica las iguales).\nconst r = $input.first().json;\nconst TIPO = {\n  riego_sin_respuesta: 'revisar_equipo',\n  humedad_sin_riego: 'revisar_datos',\n  datos_atrasados: 'revisar_datos',\n  desvio_plan_real: 'ajustar_riego',\n  estres_mds: 'ajustar_riego',\n  estres_suelo: 'ajustar_riego',\n  plan_hoy_sin_generar: 'regenerar_plan',\n};\nreturn (r.alertas || [])\n  .filter((a) => a.severidad === 'alta' && TIPO[a.codigo])\n  .map((a) => ({ json: {\n    modulo_id: r.modulo.id,\n    fecha: a.fecha || r.fecha,\n    turno_codigo: a.turno_codigo || null,\n    tipo: TIPO[a.codigo],\n    alerta_codigo: a.codigo,\n    titulo: String(a.titulo).slice(0, 160),\n    detalle: String(a.detalle).slice(0, 2000),\n  } }));"
+      },
+      "id": "6c8156fc-3245-56d8-8fef-4877f06ee500",
+      "name": "Sugerencias desde alertas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuración').first().json.api_url }}/api/v1/copiloto/sugerencias",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "0bd32499-4a9b-5802-9205-4d0b8e171cb1",
+      "name": "Crear sugerencia",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        260
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR",
+          "name": "Token agente copiloto"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada día 06:15": {
+      "main": [
+        [
+          {
+            "node": "Configuración",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuración": {
+      "main": [
+        [
+          {
+            "node": "Resumen del copiloto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resumen del copiloto": {
+      "main": [
+        [
+          {
+            "node": "Redactar informe",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sugerencias desde alertas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Redactar informe",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redactar informe": {
+      "main": [
+        [
+          {
+            "node": "Destinatarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Destinatarios": {
+      "main": [
+        [
+          {
+            "node": "Enviar por Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sugerencias desde alertas": {
+      "main": [
+        [
+          {
+            "node": "Crear sugerencia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Lima",
+    "saveDataSuccessExecution": "all"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
