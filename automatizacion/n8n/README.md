@@ -1,15 +1,16 @@
 # Copiloto agrónomo con n8n
 
-Dos flujos de n8n sobre la API del sistema de riego:
+Flujos de n8n sobre la API del sistema de riego:
 
 | Flujo | Archivo | Qué hace |
 |---|---|---|
+| Avisos por Telegram | `flujos/avisos.json` | Cada hora (de 06:50 a 21:50) pide los **avisos** pendientes y los manda apenas pasan: el MDS cambia de nivel, falla la ingesta de datos o el suelo no responde al riego. No usa el modelo y nunca repite un aviso (ver [Avisos](#avisos-por-telegram)). |
 | Informe diario | `flujos/informe_diario.json` | A las 06:15 (Lima) pide `/copiloto/resumen`, Claude redacta el informe y lo envía por Telegram. Las alertas de severidad alta se vuelven **sugerencias pendientes** en la app. |
 | Agente de Telegram | `flujos/agente_telegram.json` | Responde preguntas por Telegram con datos reales (herramientas HTTP de solo lectura). Puede dejar sugerencias pendientes, nunca publicar ni cambiar el riego. |
 | Chat de prueba | `flujos/agente_chat_prueba.json` | El mismo agente, para conversar desde el editor de n8n (botón **Open chat**) sin Telegram. Útil para probar y para la demo. |
 
 Hay dos juegos con la misma lógica, según cómo llegas a Claude: `flujos/*.json` usa la API de Anthropic y
-`flujos/devlum/*.json` usa **Devlum AI** (ver [Modelo](#modelo)).
+`flujos/devlum/*.json` usa **Devlum AI** (ver [Modelo](#modelo)). El de avisos no usa el modelo y sirve para los dos.
 
 ```text
 Telegram ──▶ n8n (VPS, HTTPS) ──X-Token-Agente──▶ API /api/v1/copiloto/* ──▶ PostgreSQL
@@ -88,15 +89,18 @@ Las claves solo se guardan en n8n (cifradas). No van en los JSON ni en el repo.
 
 ## 4. Importar y configurar los flujos
 
-1. **Workflows → Import from file**: importa los dos JSON de `flujos/`.
+1. **Workflows → Import from file**: importa los JSON de `flujos/` (o de `flujos/devlum/`) y `flujos/avisos.json`.
 2. En cada nodo con credencial (HTTP, Telegram y Claude) elige la credencial del paso 3. Los JSON
    traen `REEMPLAZAR` como id.
 3. Edita el nodo **Configuración** de cada flujo:
    - `api_url`: URL base de la API sin `/api/v1` (p. ej. `https://riego.tu-dominio.pe`).
    - `chat_ids` (informe) y `chat_ids_autorizados` (agente): IDs de chat de Telegram separados por coma.
+   - `chat_ids_campo` y `chat_ids_sistema` (avisos): quién recibe los avisos de campo (MDS y riego) y los
+     del sistema (ingesta de datos). Si `chat_ids_sistema` queda vacío, esos avisos van a los de campo.
 4. Para saber el ID de chat de cada persona, activa el flujo del agente y pídele que escriba al bot.
    Si no está autorizado, el bot le responde con su ID. Agrégalo a la lista.
-5. Activa los dos flujos. Para probar el informe sin esperar a las 06:15, usa **Execute workflow**.
+5. Activa los flujos. Para probar el informe sin esperar a las 06:15, o los avisos sin esperar a la
+   siguiente hora, usa **Execute workflow**.
 
 ### Modelo
 
@@ -133,8 +137,29 @@ Si algún nodo no se importa bien en tu versión de n8n, puedes rehacerlo a mano
 nodos *HTTP Request Tool* con la credencial `Token agente copiloto` y los parámetros llenados
 con `$fromAI(...)`.
 
-Comandos del bot (los resuelve el flujo; `/start` y `/ayuda` no gastan el modelo): `/hoy`, `/manana`,
-`/alertas`, `/semana`, `/turno TE03`, `/sugerencias`, `/ayuda`.
+Comandos del bot (los resuelve el flujo; `/start`, `/ayuda` y `/avisos` no gastan el modelo): `/hoy`,
+`/manana`, `/alertas`, `/semana`, `/turno TE03`, `/sugerencias`, `/avisos`, `/ayuda`.
+
+## Avisos por Telegram
+
+Los calcula el backend (`app/services/avisos_service.py`, con pruebas) en `GET /copiloto/avisos`, y el flujo
+`avisos.json` los manda tal cual, sin el modelo:
+
+| Código | A quién | Cuándo |
+|---|---|---|
+| `mds_nivel` | campo | El MDS del último día con dato cambió de nivel frente al día anterior: sube a estrés moderado (≥ 190 µm), alto (≥ 220) o crítico (≥ 250), o baja. |
+| `ingesta_fallida` | sistema | 30 min después de `INGESTA_HORA`, una fuente de la ingesta programada de hoy falló, quedó incompleta o no corrió. También si corrió, pero el clima o Phytech no llegan a ayer, o el riego registrado tiene 2 o más días de atraso. |
+| `riego_sin_respuesta` | campo | Se regó, pero la humedad de la zona radicular casi no subió: posible gotero tapado, válvula o fuga. Trae m³, m³/ha y ETo. |
+
+Cada aviso tiene una clave (`código:módulo:fecha:detalle`). El flujo pide los pendientes
+(`?pendientes=true`), arma un mensaje por chat, lo manda y confirma las claves con
+`POST /copiloto/avisos/confirmar`, que queda en la auditoría como «Aviso del copiloto enviado por
+Telegram». Un aviso confirmado no vuelve a salir. Si Telegram falla, no se confirma y sale en la
+siguiente hora. Con `/avisos` el bot muestra los avisos de hoy (enviados o no), y la vista Copiloto de
+la app también los muestra.
+
+Los umbrales son los del semáforo de la app (`COPILOTO_MDS_*`). La espera tras la ingesta se cambia con
+`COPILOTO_GRACIA_INGESTA_MIN`.
 
 ## Alertas que calcula el backend
 

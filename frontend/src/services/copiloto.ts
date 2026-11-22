@@ -6,7 +6,8 @@
  * - GET  /copiloto/sugerencias?estado&modulo_id          → Sugerencia[] (A E S), más recientes primero
  * - POST /copiloto/sugerencias/{id}/aprobar {comentario?} → Sugerencia (A E) · 409 si ya se resolvió
  * - POST /copiloto/sugerencias/{id}/descartar {comentario} → Sugerencia (A E) · comentario obligatorio
- * Solo el agente crea sugerencias. Aprobar no ejecuta nada: deja constancia de que se atiende.
+ * - GET  /copiloto/avisos?modulo_id                      → AvisosRespuesta (A E S y el agente)
+ * Solo el agente crea sugerencias y confirma avisos. Aprobar no ejecuta nada: deja constancia de que se atiende.
  */
 import { api } from "./httpClient";
 
@@ -78,15 +79,39 @@ export interface Sugerencia {
   comentario_resolucion: string | null;
 }
 
+/** Aviso que n8n manda solo por Telegram (cambio de nivel del MDS, ingesta fallida, riego sin respuesta). */
+export interface Aviso {
+  clave: string;
+  codigo: "mds_nivel" | "ingesta_fallida" | "riego_sin_respuesta";
+  severidad: Severidad;
+  destino: "campo" | "sistema";
+  icono: string;
+  titulo: string;
+  detalle: string;
+  fecha: string;
+  enviado: boolean;
+  valores: Record<string, unknown>;
+}
+
+export interface AvisosRespuesta {
+  modulo: { id: number; codigo: string; nombre: string };
+  generado_at: string;
+  avisos: Aviso[];
+}
+
 export const claveCopiloto = {
   todo: ["copiloto"] as const,
   resumen: (moduloId: number) => ["copiloto", "resumen", moduloId] as const,
+  avisos: (moduloId: number) => ["copiloto", "avisos", moduloId] as const,
   sugerencias: (moduloId: number, estado: EstadoSugerencia | "todas") => ["copiloto", "sugerencias", moduloId, estado] as const,
 };
 
 export const copilotoApi = {
   resumen(moduloId: number, signal?: AbortSignal): Promise<Resumen> {
     return api.get<Resumen>("/copiloto/resumen", { modulo_id: moduloId }, signal);
+  },
+  avisos(moduloId: number, signal?: AbortSignal): Promise<AvisosRespuesta> {
+    return api.get<AvisosRespuesta>("/copiloto/avisos", { modulo_id: moduloId }, signal);
   },
   sugerencias(moduloId: number, estado: EstadoSugerencia | "todas", signal?: AbortSignal): Promise<Sugerencia[]> {
     const query = estado === "todas" ? { modulo_id: moduloId } : { modulo_id: moduloId, estado };

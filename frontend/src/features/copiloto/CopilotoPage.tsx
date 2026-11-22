@@ -21,6 +21,7 @@ import {
   claveCopiloto,
   copilotoApi,
   type Alerta,
+  type Aviso,
   type EstadoSugerencia,
   type PlanDia,
   type Sugerencia,
@@ -55,6 +56,24 @@ function FilaAlerta({ alerta }: { alerta: Alerta }) {
       </div>
       <p className="text-[13px] leading-5 text-texto-2">{alerta.detalle}</p>
       {contexto && <span className="text-xs text-texto-3">{contexto}</span>}
+    </li>
+  );
+}
+
+const DESTINO_AVISO: Record<Aviso["destino"], string> = { campo: "Campo", sistema: "Sistema" };
+
+function FilaAviso({ aviso }: { aviso: Aviso }) {
+  return (
+    <li className="flex flex-col gap-1.5 border-b border-borde py-3 last:border-b-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tono={TONO_SEVERIDAD[aviso.severidad]}>{ETIQUETA_SEVERIDAD[aviso.severidad]}</Badge>
+        <Badge tono={aviso.enviado ? "exito" : "neutro"} icono={false}>
+          {aviso.enviado ? "Enviado por Telegram" : "Por enviar"}
+        </Badge>
+        <span className="text-xs text-texto-3">{DESTINO_AVISO[aviso.destino]} · {formatearDia(aviso.fecha)}</span>
+      </div>
+      <p className="text-sm font-semibold text-texto">{aviso.titulo}</p>
+      <p className="text-[13px] leading-5 text-texto-2">{aviso.detalle}</p>
     </li>
   );
 }
@@ -179,6 +198,11 @@ export function CopilotoPage() {
     queryFn: ({ signal }) => copilotoApi.sugerencias(modulo!.id, filtro, signal),
     enabled: !!modulo,
   });
+  const avisos = useQuery({
+    queryKey: claveCopiloto.avisos(modulo?.id ?? 0),
+    queryFn: ({ signal }) => copilotoApi.avisos(modulo!.id, signal),
+    enabled: !!modulo,
+  });
   const alertas = ordenarPorSeveridad(resumen.data?.alertas ?? []);
 
   return (
@@ -218,38 +242,59 @@ export function CopilotoPage() {
           </CardBody>
         </Card>
 
-        <Card>
-          <CardHeader
-            titulo="Sugerencias del agente"
-            descripcion={puedeResolver ? "Apruébalas o descártalas: quedan en la auditoría." : "Solo el encargado o el administrador las resuelven."}
-          />
-          <CardBody className="flex flex-col gap-3">
-            <div role="group" aria-label="Filtrar sugerencias" className="flex gap-1.5">
-              {FILTROS.map((f) => (
-                <button key={f.valor} type="button" aria-pressed={filtro === f.valor} onClick={() => setFiltro(f.valor)}
-                  className={cn("h-8 rounded-full border px-3 text-xs font-medium transition-colors",
-                    filtro === f.valor ? "border-green-500 bg-activo-bg text-activo-tx" : "border-borde text-texto-2 hover:bg-activo-bg")}>
-                  {f.etiqueta}
-                </button>
-              ))}
-            </div>
-            {!modulo ? null : sugerencias.isPending ? (
-              <Skeleton className="h-24" />
-            ) : sugerencias.isError ? (
-              <Alert tono="error">{mensajeDeError(sugerencias.error)}</Alert>
-            ) : sugerencias.data.length === 0 ? (
-              <EmptyState compacto icono={<Droplets />} titulo={filtro === "pendiente" ? "Sin sugerencias pendientes" : "Aún no hay sugerencias"}
-                descripcion="El agente las propone cuando detecta algo que conviene revisar." />
-            ) : (
-              <ul className="flex flex-col gap-2" aria-label="Sugerencias">
-                {sugerencias.data.map((s) => (
-                  <TarjetaSugerencia key={s.id} s={s} puedeResolver={puedeResolver}
-                    onDecidir={(aprobar) => setDecision({ sugerencia: s, aprobar })} />
+        <div className="flex min-w-0 flex-col gap-4">
+          <Card>
+            <CardHeader
+              titulo="Avisos por Telegram"
+              descripcion="El copiloto los manda solo, apenas pasan: el MDS cambia de nivel, falla la ingesta de datos o el suelo no responde al riego."
+            />
+            <CardBody>
+              {!modulo ? null : avisos.isPending ? (
+                <Skeleton className="h-16" />
+              ) : avisos.isError ? (
+                <Alert tono="error">{mensajeDeError(avisos.error)}</Alert>
+              ) : avisos.data.avisos.length === 0 ? (
+                <EmptyState compacto icono={<CheckCircle2 />} titulo="Sin avisos por ahora"
+                  descripcion="Llegarán por Telegram cuando haya algo que atender." />
+              ) : (
+                <ul aria-label="Avisos">{avisos.data.avisos.map((a) => <FilaAviso key={a.clave} aviso={a} />)}</ul>
+              )}
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader
+              titulo="Sugerencias del agente"
+              descripcion={puedeResolver ? "Apruébalas o descártalas: quedan en la auditoría." : "Solo el encargado o el administrador las resuelven."}
+            />
+            <CardBody className="flex flex-col gap-3">
+              <div role="group" aria-label="Filtrar sugerencias" className="flex gap-1.5">
+                {FILTROS.map((f) => (
+                  <button key={f.valor} type="button" aria-pressed={filtro === f.valor} onClick={() => setFiltro(f.valor)}
+                    className={cn("h-8 rounded-full border px-3 text-xs font-medium transition-colors",
+                      filtro === f.valor ? "border-green-500 bg-activo-bg text-activo-tx" : "border-borde text-texto-2 hover:bg-activo-bg")}>
+                    {f.etiqueta}
+                  </button>
                 ))}
-              </ul>
-            )}
-          </CardBody>
-        </Card>
+              </div>
+              {!modulo ? null : sugerencias.isPending ? (
+                <Skeleton className="h-24" />
+              ) : sugerencias.isError ? (
+                <Alert tono="error">{mensajeDeError(sugerencias.error)}</Alert>
+              ) : sugerencias.data.length === 0 ? (
+                <EmptyState compacto icono={<Droplets />} titulo={filtro === "pendiente" ? "Sin sugerencias pendientes" : "Aún no hay sugerencias"}
+                  descripcion="El agente las propone cuando detecta algo que conviene revisar." />
+              ) : (
+                <ul className="flex flex-col gap-2" aria-label="Sugerencias">
+                  {sugerencias.data.map((s) => (
+                    <TarjetaSugerencia key={s.id} s={s} puedeResolver={puedeResolver}
+                      onDecidir={(aprobar) => setDecision({ sugerencia: s, aprobar })} />
+                  ))}
+                </ul>
+              )}
+            </CardBody>
+          </Card>
+        </div>
       </div>
 
       <DialogoDecision decision={decision} onCerrar={() => setDecision(null)} />

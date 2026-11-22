@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import Date, cast, extract, func, select
+from sqlalchemy import Date, cast, extract, func, select, text
 from sqlalchemy.orm import Session
 
-from app.models import CopilotoSugerencia, Modulo, PhytechSueloHorario, TokenServicio, Turno, Usuario
+from app.models import (
+    Auditoria,
+    CopilotoSugerencia,
+    IngestaCorrida,
+    Modulo,
+    PhytechSueloHorario,
+    TokenServicio,
+    Turno,
+    Usuario,
+)
+from app.models.enums import DisparoIngesta
 
 # --- Catálogo -------------------------------------------------------------------
 
@@ -127,3 +138,27 @@ def humedad_diaria(db: Session, project_id: int, desde: dt.date, hasta: dt.date)
         .group_by(dia)
     )
     return {f.fecha: {"inicio": f.inicio, "maximo": f.maximo, "lecturas": f.lecturas} for f in filas}
+
+
+# --- Avisos por Telegram ----------------------------------------------------------
+
+
+def corridas_programadas(db: Session, fecha: dt.date) -> list[IngestaCorrida]:
+    """Corridas de la ingesta programada de ``fecha`` (una por fuente: ``uq(fuente, fecha_programada)``)."""
+    return list(db.scalars(select(IngestaCorrida).where(
+        IngestaCorrida.disparo == DisparoIngesta.programado, IngestaCorrida.fecha_programada == fecha,
+    )))
+
+
+def claves_avisadas(db: Session, claves: Sequence[str], *, accion: str, entidad: str) -> set[str]:
+    """Las claves de aviso que ya tienen su confirmación de envío en la auditoría."""
+    if not claves:
+        return set()
+    return set(db.scalars(select(Auditoria.entidad_id).where(
+        Auditoria.accion == accion, Auditoria.entidad == entidad, Auditoria.entidad_id.in_(list(claves)),
+    )))
+
+
+def bloquear_avisos(db: Session) -> None:
+    """Candado de transacción (sirve con el pooler 6543): dos confirmaciones a la vez no duplican."""
+    db.execute(text("SELECT pg_advisory_xact_lock(hashtext('riego.copiloto_avisos'))"))
