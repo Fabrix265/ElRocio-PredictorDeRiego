@@ -7,6 +7,8 @@
 - ``cargar-historico``: carga idempotente de ``ml/data/raw`` (meteo, Phytech, NDVI, riego) y
   recálculo de ``ambiente_diario``.
 - ``recalcular-ambiente``: recalcula ``ambiente_diario`` desde las lecturas guardadas.
+- ``crear-token-agente`` / ``revocar-token-agente`` / ``listar-tokens-agente``: tokens de servicio
+  del agente del copiloto (n8n).
 
 Los dos primeros usan DATABASE_URL_MIGRACIONES (rol dueño, conexión directa 5432); los demás usan
 DATABASE_URL (rol ``riego_app``), igual que la aplicación.
@@ -445,6 +447,75 @@ def explorar_fabric(args: argparse.Namespace) -> int:
     except Exception as error:  # noqa: BLE001 - mensaje sin secretos
         print(f"Error al consultar: {sin_secretos(f'{type(error).__name__}: {error}', cfg)}", file=sys.stderr)
         return 1
+    return 0
+
+
+# --- Copiloto: tokens del agente de n8n ----------------------------------------------
+
+def _args_crear_token(p: argparse.ArgumentParser) -> None:
+    p.add_argument("nombre", help="Nombre del token, p. ej. n8n-copiloto (minúsculas, números, - o _)")
+    p.add_argument("--archivo", type=Path,
+                   help="Escribe el token en este archivo en vez de mostrarlo (no debe existir)")
+
+
+@comando("crear-token-agente", "Crea el token de servicio del agente del copiloto (n8n). Se muestra una sola vez.",
+         _args_crear_token)
+def crear_token_agente(args: argparse.Namespace) -> int:
+    from app.core.errores import ErrorApp
+    from app.services import agente_service
+
+    if args.archivo is not None and args.archivo.exists():
+        print(f"{args.archivo} ya existe: no se sobrescribe", file=sys.stderr)
+        return 2
+    try:
+        with _sesion_app() as db:
+            fila, token = agente_service.crear(db, args.nombre)
+            nombre, prefijo = fila.nombre, fila.prefijo
+    except ErrorApp as error:
+        print(error.detail, file=sys.stderr)
+        return 1
+    if args.archivo is not None:
+        args.archivo.write_text(token + "\n", encoding="utf-8")
+        print(f"Token «{nombre}» ({prefijo}…) creado y guardado en {args.archivo}.")
+    else:
+        print(f"Token «{nombre}» creado. Cópialo ahora, no se vuelve a mostrar:\n\n{token}\n")
+    print("En n8n: credencial «Header Auth» con el nombre X-Token-Agente y este valor.")
+    return 0
+
+
+def _args_revocar_token(p: argparse.ArgumentParser) -> None:
+    p.add_argument("nombre", help="Nombre del token a revocar")
+
+
+@comando("revocar-token-agente", "Revoca un token del agente del copiloto (deja de funcionar al instante).",
+         _args_revocar_token)
+def revocar_token_agente(args: argparse.Namespace) -> int:
+    from app.core.errores import ErrorApp
+    from app.services import agente_service
+
+    try:
+        with _sesion_app() as db:
+            fila = agente_service.revocar(db, args.nombre)
+            nombre = fila.nombre
+    except ErrorApp as error:
+        print(error.detail, file=sys.stderr)
+        return 1
+    print(f"Token «{nombre}» revocado.")
+    return 0
+
+
+@comando("listar-tokens-agente", "Lista los tokens del agente del copiloto (sin el token).")
+def listar_tokens_agente(_args: argparse.Namespace) -> int:
+    from app.core.tiempo import a_lima
+    from app.repositories import copiloto as repo
+
+    with _sesion_app() as db:
+        filas = repo.tokens(db)
+        if not filas:
+            print("No hay tokens.")
+        for f in filas:
+            uso = a_lima(f.ultimo_uso_at).strftime("%Y-%m-%d %H:%M") if f.ultimo_uso_at else "nunca"
+            print(f"{f.nombre:<30} {f.prefijo}…  {'activo' if f.activo else 'revocado'}  último uso: {uso}")
     return 0
 
 

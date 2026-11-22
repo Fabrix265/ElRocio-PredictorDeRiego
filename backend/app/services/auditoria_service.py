@@ -67,6 +67,19 @@ ENTIDAD_MODULO = "modulo"
 ACCIONES += (PARAMETROS_PULSOS_ACTUALIZADOS,)
 ENTIDADES += (ENTIDAD_MODULO,)
 
+# Copiloto agrónomo: tokens del agente (CLI) y sugerencias (agente las crea, la app las resuelve).
+TOKEN_AGENTE_CREADO = "token_agente_creado"
+TOKEN_AGENTE_REVOCADO = "token_agente_revocado"
+CONSULTA_AGENTE = "consulta_agente"
+SUGERENCIA_CREADA = "sugerencia_creada"
+SUGERENCIA_APROBADA = "sugerencia_aprobada"
+SUGERENCIA_DESCARTADA = "sugerencia_descartada"
+ENTIDAD_TOKEN_SERVICIO = "token_servicio"
+ENTIDAD_SUGERENCIA = "copiloto_sugerencia"
+ACCIONES += (TOKEN_AGENTE_CREADO, TOKEN_AGENTE_REVOCADO, CONSULTA_AGENTE, SUGERENCIA_CREADA, SUGERENCIA_APROBADA,
+             SUGERENCIA_DESCARTADA)
+ENTIDADES += (ENTIDAD_TOKEN_SERVICIO, ENTIDAD_SUGERENCIA)
+
 ACTOR_SISTEMA = "sistema"
 
 # Lista blanca de campos por entidad para las instantáneas antes/después.

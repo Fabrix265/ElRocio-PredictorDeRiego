@@ -41,6 +41,12 @@ const ACCIONES: Record<string, string> = {
   ingesta_manual: "Ingesta manual",
   meteo_excel_pisado: "Lecturas del Excel histórico reemplazadas por WeatherLink",
   exportar_refinamiento: "Exportación para refinamiento",
+  token_agente_creado: "Token del agente creado",
+  token_agente_revocado: "Token del agente revocado",
+  consulta_agente: "Consulta del agente del copiloto",
+  sugerencia_creada: "Sugerencia del copiloto creada",
+  sugerencia_aprobada: "Sugerencia del copiloto aprobada",
+  sugerencia_descartada: "Sugerencia del copiloto descartada",
 };
 
 const ENTIDADES: Record<string, string> = {
@@ -51,6 +57,8 @@ const ENTIDADES: Record<string, string> = {
   carga_riego: "Carga de Excel de riego",
   ingesta_corrida: "Corrida de ingesta",
   exportacion: "Exportación",
+  token_servicio: "Token del agente",
+  copiloto_sugerencia: "Sugerencia del copiloto",
 };
 
 const CAMPOS: Record<string, string> = {
