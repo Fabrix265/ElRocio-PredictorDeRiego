@@ -111,11 +111,22 @@ return (r.alertas || [])
     detalle: String(a.detalle).slice(0, 2000),
   } }));"""
 
-DESTINATARIOS_JS = f"""// Un ítem por chat de Telegram de la lista de Configuración.
+LIMITE_TELEGRAM = 4000  # Telegram rechaza los mensajes de más de 4096 caracteres
+
+INFORME_FALLIDO = ("No pude redactar el informe de hoy. Revisa el plan y las alertas en la vista Copiloto "
+                   "de la app.")
+
+DESTINATARIOS_JS = f"""// Un ítem por chat de Telegram de la lista de Configuración (texto recortado al límite de Telegram).
+// Si el modelo falló, «Redactar informe» sigue sin texto y se manda un aviso en su lugar.
 const ids = String($('{CONFIG}').first().json.chat_ids || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
-const texto = $input.first().json.text;
+const texto = (String($input.first().json.text || '').trim() || '{INFORME_FALLIDO}').slice(0, {LIMITE_TELEGRAM});
 return ids.map((chat_id) => ({{ json: {{ chat_id, texto }} }}));"""
+
+# Si el agente falla (modelo caído, API sin respuesta, demasiadas herramientas), el bot avisa en vez de callar.
+SIN_RESPUESTA = ("No pude consultar los datos en este momento. Intenta de nuevo en unos minutos o revisa "
+                 "el plan en la app.")
+RESPUESTA_AGENTE = f"={{{{ String($json.output || '{SIN_RESPUESTA}').slice(0, {LIMITE_TELEGRAM}) }}}}"
 
 
 def informe_diario() -> dict[str, Any]:
@@ -144,6 +155,7 @@ def informe_diario() -> dict[str, Any]:
             "jsonBody": "={{ JSON.stringify($json) }}", "options": {},
         }, CRED_TOKEN),
     ]
+    next(n for n in nodos if n["name"] == "Redactar informe")["onError"] = "continueRegularOutput"
     conexiones = {
         "Cada día 06:15": {"main": [[conexion(CONFIG)]]},
         CONFIG: {"main": [[conexion("Resumen del copiloto")]]},
@@ -296,6 +308,7 @@ def _agente(texto: str, sesion: str) -> tuple[list[dict[str, Any]], dict[str, An
 
 def agente_telegram() -> dict[str, Any]:
     nodos_agente, conexiones_agente = _agente("{{ $json.pregunta }}", "={{ $('Preparar').first().json.chat_id }}")
+    nodos_agente[0]["onError"] = "continueRegularOutput"
     nodos = [
         nodo("Mensaje de Telegram", "n8n-nodes-base.telegramTrigger", 1.1, (0, 0),
              {"updates": ["message"], "additionalFields": {}}, CRED_TELEGRAM),
@@ -315,8 +328,8 @@ def agente_telegram() -> dict[str, Any]:
             ]},
             "options": {},
         }),
-        *nodos_agente,
-        telegram("Responder", (1220, -120), "={{ $('Preparar').first().json.chat_id }}", "={{ $json.output }}"),
+        *nodos_agente,  # el agente sigue con un ítem {error} si falla: «Responder» manda el aviso
+        telegram("Responder", (1220, -120), "={{ $('Preparar').first().json.chat_id }}", RESPUESTA_AGENTE),
         telegram("Ayuda", (920, 60), "={{ $json.chat_id }}", AYUDA.replace("\\n", "\n")),
         telegram("Solo texto", (920, 200), "={{ $json.chat_id }}",
                  "Por ahora solo leo mensajes de texto. Escríbeme tu pregunta o usa /ayuda."),

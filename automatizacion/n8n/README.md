@@ -46,13 +46,18 @@ llamada queda en la auditoría como `consulta_agente`.
 
 ## 2. n8n en el VPS
 
+Pon n8n **fuera del clon del repo**, para que `git pull` (o `riego-actualizar`) nunca lo toque:
+
 ```bash
-cd automatizacion/n8n
-cp .env.example .env      # completa N8N_VERSION, N8N_DOMINIO y N8N_ENCRYPTION_KEY
+mkdir -p /opt/n8n && cd /opt/n8n
+cp /opt/riego/app/automatizacion/n8n/docker-compose.yml .
+cp /opt/riego/app/automatizacion/n8n/.env.example .env
+nano .env                 # N8N_DOMINIO y N8N_ENCRYPTION_KEY (openssl rand -hex 32)
 docker compose up -d
 ```
 
-n8n escucha solo en `127.0.0.1:5678`. Publícalo con HTTPS en tu proxy, por ejemplo con Caddy:
+n8n escucha solo en `127.0.0.1:5678`. Publícalo con HTTPS en tu proxy, por ejemplo con Caddy
+(`/etc/caddy/Caddyfile`, y luego `systemctl reload caddy`):
 
 ```text
 n8n.tu-dominio.pe {
@@ -63,9 +68,12 @@ n8n.tu-dominio.pe {
 Telegram necesita HTTPS para entregar los mensajes al webhook del flujo 2. Crea tu usuario de n8n
 al abrirlo por primera vez y guarda la `N8N_ENCRYPTION_KEY` en un lugar seguro.
 
-Si la API corre en el mismo VPS, `api_url` puede ser su dirección interna (p. ej.
-`http://127.0.0.1:8000` con `network_mode: host`, o el nombre del servicio en la misma red de Docker).
-Así el tráfico del agente no sale a internet.
+**`api_url`**: usa la dirección pública de la API (p. ej. `https://irrital.duckdns.org`). Si la API
+escucha solo en `127.0.0.1:8000`, el contenedor de n8n no la alcanza por esa dirección, porque dentro
+de Docker `127.0.0.1` es el propio contenedor.
+
+Para actualizar n8n: cambia `N8N_VERSION` en `/opt/n8n/.env` y corre `docker compose pull && docker compose up -d`.
+Los flujos y las credenciales quedan en el volumen `n8n_datos`.
 
 ## 3. Credenciales en n8n (Settings → Credentials)
 
@@ -161,7 +169,7 @@ más completo:
 | Nivel | Comando | Qué comprueba |
 |---|---|---|
 | 1. Backend | `cd backend && .venv/Scripts/python -m pytest -q tests/test_copiloto.py` | Reglas de alertas, permisos, token, sugerencias (sin duplicados, también en paralelo) y que **cada herramienta de los JSON** responde como la llamaría n8n |
-| 2. Lógica del bot | `node automatizacion/n8n/pruebas/probar_codigo.mjs` | Los nodos Code: chats autorizados, comandos, `/ayuda`, alertas → sugerencias, destinatarios |
+| 2. Lógica del bot | `node automatizacion/n8n/pruebas/probar_codigo.mjs` (para el juego Devlum: `FLUJOS_DIR=automatizacion/n8n/flujos/devlum` delante) | Los nodos Code: chats autorizados, comandos, `/ayuda`, alertas → sugerencias, destinatarios, aviso si el modelo falla y recorte al límite de Telegram |
 | 3. n8n real (Docker) | `python automatizacion/n8n/pruebas/probar_n8n_local.py --token-archivo <ruta>` | Importa los flujos en n8n, ejecuta el informe contra la API (sin Claude ni Telegram) dos veces y el bot con 5 mensajes simulados |
 | 4. Punta a punta | Con tus credenciales reales, en el VPS | Mensaje del informe en Telegram y respuestas del agente |
 
@@ -196,4 +204,8 @@ Lista para el nivel 4 (una vez desplegado):
   el 5678, define `WEBHOOK_URL` con la dirección real (p. ej. `http://localhost:5679/`).
 - **El bot no responde**: el flujo del agente no está activo, o n8n no tiene HTTPS público (revisa
   `WEBHOOK_URL`).
+- **El bot contesta «No pude consultar los datos en este momento»**: el agente falló (clave del modelo,
+  saldo en Devlum, API caída o 401 del token). El detalle está en **Executions** del flujo. Si el modelo
+  falla al redactar el informe diario, los chats reciben igual un aviso en vez de nada. Los mensajes se
+  recortan a 4000 caracteres porque Telegram rechaza los de más de 4096.
 - **400 del modelo**: quita la temperatura y el thinking del nodo de Claude (ver *Modelo*).

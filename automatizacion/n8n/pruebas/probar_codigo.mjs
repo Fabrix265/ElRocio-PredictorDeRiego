@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-const dir = fileURLToPath(new URL("../flujos", import.meta.url));
+const dir = process.env.FLUJOS_DIR || fileURLToPath(new URL("../flujos", import.meta.url));
 const cargar = (f) => JSON.parse(readFileSync(`${dir}/${f}`, "utf8"));
 const codigo = (flujo, nombre) => flujo.nodes.find((n) => n.name === nombre).parameters.jsCode;
 
@@ -23,6 +23,21 @@ const dest = correr(codigo(informe, "Destinatarios"), {
   entrada: { text: "Buenos días" }, nodos: { "Configuración": { chat_ids: " 111, 222 ,," } },
 });
 assert.deepEqual(dest.map((d) => d.json), [{ chat_id: "111", texto: "Buenos días" }, { chat_id: "222", texto: "Buenos días" }]); ok++;
+const destinatarios = (entrada) => correr(codigo(informe, "Destinatarios"), {
+  entrada, nodos: { "Configuración": { chat_ids: "111" } },
+})[0].json.texto;
+assert.equal(destinatarios({ text: "x".repeat(6000) }).length, 4000); ok++; // límite de Telegram: 4096
+assert.match(destinatarios({ error: "modelo caído" }), /^No pude redactar el informe/); ok++;
+assert.equal(informe.nodes.find((n) => n.name === "Redactar informe").onError, "continueRegularOutput"); ok++;
+
+// --- Respuesta del agente (expresión del nodo «Responder»)
+const nodoAgente = agente.nodes.find((n) => n.name === "Agente copiloto");
+assert.equal(nodoAgente.onError, "continueRegularOutput"); ok++;
+const exprResponder = agente.nodes.find((n) => n.name === "Responder").parameters.text.replace(/^=\{\{|\}\}$/g, "");
+const responder = ($json) => new Function("$json", `return ${exprResponder};`)($json);
+assert.equal(responder({ output: "Plan de hoy: TE01 120 m³" }), "Plan de hoy: TE01 120 m³"); ok++;
+assert.match(responder({ error: "timeout" }), /^No pude consultar los datos/); ok++;
+assert.equal(responder({ output: "y".repeat(9000) }).length, 4000); ok++;
 
 // --- Sugerencias desde alertas
 const resumen = {

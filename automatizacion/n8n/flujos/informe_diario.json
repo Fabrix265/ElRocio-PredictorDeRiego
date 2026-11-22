@@ -86,7 +86,8 @@
       "position": [
         680,
         -100
-      ]
+      ],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -116,7 +117,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Un ítem por chat de Telegram de la lista de Configuración.\nconst ids = String($('Configuración').first().json.chat_ids || '')\n  .split(',').map((s) => s.trim()).filter(Boolean);\nconst texto = $input.first().json.text;\nreturn ids.map((chat_id) => ({ json: { chat_id, texto } }));"
+        "jsCode": "// Un ítem por chat de Telegram de la lista de Configuración (texto recortado al límite de Telegram).\n// Si el modelo falló, «Redactar informe» sigue sin texto y se manda un aviso en su lugar.\nconst ids = String($('Configuración').first().json.chat_ids || '')\n  .split(',').map((s) => s.trim()).filter(Boolean);\nconst texto = (String($input.first().json.text || '').trim() || 'No pude redactar el informe de hoy. Revisa el plan y las alertas en la vista Copiloto de la app.').slice(0, 4000);\nreturn ids.map((chat_id) => ({ json: { chat_id, texto } }));"
       },
       "id": "6354ad1f-b64b-5b58-9932-697a07577e7d",
       "name": "Destinatarios",

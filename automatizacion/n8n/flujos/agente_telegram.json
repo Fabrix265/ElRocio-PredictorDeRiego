@@ -190,7 +190,8 @@
       "position": [
         920,
         -120
-      ]
+      ],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -495,7 +496,7 @@
     {
       "parameters": {
         "chatId": "={{ $('Preparar').first().json.chat_id }}",
-        "text": "={{ $json.output }}",
+        "text": "={{ String($json.output || 'No pude consultar los datos en este momento. Intenta de nuevo en unos minutos o revisa el plan en la app.').slice(0, 4000) }}",
         "additionalFields": {
           "appendAttribution": false
         }
