@@ -31,6 +31,7 @@ DEVLUM_URL = "https://ai.devlumlabs.com/api/v1"
 PROVEEDORES = ("anthropic", "devlum")
 CONFIG = "Configuración"
 _proveedor = "anthropic"  # lo fija main() para cada juego de flujos
+DISPARADORES_WEBHOOK = {"n8n-nodes-base.telegramTrigger", "@n8n/n8n-nodes-langchain.chatTrigger"}
 
 
 def _id(nombre: str) -> str:
@@ -41,6 +42,10 @@ def nodo(nombre: str, tipo: str, version: float, posicion: tuple[int, int], para
          credenciales: dict[str, Any] | None = None) -> dict[str, Any]:
     salida = {"parameters": parametros, "id": _id(nombre), "name": nombre, "type": tipo, "typeVersion": version,
               "position": list(posicion)}
+    if tipo in DISPARADORES_WEBHOOK:
+        # Sin webhookId, n8n arma la ruta con el nombre del nodo (con espacios) y no la registra al
+        # publicar: Telegram recibe 404. El editor lo asigna solo; en un JSON importado debe venir.
+        salida["webhookId"] = _id(f"webhook-{nombre}")
     if credenciales:
         salida["credentials"] = credenciales
     return salida

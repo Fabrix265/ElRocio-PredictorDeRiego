@@ -30,6 +30,12 @@ assert.equal(destinatarios({ text: "x".repeat(6000) }).length, 4000); ok++; // l
 assert.match(destinatarios({ error: "modelo caído" }), /^No pude redactar el informe/); ok++;
 assert.equal(informe.nodes.find((n) => n.name === "Redactar informe").onError, "continueRegularOutput"); ok++;
 
+// --- Disparadores con webhookId fijo (sin él, n8n no registra el webhook de Telegram al publicar)
+const chatPrueba = cargar("agente_chat_prueba.json");
+for (const [flujo, nombre] of [[agente, "Mensaje de Telegram"], [chatPrueba, "Chat de prueba"]]) {
+  assert.match(flujo.nodes.find((n) => n.name === nombre).webhookId ?? "", /^[0-9a-f-]{36}$/); ok++;
+}
+
 // --- Respuesta del agente (expresión del nodo «Responder»)
 const nodoAgente = agente.nodes.find((n) => n.name === "Agente copiloto");
 assert.equal(nodoAgente.onError, "continueRegularOutput"); ok++;
