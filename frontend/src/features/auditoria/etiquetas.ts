@@ -118,6 +118,14 @@ export const etiquetaAccion = (accion: string) => ACCIONES[accion] ?? humanizar(
 export const etiquetaEntidad = (entidad: string) => ENTIDADES[entidad] ?? humanizar(entidad);
 export const etiquetaCampo = (campo: string) => CAMPOS[campo] ?? humanizar(campo);
 
+/** Nombre visible de quien hizo la acción: el sistema y el agente del copiloto, en palabras. */
+export function etiquetaActor(username: string | null | undefined): { nombre: string; detalle?: string } {
+  if (!username) return { nombre: "Anónimo" };
+  if (username === "sistema") return { nombre: "Sistema", detalle: "Proceso automático" };
+  if (username.startsWith("agente:")) return { nombre: "Copiloto", detalle: "Agente automático" };
+  return { nombre: username };
+}
+
 export function etiquetaRol(rol: string | null | undefined): string {
   if (!rol) return "—";
   return (ROLES as readonly string[]).includes(rol) ? ETIQUETA_ROL[rol as Rol] : humanizar(rol);

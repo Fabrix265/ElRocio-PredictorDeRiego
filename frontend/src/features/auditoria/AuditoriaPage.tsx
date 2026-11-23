@@ -17,7 +17,7 @@ import { Select } from "../../components/ui/Select";
 import { formatearFechaHora, hoyLima, limiteDiaLima } from "../../lib/fechas";
 import { mensajeDeError } from "../../services/httpClient";
 import { auditoriaApi, claveAuditoria, type FiltrosAuditoria, type RegistroAuditoria } from "./api";
-import { etiquetaAccion, etiquetaEntidad, etiquetaRol, tonoAccion } from "./etiquetas";
+import { etiquetaAccion, etiquetaActor, etiquetaEntidad, etiquetaRol, tonoAccion } from "./etiquetas";
 import { PanelDetalle } from "./PanelDetalle";
 
 const TAMANO_PAGINA = 50;
@@ -104,12 +104,15 @@ export default function AuditoriaPage() {
       {
         id: "usuario",
         header: "Usuario",
-        cell: ({ row: { original: r } }) => (
-          <div className="flex flex-col">
-            <span className="font-medium">{r.username ?? "Anónimo"}</span>
-            <span className="text-xs text-texto-3">{etiquetaRol(r.rol)}</span>
-          </div>
-        ),
+        cell: ({ row: { original: r } }) => {
+          const actor = etiquetaActor(r.username);
+          return (
+            <div className="flex flex-col" title={r.username ?? undefined}>
+              <span className="font-medium">{actor.nombre}</span>
+              <span className="text-xs text-texto-3">{r.rol ? etiquetaRol(r.rol) : (actor.detalle ?? etiquetaRol(r.rol))}</span>
+            </div>
+          );
+        },
       },
       {
         id: "accion",
@@ -123,7 +126,7 @@ export default function AuditoriaPage() {
           r.entidad ? (
             <span>
               {etiquetaEntidad(r.entidad)}
-              {r.entidad_id != null && <span className="text-texto-3"> #{r.entidad_id}</span>}
+              {r.entidad_id != null && /^\d+$/.test(String(r.entidad_id)) && <span className="text-texto-3"> #{r.entidad_id}</span>}
             </span>
           ) : (
             <span className="text-texto-3">—</span>

@@ -1,7 +1,8 @@
 import { useCallback, useState, type ReactNode } from "react";
-import { Outlet } from "react-router";
+import { Outlet, useLocation } from "react-router";
 
 import { guardarPreferencia, leerPreferencia } from "../../lib/preferencias";
+import { AvisoActualizacion, AvisoSinConexion } from "./AvisosPwa";
 import { Cabecera } from "./Cabecera";
 import { MenuInferior } from "./MenuInferior";
 import { Sidebar } from "./Sidebar";
@@ -17,6 +18,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
     guardarPreferencia("sidebar-colapsada", nueva ? "1" : "0");
     setColapsada(nueva);
   }, [colapsada]);
+  const { pathname } = useLocation();
 
   return (
     <div className="flex min-h-dvh">
@@ -29,11 +31,16 @@ export function AppLayout({ children }: { children?: ReactNode }) {
       <Sidebar colapsada={colapsada} alternar={alternar} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Cabecera />
-        <main id="contenido" tabIndex={-1} className="flex-1 px-4 pt-4 pb-24 focus:outline-none sm:px-5 sm:pt-5 md:pb-8">
-          <div className="mx-auto w-full max-w-[1400px]">{children ?? <Outlet />}</div>
+        <AvisoSinConexion />
+        <main id="contenido" tabIndex={-1} className="flex-1 px-4 pt-5 pb-28 focus:outline-none sm:px-6 sm:pt-6 md:pb-10">
+          {/* La clave por ruta reinicia la animación de entrada al cambiar de pantalla. */}
+          <div key={pathname} className="entrada-suave mx-auto w-full max-w-[1400px]">
+            {children ?? <Outlet />}
+          </div>
         </main>
       </div>
       <MenuInferior />
+      <AvisoActualizacion />
     </div>
   );
 }

@@ -45,6 +45,10 @@
   --info-bg: #e7f0fa;
   --info: #2569ae;
   --info-tx: #1b5a96;
+  /* Acentos de KPIs (solo íconos): violeta para planta, ámbar para clima */
+  --violeta-bg: #f3eefb;
+  --violeta: #7a4fc4;
+  --ambar: #c77a00;
 
   /* Gráficos: turnos y series */
   --te1: #1f63b0;
@@ -58,11 +62,12 @@
 
   /* Semánticos */
   --sidebar: #ffffff; /* barra lateral blanca */
-  --fondo: var(--sand-25); /* detrás de las tarjetas */
+  --fondo: #f4f7f2; /* detrás de las tarjetas: blanco con un toque de verde */
   --superficie: var(--sand-0); /* tarjetas, cabecera, barra lateral */
-  --hundido: var(--sand-50); /* cabecera de tabla, segmentos */
+  --hundido: #f2f5ef; /* cabecera de tabla, segmentos */
   --deshabilitado: var(--sand-100);
-  --borde: var(--sand-200);
+  --borde: #e1e7dd; /* bordes de tarjetas y tablas (verde muy claro) */
+  --borde-suave: #ecf0e8;
   --borde-input: var(--sand-400);
   --texto: var(--sand-900);
   --texto-2: var(--sand-600);
@@ -76,12 +81,20 @@
   --foco-anillo: var(--green-200);
 
   /* Forma */
-  --radio-sm: 4px;
-  --radio-md: 8px;
-  --radio-lg: 12px;
-  --radio-xl: 16px;
-  --sombra: 0 1px 3px rgb(18 48 31 / 0.08), 0 1px 2px rgb(18 48 31 / 0.04);
-  --sombra-lg: 0 16px 40px rgb(18 48 31 / 0.14);
+  --radio-sm: 6px;
+  --radio-md: 10px;
+  --radio-lg: 14px;
+  --radio-xl: 20px;
+  --sombra: 0 1px 2px rgb(18 48 31 / 0.05), 0 4px 14px -6px rgb(18 48 31 / 0.1);
+  --sombra-hover: 0 2px 4px rgb(18 48 31 / 0.06), 0 12px 28px -10px rgb(18 48 31 / 0.2);
+  --sombra-lg: 0 18px 48px -12px rgb(18 48 31 / 0.24);
+  --sombra-marca: 0 1px 2px rgb(20 56 35 / 0.25), 0 6px 16px -6px rgb(42 112 66 / 0.55);
+
+  /* Degradados de marca */
+  --degradado-marca: linear-gradient(135deg, #2f7d4a 0%, #215a36 100%);
+  --degradado-boton: linear-gradient(180deg, #33844f 0%, #2a7042 100%);
+  --degradado-boton-hover: linear-gradient(180deg, #2a7042 0%, #215a36 100%);
+  --lima: #a3d977; /* acento claro sobre verde oscuro (brillos, filete) */
 
   /* Tipografía */
   --fuente: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -90,5 +103,5 @@
   /* Layout */
   --sidebar-ancho: 248px;
   --sidebar-ancho-colapsado: 72px;
-  --cabecera-alto: 60px;
+  --cabecera-alto: 64px;
 }

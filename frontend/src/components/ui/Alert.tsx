@@ -29,7 +29,7 @@ export function Alert({
     <div
       role={tono === "error" ? "alert" : "status"}
       className={cn(
-        "flex gap-2.5 rounded-md border px-3 py-2.5 text-[13px] leading-5 [&>svg]:mt-0.5 [&>svg]:size-4 [&>svg]:shrink-0",
+        "flex gap-2.5 rounded-md border px-3.5 py-3 text-[13px] leading-5 [&>svg]:mt-0.5 [&>svg]:size-4 [&>svg]:shrink-0",
         caja,
         className,
       )}

@@ -125,7 +125,7 @@ export default function CronogramasPage() {
                 <button
                   type="button"
                   onClick={() => navigate(`/cronogramas/${c.id}`)}
-                  className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-hundido"
+                  className="group flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-activo-bg/60 sm:px-5"
                 >
                   <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
                     <span className="w-24 shrink-0 text-sm font-semibold text-texto">
@@ -142,7 +142,7 @@ export default function CronogramasPage() {
                         </span>
                       )}
                     </span>
-                    {c.version && <MarcasVersion marcas={c.version} />}
+                    {c.version && <MarcasVersion marcas={c.version} origen={c.version.origen} />}
                     {(c.version?.total_m3 != null || c.eto_dia_anterior_mm != null) && (
                       <span className="cifras flex flex-wrap gap-x-3 text-xs text-texto sm:ml-auto sm:flex-col sm:items-end">
                         {c.version?.total_m3 != null && <span className="font-semibold whitespace-nowrap">{textoAgua(c.version.total_m3, c.version.total_m3ha)}</span>}
@@ -152,7 +152,7 @@ export default function CronogramasPage() {
                       </span>
                     )}
                   </div>
-                  <ChevronRight className="size-4 shrink-0 text-texto-3" aria-hidden="true" />
+                  <ChevronRight className="size-4 shrink-0 text-texto-3 transition-transform group-hover:translate-x-0.5 group-hover:text-marca" aria-hidden="true" />
                 </button>
               </li>
             ))}

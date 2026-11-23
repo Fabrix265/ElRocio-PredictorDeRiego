@@ -39,27 +39,6 @@ export function valorAgua(turnos: AguaTurno[], serie: SerieAgua, unidad: UnidadA
   return unidad === "m3" ? redondear(m3, 1) : area > 0 ? redondear(m3 / area, 2) : null;
 }
 
-/**
- * Partes de la barra apilada (real + provisional) del gráfico. En m³/ha las dos se dividen por la
- * misma superficie (turnos con riego real o provisional), así la barra suma la lámina del día; con
- * promedios separados, un día a medias sumaría dos promedios y saldría casi el doble.
- */
-export function valorApilado(turnos: AguaTurno[], serie: "real" | "provisional", unidad: UnidadAgua): number | null {
-  if (unidad === "m3" || turnos.length === 1) return valorAgua(turnos, serie, unidad);
-  let m3 = 0;
-  let area = 0;
-  let hay = false;
-  for (const t of turnos) {
-    const real = m3De(t, "real");
-    const provisional = m3De(t, "provisional");
-    if (real == null && provisional == null) continue;
-    area += t.area_ha;
-    const v = serie === "real" ? real : provisional;
-    if (v != null) { hay = true; m3 += v; }
-  }
-  return hay && area > 0 ? redondear(m3 / area, 2) : null;
-}
-
 function redondear(v: number | null, decimales: number): number | null {
   if (v == null || !Number.isFinite(v)) return null;
   const f = 10 ** decimales;
@@ -73,8 +52,8 @@ const escapar = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<":
 
 /**
  * Tooltip del gráfico de agua: día y alcance, cada serie con su unidad (sin las vacías) y, si el día
- * ya es todo real, cuánto se apartó lo regado del plan publicado. Series: 0 real, 1 provisional,
- * 2 publicado, 3 modelo. ``versiones`` (serie -> número) nombra la versión del cronograma de cada línea.
+ * tiene dato real, cuánto se apartó lo regado del plan publicado. Series: 0 real, 1 publicado,
+ * 2 modelo. ``versiones`` (serie -> número) nombra la versión del cronograma de cada línea.
  */
 export function tooltipAgua(puntos: PuntoTooltip[], unidad: UnidadAgua, alcance: string,
   versiones: Partial<Record<number, number | null>> = {}): string {
@@ -90,12 +69,7 @@ export function tooltipAgua(puntos: PuntoTooltip[], unidad: UnidadAgua, alcance:
     `${escapar(p.seriesName ?? "")}${versiones[p.seriesIndex ?? -1] != null ? ` · v${versiones[p.seriesIndex ?? -1]}` : ""}</span><strong>${fmt.format(p.value as number)} ${u}</strong></div>`);
   let html = `<div style="margin-bottom:4px"><strong>${escapar(puntos[0]?.axisValueLabel ?? "")}</strong> · ${escapar(alcance)}</div>`;
   html += filas.length ? filas.join("") : "<div>Sin riego registrado</div>";
-  const real = valor(0), provisional = valor(1);
-  if (real != null && provisional != null) {
-    html += `<div style="margin-top:4px;display:flex;justify-content:space-between;gap:16px"><span>Total del día</span>` +
-      `<strong>${fmt.format(real + provisional)} ${u}</strong></div>`;
-  }
-  const dif = provisional == null ? diferenciaPct(real, valor(2)) : null;
+  const dif = diferenciaPct(valor(0), valor(1));
   if (dif != null) {
     html += `<div style="margin-top:4px;color:#5F5849">Real vs publicado: ${dif > 0 ? "+" : ""}${new Intl.NumberFormat("es-PE", { maximumFractionDigits: 1 }).format(dif)} %</div>`;
   }
@@ -139,7 +113,7 @@ export function csvAgua(dias: AguaDia[], unidad: UnidadAgua, conModelo: boolean)
       filas.push([
         d.fecha, t.turno_codigo, ...(conModelo ? [numeroCsv(modelo)] : []), numeroCsv(prop), numeroCsv(real),
         numeroCsv(diferenciaPct(real, prop)), ...(conModelo ? [numeroCsv(diferenciaPct(real, modelo))] : []),
-        t.estado_riego === "aplicado" ? "Real" : t.estado_riego === "provisional" ? "Provisional" : "Sin dato",
+        t.estado_riego === "aplicado" ? "Real" : "Sin dato",
         t.modificado ? "Sí" : "No", t.modificado ? textoSeguro(d.motivo ?? "") : "",
       ]);
     }

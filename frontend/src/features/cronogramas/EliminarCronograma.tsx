@@ -40,7 +40,7 @@ export function EliminarCronograma({ cronograma, bloqueado }: { cronograma: Cron
   const conflicto = eliminar.error instanceof ApiError && eliminar.error.status === 409;
   if (!puede(usuario.rol, "eliminarCronogramas")) return null;
   return <>
-    <Button variante="secundario" className="text-err-tx" icono={<Trash2 aria-hidden="true" />} disabled={bloqueado || eliminar.isPending}
+    <Button variante="peligroSuave" icono={<Trash2 aria-hidden="true" />} disabled={bloqueado || eliminar.isPending}
       onClick={() => { eliminar.reset(); setMotivo(""); setBase(cronograma); }}>Eliminar</Button>
     <Dialog open={!!base} onOpenChange={(abierto) => { if (!abierto && !eliminar.isPending) setBase(null); }}>
       <DialogContent titulo={`${verbo} cronograma`} descripcion={definitivo

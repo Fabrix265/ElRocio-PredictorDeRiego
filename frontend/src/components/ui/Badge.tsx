@@ -6,11 +6,11 @@ import { cn } from "../../lib/cn";
 export type TonoBadge = "exito" | "aviso" | "error" | "info" | "neutro" | "marca";
 
 const TONOS: Record<TonoBadge, string> = {
-  exito: "bg-ok-bg text-ok-tx",
-  aviso: "bg-warn-bg text-warn-tx",
-  error: "bg-err-bg text-err-tx",
-  info: "bg-info-bg text-info-tx",
-  neutro: "bg-hundido text-texto-2 border border-borde",
+  exito: "bg-ok-bg text-ok-tx ring-1 ring-inset ring-ok/15",
+  aviso: "bg-warn-bg text-warn-tx ring-1 ring-inset ring-warn/20",
+  error: "bg-err-bg text-err-tx ring-1 ring-inset ring-err/15",
+  info: "bg-info-bg text-info-tx ring-1 ring-inset ring-info/15",
+  neutro: "bg-hundido text-texto-2 ring-1 ring-inset ring-borde",
   marca: "bg-green-50 text-green-700",
 };
 
