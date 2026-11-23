@@ -120,7 +120,7 @@ function FilaGrupo({ g, bloqueada, onCambiar }: { g: GrupoCarga; bloqueada: bool
         )}
       </div>
       <div className="flex items-center gap-2 md:contents">
-        <span className="cifras text-[13px] font-medium capitalize">{formatearDiaCorto(g.fecha)}</span>
+        <span className="cifras text-[13px] font-medium">{formatearDiaCorto(g.fecha)}</span>
         <span className="text-[13px] font-semibold">{turno}</span>
       </div>
       <div className="md:order-none">

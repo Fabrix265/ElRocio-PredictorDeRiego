@@ -30,6 +30,7 @@ export function ordenarPorSeveridad<T extends { severidad: Severidad }>(alertas:
 }
 
 /** «Agente n8n-copiloto» a partir de «agente:n8n-copiloto». */
+/** Quién propuso: el token técnico del agente ("agente:n8n-…") se muestra como «el agente del copiloto». */
 export function nombreAgente(propuestaPor: string): string {
-  return propuestaPor.startsWith("agente:") ? `Agente ${propuestaPor.slice("agente:".length)}` : propuestaPor;
+  return propuestaPor.startsWith("agente:") ? "el agente del copiloto" : propuestaPor;
 }

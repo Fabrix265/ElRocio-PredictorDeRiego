@@ -8,6 +8,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import App from "./App";
+import { iniciarPwa } from "./lib/pwa";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -15,11 +16,5 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 );
 
-// PWA (F6): el service worker solo se registra en producción (en desarrollo interferiría con Vite).
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => {
-      /* sin service worker la app funciona igual; solo no es instalable */
-    });
-  });
-}
+// PWA: service worker (solo en producción), instalación y aviso de versión nueva (ver lib/pwa.ts).
+iniciarPwa();

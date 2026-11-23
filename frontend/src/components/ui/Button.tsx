@@ -3,30 +3,37 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 import { cn } from "../../lib/cn";
 
-export type VarianteBoton = "primario" | "secundario" | "fantasma" | "peligro";
+export type VarianteBoton = "primario" | "secundario" | "fantasma" | "peligro" | "peligroSuave";
 export type TamanoBoton = "sm" | "md" | "lg" | "icono";
 
 const BASE =
   "inline-flex items-center justify-center gap-2 rounded-md border font-medium whitespace-nowrap select-none " +
-  "transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-foco " +
+  "transition-[background,color,border-color,box-shadow,transform] duration-150 active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-foco " +
   "focus-visible:shadow-[0_0_0_4px_var(--foco-anillo)] disabled:cursor-not-allowed [&_svg]:size-4 [&_svg]:shrink-0";
 
 const VARIANTES: Record<VarianteBoton, string> = {
   primario:
-    "bg-marca text-marca-texto border-transparent hover:bg-marca-hover active:bg-green-800 " +
-    "disabled:bg-sand-300 disabled:text-white",
+    "bg-marca bg-[image:var(--degradado-boton)] text-marca-texto border-transparent shadow-marca " +
+    "hover:bg-[image:var(--degradado-boton-hover)] active:bg-green-800 " +
+    "disabled:bg-sand-300 disabled:bg-none disabled:text-white disabled:shadow-none",
   secundario:
-    "bg-superficie text-texto border-borde-input hover:bg-activo-bg hover:text-activo-tx hover:border-green-400 " +
+    "bg-superficie text-texto border-borde shadow-[0_1px_2px_rgb(18_48_31/0.05)] hover:bg-activo-bg hover:text-activo-tx hover:border-green-400 " +
     "disabled:bg-deshabilitado disabled:text-texto-3 disabled:border-borde",
   fantasma:
     "bg-transparent text-activo-tx border-transparent hover:bg-activo-bg disabled:text-texto-3 disabled:bg-transparent",
-  peligro: "bg-err text-white border-transparent hover:bg-err-tx disabled:bg-sand-300 disabled:text-white",
+  /** Acción destructiva secundaria (p. ej. «Eliminar» junto a «Publicar»): borde y texto rojos. */
+  peligroSuave:
+    "bg-superficie text-err-tx border-err/25 hover:bg-err-bg hover:border-err/45 " +
+    "disabled:bg-deshabilitado disabled:text-texto-3 disabled:border-borde",
+  peligro:
+    "bg-err text-white border-transparent shadow-[0_1px_2px_rgb(120_20_15/0.25)] hover:bg-err-tx " +
+    "disabled:bg-sand-300 disabled:text-white disabled:shadow-none",
 };
 
 const TAMANOS: Record<TamanoBoton, string> = {
   sm: "h-8 px-3 text-[13px]",
-  md: "h-9 px-3.5 text-[13.5px]",
-  lg: "h-10 px-4 text-sm",
+  md: "h-9 px-4 text-[13.5px]",
+  lg: "h-11 px-5 text-sm",
   icono: "size-9 p-0",
 };
 

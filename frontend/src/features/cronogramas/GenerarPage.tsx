@@ -17,7 +17,7 @@ import { mensajeDeError } from "../../services/httpClient";
 import { claveCronogramas, cronogramasApi, type GenerarSalida } from "../../services/cronogramas";
 import { useSeleccion } from "../catalogo/SeleccionProvider";
 import { ContextoDiaAnterior, RangoContextoDiaAnterior } from "./ContextoDiaAnterior";
-import { ETIQUETA_ACCION, MarcasVersion, TONO_ACCION, textoAgua } from "./etiquetas";
+import { ETIQUETA_ACCION, MarcasVersion, TONO_ACCION, fechaModelo, textoAgua } from "./etiquetas";
 
 export const DIAS_MAX = 7;
 
@@ -136,7 +136,7 @@ export default function GenerarPage() {
         <Card>
           <CardHeader
             titulo="Resultado por día"
-            descripcion={`Modelo ${resultado.modelo_version}${resultado.duracion_ms ? ` · ${(resultado.duracion_ms / 1000).toFixed(1)} s` : ""}`}
+            descripcion={`Modelo entrenado el ${fechaModelo(resultado.modelo_version)}${resultado.duracion_ms ? ` · ${(resultado.duracion_ms / 1000).toFixed(1)} s` : ""}`}
           />
           {atrasadas.length > 0 && (
             <div className="px-4 pt-3">

@@ -67,7 +67,7 @@ export function AccionesCronograma({ cronograma: c, bloqueado }: { cronograma: C
   const requiereTexto = dialogo?.accion === "solicitar" || dialogo?.accion === "mantener";
   const conflicto = ejecutar.error instanceof ApiError && ejecutar.error.status === 409;
   return <div className="flex min-w-0 flex-col gap-3">
-    <div className="flex flex-wrap gap-2">{acciones.filter((a) => a.visible).map((a) => <Button key={a.accion} variante={a.accion === "descartar" ? "secundario" : "primario"} disabled={bloqueado || ejecutar.isPending} onClick={() => abrir(a.accion, a.titulo, a.descripcion)}>{a.titulo}</Button>)}<EliminarCronograma cronograma={c} bloqueado={bloqueado || ejecutar.isPending} /></div>
+    <div className="flex flex-wrap gap-2">{acciones.filter((a) => a.visible).map((a) => <Button key={a.accion} variante={a.accion === "descartar" ? "secundario" : "primario"} disabled={bloqueado || ejecutar.isPending} onClick={() => abrir(a.accion, a.titulo, a.descripcion)}>{a.titulo}</Button>)}<div className="ml-auto"><EliminarCronograma cronograma={c} bloqueado={bloqueado || ejecutar.isPending} /></div></div>
     {mensaje && <Alert tono="aviso">{mensaje}</Alert>}
     {avisos.length > 0 && <Alert tono="aviso" titulo="Avisos"><ul className="list-disc pl-4">{avisos.map((a, i) => <li key={i}>{a}</li>)}</ul></Alert>}
     <Dialog open={!!dialogo} onOpenChange={(v) => { if (!v && !ejecutar.isPending) setDialogo(null); }}>

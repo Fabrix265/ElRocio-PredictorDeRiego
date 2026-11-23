@@ -89,6 +89,15 @@ const COLUMNAS_DATOS: [string, string][] = [
   ]),
   ["mds_contraccion_um", "MDS (µm)"],
 ];
+/** Decimales fijos por columna: ETo 2, MDS 0, el resto 1 (columnas parejas, fáciles de comparar). */
+const DECIMALES_DATOS: Record<string, number> = { eto_mm: 2, mds_contraccion_um: 0 };
+const formatosDatos = new Map<number, Intl.NumberFormat>();
+function cifraDato(campo: string, valor: number): string {
+  const d = DECIMALES_DATOS[campo] ?? 1;
+  if (!formatosDatos.has(d)) formatosDatos.set(d, new Intl.NumberFormat("es-PE", { minimumFractionDigits: d, maximumFractionDigits: d }));
+  return formatosDatos.get(d)!.format(valor);
+}
+
 export function DatosCronograma({ id }: { id: number }) {
   const q = useQuery({ queryKey: claveCronogramas.datosCampo(id), queryFn: ({ signal }) => cronogramasApi.datosCampo(id, 7, signal) });
   if (q.isPending) return <Skeleton className="m-4 h-40" />;
@@ -99,7 +108,7 @@ export function DatosCronograma({ id }: { id: number }) {
     <p className="mb-3 text-xs text-texto-2">Siete días previos al cronograma. Humedad volumétrica del suelo; HR: humedad relativa del aire.</p>
     <div className="max-w-full overflow-x-auto"><table className="w-full text-sm tabular-nums"><caption className="sr-only">Datos de campo por día</caption>
       <thead className="bg-hundido"><tr><th className={CELDA}>Día</th>{columnas.map(([k, s]) => <th key={k} className={`${CELDA} min-w-28`}>{s}</th>)}</tr></thead>
-      <tbody>{q.data.map((d) => <tr key={d.fecha}><th className={`${CELDA} whitespace-nowrap`}>{formatearDiaCorto(d.fecha)}</th>{columnas.map(([k]) => <td key={k} className={CELDA}>{typeof d[k] === "number" ? d[k].toLocaleString("es-PE", { maximumFractionDigits: 2 }) : d[k] == null ? "—" : String(d[k])}</td>)}</tr>)}</tbody>
+      <tbody>{q.data.map((d) => <tr key={d.fecha}><th className={`${CELDA} whitespace-nowrap`}>{formatearDiaCorto(d.fecha)}</th>{columnas.map(([k]) => <td key={k} className={CELDA}>{typeof d[k] === "number" ? cifraDato(k, d[k]) : d[k] == null ? "—" : String(d[k])}</td>)}</tr>)}</tbody>
     </table></div>
   </div>;
 }

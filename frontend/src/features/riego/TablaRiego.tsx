@@ -153,7 +153,7 @@ export function TablaRiego({ dias, turnos, registros, onSeleccionar, seleccionad
             className={cn("grid grid-cols-2 gap-2 border-b border-borde px-4 py-3 @lg:grid-cols-3", columnas)}
           >
             <div className="col-span-full flex flex-wrap items-baseline justify-between gap-2 @3xl:col-span-1 @3xl:flex-col @3xl:justify-start @3xl:gap-0.5">
-              <h3 id={idTitulo} className="cifras text-[13px] font-semibold text-texto capitalize">
+              <h3 id={idTitulo} className="cifras text-[13px] font-semibold text-texto">
                 {formatearDiaCorto(fecha)}
               </h3>
               <span className="cifras text-[11px] text-texto-3">{m3Dia > 0 ? `${formatearM3(m3Dia)} m³ · ${formatearM3ha(haDia > 0 ? m3Dia / haDia : null)} m³/ha` : "—"}</span>
