@@ -145,13 +145,13 @@ class Settings(BaseSettings):
             problemas.append("falta DATABASE_URL")
         if not self.frontend_url.startswith("https://"):
             problemas.append("FRONTEND_URL debe usar https")
-        # §7: en producción CORS solo con FRONTEND_URL.
-        frontend = self.frontend_url.rstrip("/")
-        ajenos = [o for o in _lista(self.cors_origins) if o.rstrip("/") != frontend]
-        if ajenos:
+        # §7: en producción solo orígenes propios con https (p. ej. el dominio de la empresa y
+        # el de Vercel a la vez); nada de http ni localhost.
+        sin_https = [o for o in _lista(self.cors_origins) if not o.startswith("https://")]
+        if sin_https:
             problemas.append(
-                "CORS_ORIGINS solo puede contener FRONTEND_URL (o quedar vacío); sobran: "
-                + ", ".join(ajenos)
+                "CORS_ORIGINS en producción solo admite orígenes https; sobran: "
+                + ", ".join(sin_https)
             )
         if self.cookie_samesite != "strict":
             problemas.append("COOKIE_SAMESITE debe ser strict")

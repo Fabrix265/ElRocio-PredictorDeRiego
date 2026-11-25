@@ -221,8 +221,9 @@ el primer ingreso. Queda auditado como `usuario_creado` con actor `sistema`.
   el mensaje es siempre el mismo.
 - IDs y páginas acotados (`IdPath`, `IdQuery`, `Pagina` en `app/api/deps.py`; usarlos en F2–F5):
   fuera de rango responden 422.
-- Producción exige además `COOKIE_SAMESITE=strict` y `CORS_ORIGINS` vacío o igual a
-  `FRONTEND_URL`; `CORS_ORIGINS=*` se rechaza siempre.
+- Producción exige además `COOKIE_SAMESITE=strict` y `CORS_ORIGINS` vacío o solo con orígenes
+  https (puede haber varios, p. ej. el dominio propio y el de Vercel); `CORS_ORIGINS=*` se
+  rechaza siempre.
 - Errores siempre como `{"detail": "mensaje en español"}`; los de validación (422) como lista
   `[{loc, msg, type}]` con `msg` en español y sin repetir lo enviado.
 - Cabeceras: `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, CSP
