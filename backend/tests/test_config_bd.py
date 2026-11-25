@@ -140,14 +140,20 @@ def test_health_ok_informa_el_rol(client):
     assert client.get("/api/v1/health").json()["rol_bd"] == "ok"
 
 
-def test_produccion_cors_solo_con_frontend_url():
+def test_produccion_cors_solo_con_origenes_https():
     base = dict(_env_file=None, app_env="production", jwt_secret="x" * 40, debug=False,
                 cookie_secure=True, database_url=POOLER, frontend_url="https://riego.ejemplo.pe")
     assert Settings(**base, cors_origins="https://riego.ejemplo.pe/").cors_origin_list == [
         "https://riego.ejemplo.pe/"
     ]
-    with pytest.raises(ValueError, match="CORS_ORIGINS solo puede contener FRONTEND_URL"):
+    # Dominio propio y el de Vercel a la vez.
+    assert Settings(
+        **base, cors_origins="https://riego.ejemplo.pe,https://riego.vercel.app"
+    ).cors_origin_list == ["https://riego.ejemplo.pe", "https://riego.vercel.app"]
+    with pytest.raises(ValueError, match="solo admite orígenes https"):
         Settings(**base, cors_origins="http://localhost:5173,http://127.0.0.1:5173")
+    with pytest.raises(ValueError, match="solo admite orígenes https"):
+        Settings(**base, cors_origins="https://riego.ejemplo.pe,http://riego.vercel.app")
     with pytest.raises(ValueError, match="COOKIE_SAMESITE"):
         Settings(**base, cookie_samesite="lax")
 

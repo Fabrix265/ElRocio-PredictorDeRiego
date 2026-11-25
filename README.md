@@ -229,7 +229,8 @@ La Data API de Supabase solo publica `public`, así que el esquema `riego` queda
 **En producción** (`APP_ENV=production`), la API no arranca si falta algo de lo siguiente:
 - `DEBUG=false`, `COOKIE_SECURE=true` y `COOKIE_SAMESITE=strict`;
 - un `JWT_SECRET` de 32 caracteres o más;
-- `FRONTEND_URL` con https y `CORS_ORIGINS` vacío o igual a `FRONTEND_URL`;
+- `FRONTEND_URL` con https y `CORS_ORIGINS` vacío o con orígenes https propios (p. ej.
+  `https://agricola1.dnthub.com,https://irritall.vercel.app`);
 - una conexión con el rol `riego_app`.
 
 Se arranca con `python -m app`, que usa 1 worker y toma la IP real solo desde `TRUSTED_PROXIES`.
