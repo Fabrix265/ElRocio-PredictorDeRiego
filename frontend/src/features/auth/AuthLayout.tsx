@@ -2,6 +2,7 @@ import { CalendarCheck2, CloudSun, Droplets } from "lucide-react";
 import type { ReactNode } from "react";
 
 import logoAvoperu from "../../assets/logos/avoperu.webp";
+import logoItal from "../../assets/logos/ital-blanco.webp";
 import logoJordie from "../../assets/logos/jordie.webp";
 import logoTalsa from "../../assets/logos/talsa.webp";
 
@@ -53,9 +54,15 @@ export function AuthLayout({ titulo, descripcion, children }: AuthLayoutProps) {
             <span className="h-[3px] w-5 rounded-full bg-lima" aria-hidden="true" />
             Grupo El Rocío
           </span>
-          <p className="text-[28px] leading-9 font-bold tracking-[-0.02em] text-balance sm:text-[36px] sm:leading-[44px]">
-            Plan de riego diario
-          </p>
+          <h2 className="mt-1 mb-2">
+            <img
+              src={logoItal}
+              alt="iTAL · Riego Inteligente"
+              width={960}
+              height={466}
+              className="h-auto w-[200px] drop-shadow-[0_6px_18px_rgb(6_40_22/0.35)] sm:w-[260px] lg:w-[320px]"
+            />
+          </h2>
           <p className="hidden text-[15px] leading-6 text-green-50/90 sm:block">
             Cronogramas generados con el modelo, revisados por el encargado y confirmados en campo.
           </p>
@@ -78,7 +85,7 @@ export function AuthLayout({ titulo, descripcion, children }: AuthLayoutProps) {
             {descripcion && <p className="text-sm text-texto-2">{descripcion}</p>}
           </div>
           {children}
-          <p className="text-xs text-texto-3">Plan de Riego · Grupo El Rocío</p>
+          <p className="text-xs text-texto-3">iTAL · Grupo El Rocío</p>
         </div>
       </main>
     </div>
