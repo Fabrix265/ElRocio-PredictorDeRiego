@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Plan de Riego · Grupo El Rocío",
-  "short_name": "Plan de Riego",
+  "name": "iTAL · Riego Inteligente",
+  "short_name": "iTAL",
   "description": "Cronogramas de riego diarios generados con el modelo, revisados por el encargado y confirmados en campo.",
   "lang": "es",
   "dir": "ltr",

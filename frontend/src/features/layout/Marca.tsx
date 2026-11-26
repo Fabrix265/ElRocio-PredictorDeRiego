@@ -14,7 +14,9 @@ export function Marca({ compacta }: { compacta?: boolean }) {
         <Droplet className="relative size-[18px]" strokeWidth={2} />
       </span>
       <span className={cn("flex min-w-0 flex-col", compacta && "sr-only")}>
-        <span className="text-[15px] leading-[18px] font-bold tracking-[-0.01em] text-green-900">Plan de Riego</span>
+        <span className="text-[15px] leading-[18px] font-bold tracking-[-0.01em] text-green-900">
+          <span className="text-green-600">i</span>TAL
+        </span>
         <span className="text-[11px] leading-4 font-medium text-texto-3">Grupo El Rocío</span>
       </span>
     </div>
